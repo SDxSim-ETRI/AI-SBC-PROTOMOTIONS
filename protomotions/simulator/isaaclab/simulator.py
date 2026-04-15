@@ -241,6 +241,7 @@ class IsaacLabSimulator(Simulator):
                         ),
                     )
                 elif isinstance(obj, BoxSceneObject):
+                    mass_props = self._mass_props_from_options(obj.options)
                     spawn_cfg = sim_utils.CuboidCfg(
                         size=(obj.width, obj.depth, obj.height),
                         visual_material=sim_utils.PreviewSurfaceCfg(
@@ -248,10 +249,11 @@ class IsaacLabSimulator(Simulator):
                             metallic=0.2,
                         ),
                         rigid_props=rigid_props,
-                        mass_props=sim_utils.MassPropertiesCfg(mass=-1, density=100),
+                        mass_props=mass_props,
                         collision_props=collision_props,
                     )
                 elif isinstance(obj, SphereSceneObject):
+                    mass_props = self._mass_props_from_options(obj.options)
                     spawn_cfg = sim_utils.SphereCfg(
                         radius=obj.radius,
                         visual_material=sim_utils.PreviewSurfaceCfg(
@@ -259,12 +261,11 @@ class IsaacLabSimulator(Simulator):
                             metallic=0.2,
                         ),
                         rigid_props=rigid_props,
-                        mass_props=sim_utils.MassPropertiesCfg(
-                            mass=-1, density=obj.options.density
-                        ),
+                        mass_props=mass_props,
                         collision_props=collision_props,
                     )
                 elif isinstance(obj, CylinderSceneObject):
+                    mass_props = self._mass_props_from_options(obj.options)
                     spawn_cfg = sim_utils.CylinderCfg(
                         radius=obj.radius,
                         height=obj.height,
@@ -273,9 +274,7 @@ class IsaacLabSimulator(Simulator):
                             metallic=0.2,
                         ),
                         rigid_props=rigid_props,
-                        mass_props=sim_utils.MassPropertiesCfg(
-                            mass=-1, density=obj.options.density
-                        ),
+                        mass_props=mass_props,
                         collision_props=collision_props,
                     )
                 else:
@@ -284,6 +283,17 @@ class IsaacLabSimulator(Simulator):
                 objects_cfgs[obj_idx].append(spawn_cfg)
 
         return objects_cfgs, initial_obj_pos
+
+    @staticmethod
+    def _mass_props_from_options(options):
+        """Build ``MassPropertiesCfg`` from :class:`ObjectOptions`.
+
+        If ``options.mass`` is set, use explicit mass (density disabled).
+        Otherwise use ``options.density`` (always set by ObjectOptions).
+        """
+        if options.mass is not None:
+            return sim_utils.MassPropertiesCfg(mass=options.mass, density=-1)
+        return sim_utils.MassPropertiesCfg(mass=-1, density=options.density)
 
     def _setup_keyboard(self) -> None:
         """
