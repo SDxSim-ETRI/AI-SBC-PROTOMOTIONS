@@ -20,3 +20,4 @@ data/yaml_files/*.yaml filter=lfs diff=lfs merge=lfs -text
 *.fbx filter=lfs diff=lfs merge=lfs -text
 protomotions/data/assets/blender/Textures/*.png filter=lfs diff=lfs merge=lfs -text
 *.onnx filter=lfs diff=lfs merge=lfs -text
+*.motion filter=lfs diff=lfs merge=lfs -text
