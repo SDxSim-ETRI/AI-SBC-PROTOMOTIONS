@@ -1,0 +1,345 @@
+<mujoco model="skeleton_torque_suit_muscle">
+  <!--
+    skeleton_torque_suit_muscle MJCF for ProtoMotions — PRIMITIVE COLLISION SHAPES ONLY.
+    Use skeleton_torque_suit_muscle_mesh.xml for bone mesh / muscle visualization.
+    Based on skeleton_torque_suit.xml + subtalar/mtp joints from muscle model.
+
+    Bodies (28, world excluded): same as skeleton_torque_suit
+      pelvis(0)
+      femur_r(1) tibia_r(2) talus_r(3) calcn_r(4) toes_r(5)
+      RH_dump(6) RH_dump2(7)
+      femur_l(8) tibia_l(9) talus_l(10) calcn_l(11) toes_l(12)
+      LH_dump(13) LH_dump2(14)
+      torso(15)
+      humerus_r(16) ulna_r(17) radius_r(18) hand_r(19)
+      humerus_l(20) ulna_l(21) radius_l(22) hand_l(23)
+      slider1(24) slider2(25) slider3(26) slider4(27)
+
+    DOF ordering (31 DOFs):
+      hip_flexion_r/adduction_r/rotation_r  knee_angle_r  ankle_angle_r
+      subtalar_angle_r  mtp_angle_r                                       (7)
+      hip_flexion_l/adduction_l/rotation_l  knee_angle_l  ankle_angle_l
+      subtalar_angle_l  mtp_angle_l                                       (7)
+      lumbar_extension/bending/rotation                                   (3)
+      arm_flex_r/add_r/rot_r  elbow_flex_r  pro_sup_r                    (5)
+      arm_flex_l/add_l/rot_l  elbow_flex_l  pro_sup_l                    (5)
+      slide1  slide2  slide3  slide4                                      (4)
+
+    subtalar/mtp are equality-constrained to 0.
+  -->
+  <compiler angle="radian" inertiafromgeom="false" balanceinertia="true"
+            boundmass="0.001" boundinertia="0.001"/>
+
+  <default>
+    <joint limited="true" damping="1.0" armature="0.01" stiffness="1.0"/>
+    <geom rgba="0.8 0.6 0.4 1" condim="3"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0"/>
+  </default>
+
+  <worldbody>
+    <body name="pelvis" pos="0 0 0.975">
+      <freejoint name="root"/>
+      <inertial pos="-0.0721882 0 0" mass="13.5729922649758"
+                fullinertia="0.123517 0.0695686 0.104653 0 0 0"/>
+      <geom name="pelvis_col" type="sphere" size="0.12" pos="-0.07 0 -0.04" contype="1" conaffinity="1"/>
+
+      <!-- Right leg -->
+      <body name="femur_r" pos="-0.0721882 -0.0852576 -0.0674914">
+        <joint name="hip_flexion_r"   damping="5" stiffness="10" type="hinge"
+               pos="0 0 0" axis="0 -1 0" range="-0.787 0.787"/>
+        <joint name="hip_adduction_r" damping="5" stiffness="10" type="hinge"
+               pos="0 0 0" axis="1 0 0" range="-0.524 0.524"/>
+        <joint name="hip_rotation_r"  damping="5" stiffness="20" type="hinge"
+               pos="0 0 0" axis="0 0 1" range="-2.0944 2.0944"/>
+        <inertial pos="0 0 -0.154514" mass="10.7198633143794"
+                  fullinertia="0.127486 0.134436 0.0334185 0 0 0"/>
+        <geom name="femur_r_col"   type="capsule" size="0.05" fromto="0 0 0 0 0 -0.365" contype="1" conaffinity="1"/>
+        <geom name="right_hip_ring" type="cylinder" size="0.06 0.06" pos="0 0 -0.2" contype="1" conaffinity="1" rgba="0.0 0.0 0.5 0.8"/>
+
+        <body name="tibia_r" pos="-0.00167398 0 -0.365545">
+          <joint name="knee_angle_r" type="hinge" pos="0 0 0"
+                 axis="0 -1 0" range="-2.0944 0.174533"/>
+          <inertial pos="0 0 -0.208485" mass="4.27289367601238"
+                    fullinertia="0.072432 0.073438 0.00732943 0 0 0"/>
+          <geom name="tibia_r_col" type="capsule" size="0.04" fromto="0 0 0 0 0 -0.480" contype="1" conaffinity="1"/>
+
+          <body name="talus_r" pos="0 0 -0.480173">
+            <joint name="ankle_angle_r" stiffness="10" damping="1" type="hinge"
+                   pos="0 0 0" axis="-0.105014 -0.979126 -0.174022"
+                   range="-1.5708 1.5708"/>
+            <inertial pos="0 0 0" mass="0.11524999800438"
+                      fullinertia="0.00143714 0.00143714 0.00143714 0 0 0"/>
+            <geom name="talus_r_col" type="sphere" size="0.035" contype="1" conaffinity="1"/>
+
+            <body name="calcn_r" pos="-0.0544606 -0.00884412 -0.0468448">
+              <joint name="subtalar_angle_r" type="hinge" pos="0 0 0"
+                     axis="0.78718 0.120949 0.604747" range="-1.5708 1.5708"/>
+              <inertial pos="0.106552 0 0.0319656" mass="1.44062497505475"
+                        fullinertia="0.00183186 0.00536472 0.00510303 0 0 0"/>
+              <geom name="calcn_r_col" type="box" size="0.105 0.03 0.025" pos="0.125 0 0.000" contype="1" conaffinity="1"/>
+
+              <body name="toes_r" pos="0.190515 -0.00115076 -0.00213104">
+                <joint name="mtp_angle_r" type="hinge" pos="0 0 0"
+                       axis="-0.580954 -0.813936 0" range="-1.5708 1.5708"/>
+                <inertial pos="0.036867 0.0186466 0.00639311" mass="0.249631495677486"
+                          fullinertia="0.000130847 0.00130847 0.000261694 0 0 0"/>
+                <geom name="toes_r_col" type="sphere" size="0.025" pos="0.04 0 0" contype="1" conaffinity="1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: right hip cable anchors -->
+        <body name="RH_dump" pos="-0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="RH_dump_col" type="box" size="0.02 0.02 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 0.8"/>
+          <site name="slider1_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="RH_dump2" pos="0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="RH_dump2_col" type="box" size="0.02 0.02 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 0.8"/>
+          <site name="slider2_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+
+      <!-- Left leg -->
+      <body name="femur_l" pos="-0.0721882 0.0852576 -0.0674914">
+        <joint name="hip_flexion_l"   damping="5" stiffness="10" type="hinge"
+               pos="0 0 0" axis="0 -1 0" range="-0.787 0.787"/>
+        <joint name="hip_adduction_l" damping="5" stiffness="10" type="hinge"
+               pos="0 0 0" axis="-1 0 0" range="-0.524 0.524"/>
+        <joint name="hip_rotation_l"  damping="5" stiffness="20" type="hinge"
+               pos="0 0 0" axis="0 0 -1" range="-2.0944 2.0944"/>
+        <inertial pos="0 0 -0.154514" mass="10.7198633143794"
+                  fullinertia="0.127486 0.134436 0.0334185 0 0 0"/>
+        <geom name="femur_l_col"   type="capsule" size="0.05" fromto="0 0 0 0 0 -0.365" contype="1" conaffinity="1"/>
+        <geom name="left_hip_ring" type="cylinder" size="0.06 0.06" pos="0 0 -0.2" contype="1" conaffinity="1" rgba="0.0 0.0 0.5 0.8"/>
+
+        <body name="tibia_l" pos="-0.00167398 0 -0.365545">
+          <joint name="knee_angle_l" type="hinge" pos="0 0 0"
+                 axis="0 -1 0" range="-2.0944 0.174533"/>
+          <inertial pos="0 0 -0.208485" mass="4.27289367601238"
+                    fullinertia="0.072432 0.073438 0.00732943 0 0 0"/>
+          <geom name="tibia_l_col" type="capsule" size="0.04" fromto="0 0 0 0 0 -0.480" contype="1" conaffinity="1"/>
+
+          <body name="talus_l" pos="0 0 -0.480173">
+            <joint name="ankle_angle_l" stiffness="10" damping="1" type="hinge"
+                   pos="0 0 0" axis="0.105014 -0.979126 0.174022"
+                   range="-1.0472 1.0472"/>
+            <inertial pos="0 0 0" mass="0.11524999800438"
+                      fullinertia="0.00143714 0.00143714 0.00143714 0 0 0"/>
+            <geom name="talus_l_col" type="sphere" size="0.035" contype="1" conaffinity="1"/>
+
+            <body name="calcn_l" pos="-0.0544606 0.00884412 -0.0468448">
+              <joint name="subtalar_angle_l" type="hinge" pos="0 0 0"
+                     axis="-0.78718 0.120949 -0.604747" range="-1.5708 1.5708"/>
+              <inertial pos="0.106552 0 0.0319656" mass="1.44062497505475"
+                        fullinertia="0.00183186 0.00536472 0.00510303 0 0 0"/>
+              <geom name="calcn_l_col" type="box" size="0.105 0.03 0.025" pos="0.125 0 0.000" contype="1" conaffinity="1"/>
+
+              <body name="toes_l" pos="0.190515 0.00115076 -0.00213104">
+                <joint name="mtp_angle_l" type="hinge" pos="0 0 0"
+                       axis="0.580954 -0.813936 0" range="-1.0472 1.0472"/>
+                <inertial pos="0.036867 -0.0186466 0.00639311" mass="0.249631495677486"
+                          fullinertia="0.000130847 0.00130847 0.000261694 0 0 0"/>
+                <geom name="toes_l_col" type="sphere" size="0.025" pos="0.04 0 0" contype="1" conaffinity="1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: left hip cable anchors -->
+        <body name="LH_dump" pos="-0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="LH_dump_col" type="box" size="0.02 0.02 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 0.8"/>
+          <site name="slider3_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="LH_dump2" pos="0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="LH_dump2_col" type="box" size="0.02 0.02 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 0.8"/>
+          <site name="slider4_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+
+      <!-- Torso -->
+      <body name="torso" pos="-0.10282 0 0.0832155">
+        <joint name="lumbar_extension" stiffness="10" damping="5" type="hinge"
+               pos="0 0 0" axis="0 -1 0" range="-1.5708 0.377"/>
+        <joint name="lumbar_bending"   stiffness="10" damping="5" type="hinge"
+               pos="0 0 0" axis="1 0 0" range="-0.754 0.754"/>
+        <joint name="lumbar_rotation"  stiffness="20" damping="5" type="hinge"
+               pos="0 0 0" axis="0 0 1" range="-0.754 0.754"/>
+        <inertial pos="-0.0323208 0 0.344755" mass="30.9176559646429"
+                  fullinertia="1.97246 1.9148 1.01064 0 0 0"/>
+        <geom name="torso_lower_col" type="capsule" size="0.10" fromto="0 0 0.05 0 0 0.40" contype="1" conaffinity="1"/>
+        <geom name="torso_upper_col" type="capsule" size="0.04" fromto="0 0 0.40 0 0 0.53" contype="1" conaffinity="1"/>
+        <geom name="head_col" type="sphere" size="0.10" pos="0 0 0.62" contype="1" conaffinity="1"/>
+        <geom name="exo_main_col" type="box" size="0.04 0.1 0.18" pos="-0.08 0 0.2" contype="1" conaffinity="1" rgba="0.75 0.5 0.5 0.8"/>
+
+        <!-- Right arm -->
+        <body name="humerus_r" pos="0.00339907 -0.183151 0.400239">
+          <joint name="arm_flex_r" type="hinge" pos="0 0 0"
+                 axis="0 -1 0" range="-1.5708 1.5708"/>
+          <joint name="arm_add_r"  type="hinge" pos="0 0 0"
+                 axis="1 0 0" range="-2.0944 1.5708"/>
+          <joint name="arm_rot_r"  type="hinge" pos="0 0 0"
+                 axis="0 0 1" range="-1.5708 1.5708"/>
+          <inertial pos="0 0 -0.193252" mass="2.34245620943902"
+                    fullinertia="0.0190007 0.0213276 0.00655464 0 0 0"/>
+          <geom name="humerus_r_col" type="capsule" size="0.035" fromto="0 0 0 0 0 -0.336" contype="1" conaffinity="1"/>
+
+          <body name="ulna_r" pos="0.0154412 0.0112719 -0.336305">
+            <joint name="elbow_flex_r" stiffness="0" type="hinge"
+                   pos="0 0 0" axis="0.226047 -0.973862 0.022269"
+                   range="0 2.618"/>
+            <inertial pos="0 0 -0.133575" mass="0.700143737876607"
+                      fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+            <geom name="ulna_r_col" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1"/>
+
+            <body name="radius_r" pos="-0.00745535 -0.0289071 -0.0144153">
+              <joint name="pro_sup_r" stiffness="0" type="hinge"
+                     pos="0 0 0" axis="0.056398 -0.001952 0.998406"
+                     range="0 1.5708"/>
+              <inertial pos="0 0 -0.133575" mass="0.700143737876607"
+                        fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+              <geom name="radius_r_col" type="capsule" size="0.02" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1"/>
+
+              <body name="hand_r" pos="-0.00974948 -0.0150836 -0.261376">
+                <inertial pos="0 0 -0.0725565" mass="0.527268740870037"
+                          fullinertia="0.00116715 0.00175335 0.000715732 0 0 0"/>
+                <geom name="hand_r_col" type="sphere" size="0.04" pos="0 0 -0.07" contype="1" conaffinity="1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- Left arm -->
+        <body name="humerus_l" pos="0.00339907 0.183151 0.400239">
+          <joint name="arm_flex_l" type="hinge" pos="0 0 0"
+                 axis="0 -1 0" range="-1.5708 1.5708"/>
+          <joint name="arm_add_l"  type="hinge" pos="0 0 0"
+                 axis="-1 0 0" range="-2.0944 1.5708"/>
+          <joint name="arm_rot_l"  type="hinge" pos="0 0 0"
+                 axis="0 0 -1" range="-1.5708 1.5708"/>
+          <inertial pos="0 0 -0.193252" mass="2.34245620943902"
+                    fullinertia="0.0190007 0.0213276 0.00655464 0 0 0"/>
+          <geom name="humerus_l_col" type="capsule" size="0.035" fromto="0 0 0 0 0 -0.336" contype="1" conaffinity="1"/>
+
+          <body name="ulna_l" pos="0.0154412 -0.0112719 -0.336305">
+            <joint name="elbow_flex_l" stiffness="0" type="hinge"
+                   pos="0 0 0" axis="-0.226047 -0.973862 -0.022269"
+                   range="0 2.618"/>
+            <inertial pos="0 0 -0.133575" mass="0.700143737876607"
+                      fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+            <geom name="ulna_l_col" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1"/>
+
+            <body name="radius_l" pos="-0.00745535 0.0289071 -0.0144153">
+              <joint name="pro_sup_l" stiffness="0" type="hinge"
+                     pos="0 0 0" axis="-0.056398 -0.001952 -0.998406"
+                     range="0 1.5708"/>
+              <inertial pos="0 0 -0.133575" mass="0.700143737876607"
+                        fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+              <geom name="radius_l_col" type="capsule" size="0.02" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1"/>
+
+              <body name="hand_l" pos="-0.00974948 0.0150836 -0.261376">
+                <inertial pos="0 0 -0.0725565" mass="0.527268740870037"
+                          fullinertia="0.00116715 0.00175335 0.000715732 0 0 0"/>
+                <geom name="hand_l_col" type="sphere" size="0.04" pos="0 0 -0.07" contype="1" conaffinity="1"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: cable slider actuators -->
+        <body name="slider1" pos="-0.14 -0.075 0.15">
+          <joint name="slide1" type="slide" pos="0 0 0" axis="0 0 1"
+                 range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider1_col" type="box" size="0.02 0.015 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 1.0"/>
+          <site name="slider1_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider2" pos="-0.14 -0.035 0.15">
+          <joint name="slide2" type="slide" pos="0 0 0" axis="0 0 1"
+                 range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider2_col" type="box" size="0.02 0.015 0.02" contype="1" conaffinity="1" rgba="0.0 0.0 0.5 1.0"/>
+          <site name="slider2_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider3" pos="-0.14 0.075 0.15">
+          <joint name="slide3" type="slide" pos="0 0 0" axis="0 0 1"
+                 range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider3_col" type="box" size="0.02 0.015 0.02" contype="1" conaffinity="1" rgba="0.0 0.3 0.0 1.0"/>
+          <site name="slider3_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider4" pos="-0.14 0.035 0.15">
+          <joint name="slide4" type="slide" pos="0 0 0" axis="0 0 1"
+                 range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider4_col" type="box" size="0.02 0.015 0.02" contype="1" conaffinity="1" rgba="0.0 0.0 0.5 1.0"/>
+          <site name="slider4_origin" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <tendon>
+    <spatial name="cable1" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider1_origin"/>
+      <site site="slider1_insertion"/>
+    </spatial>
+    <spatial name="cable2" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider2_origin"/>
+      <site site="slider2_insertion"/>
+    </spatial>
+    <spatial name="cable3" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider3_origin"/>
+      <site site="slider3_insertion"/>
+    </spatial>
+    <spatial name="cable4" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider4_origin"/>
+      <site site="slider4_insertion"/>
+    </spatial>
+  </tendon>
+
+  <equality>
+    <joint name="subtalar_angle_r_constraint" active="true" joint1="subtalar_angle_r" polycoef="0 0 0 0 0"/>
+    <joint name="mtp_angle_r_constraint"      active="true" joint1="mtp_angle_r"      polycoef="0 0 0 0 0"/>
+    <joint name="subtalar_angle_l_constraint" active="true" joint1="subtalar_angle_l" polycoef="0 0 0 0 0"/>
+    <joint name="mtp_angle_l_constraint"      active="true" joint1="mtp_angle_l"      polycoef="0 0 0 0 0"/>
+  </equality>
+
+  <actuator>
+    <motor name="mot_hip_flexion_r"   gear="275" joint="hip_flexion_r"/>
+    <motor name="mot_hip_adduction_r" gear="530" joint="hip_adduction_r"/>
+    <motor name="mot_hip_rotation_r"  gear="600" joint="hip_rotation_r"/>
+    <motor name="mot_knee_angle_r"    gear="600" joint="knee_angle_r"/>
+    <motor name="mot_ankle_angle_r"   gear="500" joint="ankle_angle_r"/>
+    <motor name="mot_subtalar_r"      gear="50"  joint="subtalar_angle_r"/>
+    <motor name="mot_mtp_r"           gear="50"  joint="mtp_angle_r"/>
+    <motor name="mot_hip_flexion_l"   gear="275" joint="hip_flexion_l"/>
+    <motor name="mot_hip_adduction_l" gear="530" joint="hip_adduction_l"/>
+    <motor name="mot_hip_rotation_l"  gear="600" joint="hip_rotation_l"/>
+    <motor name="mot_knee_angle_l"    gear="600" joint="knee_angle_l"/>
+    <motor name="mot_ankle_angle_l"   gear="500" joint="ankle_angle_l"/>
+    <motor name="mot_subtalar_l"      gear="50"  joint="subtalar_angle_l"/>
+    <motor name="mot_mtp_l"           gear="50"  joint="mtp_angle_l"/>
+    <motor name="mot_lumbar_ext"      gear="160" joint="lumbar_extension"/>
+    <motor name="mot_lumbar_bend"     gear="160" joint="lumbar_bending"/>
+    <motor name="mot_lumbar_rot"      gear="100" joint="lumbar_rotation"/>
+    <motor name="mot_shoulder_flex_r" gear="250" joint="arm_flex_r"/>
+    <motor name="mot_shoulder_add_r"  gear="250" joint="arm_add_r"/>
+    <motor name="mot_shoulder_rot_r"  gear="250" joint="arm_rot_r"/>
+    <motor name="mot_elbow_flex_r"    gear="250" joint="elbow_flex_r"/>
+    <motor name="mot_pro_sup_r"       gear="250" joint="pro_sup_r"/>
+    <motor name="mot_shoulder_flex_l" gear="250" joint="arm_flex_l"/>
+    <motor name="mot_shoulder_add_l"  gear="250" joint="arm_add_l"/>
+    <motor name="mot_shoulder_rot_l"  gear="250" joint="arm_rot_l"/>
+    <motor name="mot_elbow_flex_l"    gear="250" joint="elbow_flex_l"/>
+    <motor name="mot_pro_sup_l"       gear="250" joint="pro_sup_l"/>
+    <motor name="cable1" gear="500" joint="slide1" ctrlrange="-2 2"/>
+    <motor name="cable2" gear="500" joint="slide2" ctrlrange="-2 2"/>
+    <motor name="cable3" gear="500" joint="slide3" ctrlrange="-2 2"/>
+    <motor name="cable4" gear="500" joint="slide4" ctrlrange="-2 2"/>
+  </actuator>
+</mujoco>

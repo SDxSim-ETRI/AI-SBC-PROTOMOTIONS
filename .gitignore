@@ -17,4 +17,5 @@ data/amass/*.pkl
 .claude/*
 !.claude/commands/
 .cursor/
-renders/
+.env
+tasks/*/recordings/

@@ -20,7 +20,7 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
     """Factory function to create robot configuration based on robot type.
 
     Args:
-        robot_name: Name of the robot type (smpl, smplx, amp, g1, h1_2, soma23, rigv1)
+        robot_name: Name of the robot type (smpl, smplx, amp, g1, h1_2, soma23, rigv1, skeleton_torque)
         **updates: Optional field updates to apply to the robot config
 
     Returns:
@@ -57,6 +57,38 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.soma23 import Soma23RobotConfig
 
         config = Soma23RobotConfig()
+    elif robot_name == "skeleton_torque":
+        from protomotions.robot_configs.skeleton_torque import SkeletonTorqueRobotConfig
+
+        config = SkeletonTorqueRobotConfig()
+    elif robot_name == "skeleton_torque_suit":
+        from protomotions.robot_configs.skeleton_torque_suit import SkeletonTorqueSuitRobotConfig
+
+        config = SkeletonTorqueSuitRobotConfig()
+    elif robot_name == "skeleton_torque_suit_muscle":
+        from protomotions.robot_configs.skeleton_torque_suit_muscle import SkeletonTorqueSuitMuscleRobotConfig
+
+        config = SkeletonTorqueSuitMuscleRobotConfig()
+    elif robot_name == "skeleton_torque_suit_passive_cable":
+        from protomotions.robot_configs.skeleton_torque_suit_passive_cable import SkeletonTorqueSuitPassiveCableRobotConfig
+
+        config = SkeletonTorqueSuitPassiveCableRobotConfig()
+    elif robot_name == "skeleton_torque_suit_active_cable":
+        from protomotions.robot_configs.skeleton_torque_suit_active_cable import SkeletonTorqueSuitActiveCableRobotConfig
+
+        config = SkeletonTorqueSuitActiveCableRobotConfig()
+    elif robot_name in ("skeleton_torque_31dof", "skeleton"):
+        from protomotions.robot_configs.skeleton import SkeletonRobotConfig
+
+        config = SkeletonRobotConfig()
+    elif robot_name in ("skeleton_torque_suit_31dof", "etrisuit"):
+        from protomotions.robot_configs.etrisuit import EtriSuitRobotConfig
+
+        config = EtriSuitRobotConfig()
+    elif robot_name == "etrisuit_active_cable":
+        from protomotions.robot_configs.etrisuit_active_cable import EtriSuitActiveCableRobotConfig
+
+        config = EtriSuitActiveCableRobotConfig()
     else:
         raise ValueError(f"Invalid robot name: {robot_name}")
 

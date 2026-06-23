@@ -124,6 +124,7 @@ class IsaacLabSimulator(Simulator):
         self._scene = InteractiveScene(scene_cfg)
         if not self.headless:
             self._setup_keyboard()
+            self._apply_visual_materials()
         print("[INFO]: Setup complete...")
 
     def _create_simulation(self) -> None:
@@ -160,6 +161,8 @@ class IsaacLabSimulator(Simulator):
         if self._visualization_markers:
             self._build_markers(self._visualization_markers)
         self._sim.reset()
+        if not self.headless:
+            self._apply_visual_materials()
 
     def _get_scene_cfg(self) -> SceneCfg:
         """
@@ -302,6 +305,29 @@ class IsaacLabSimulator(Simulator):
             return sim_utils.MassPropertiesCfg(mass=options.mass, density=-1)
         return sim_utils.MassPropertiesCfg(mass=-1, density=options.density)
 
+    def _apply_visual_materials(self) -> None:
+        """Apply humanoid visual materials (skin/suit/foot colors) to env_0 robot prims.
+
+        Called before _sim.reset() so materials are applied to the source prims before
+        physics instancing. Only runs in non-headless (visualization) mode.
+        """
+        try:
+            import sys
+            import omni.usd
+
+            _ISAACLAB_TASKS = "/home/user/IsaacLab/source/isaaclab_tasks"
+            if _ISAACLAB_TASKS not in sys.path:
+                sys.path.insert(0, _ISAACLAB_TASKS)
+            from isaaclab_tasks.direct.visual_material_utils import (
+                apply_humanoid_visual_materials,
+            )
+
+            stage = omni.usd.get_context().get_stage()
+            n = apply_humanoid_visual_materials(stage, "/World/envs/env_0/Robot")
+            print(f"[INFO] Visual materials applied to {n} prims")
+        except Exception as e:
+            print(f"[WARNING] Could not apply visual materials: {e}")
+
     def _setup_keyboard(self) -> None:
         """
         Set up keyboard callbacks for control using the Se2Keyboard interface.
@@ -338,6 +364,15 @@ class IsaacLabSimulator(Simulator):
         self.keyboard_interface.add_callback("O", self._toggle_camera_target)
         self.keyboard_interface.add_callback("J", self._throw_projectile)
         self.keyboard_interface.add_callback("M", self._toggle_markers)
+        # Camera angle presets: C=측면, V=사선뒤45°, B=정면
+        self.keyboard_interface.add_callback("C", lambda: self._set_camera_offset(side=True))
+        self.keyboard_interface.add_callback("V", lambda: self._set_camera_offset(diagonal=True))
+        self.keyboard_interface.add_callback("B", lambda: self._set_camera_offset(front=True))
+        # F: 자동 추적 on/off 토글
+        self.keyboard_interface.add_callback("F", self._toggle_camera_follow)
+        # [/]: 카메라 30° 씩 좌/우 회전 (Newton과 동일)
+        self.keyboard_interface.add_callback("LEFT_BRACKET", lambda: self._rotate_camera_azimuth(-30))
+        self.keyboard_interface.add_callback("RIGHT_BRACKET", lambda: self._rotate_camera_azimuth(30))
 
         # Register custom key handlers for keys 1-0
         self._register_custom_key_handlers()
@@ -960,10 +995,53 @@ class IsaacLabSimulator(Simulator):
                 )
 
                 self._perspective_view = PerspectiveViewer()
+                self._camera_follow_enabled = True
                 self._init_camera()
             else:
-                self._update_camera()
+                if getattr(self, "_camera_follow_enabled", True):
+                    self._update_camera()
         super().render()
+
+    def _toggle_camera_follow(self):
+        self._camera_follow_enabled = not getattr(self, "_camera_follow_enabled", True)
+        state = "ON" if self._camera_follow_enabled else "OFF (free camera)"
+        print(f"Camera follow: {state}")
+
+    def _set_camera_offset(self, side=False, diagonal=False, front=False):
+        """Reset camera to a preset angle while keeping auto-follow active."""
+        char_pos = self._get_simulator_root_state(self._camera_target["env"]).root_pos.cpu().numpy()
+        self._cam_prev_char_pos = char_pos.copy()
+        if side:        # 7: 측면 (오른쪽에서)
+            offset = np.array([5, 0, 1.5])
+            print("Camera: side view (7)")
+        elif diagonal:  # 8: 사선 뒤 45°
+            offset = np.array([-3.5, -3.5, 2.5])
+            print("Camera: diagonal back view (8)")
+        else:           # 9: 정면
+            offset = np.array([0, -5, 1.5])
+            print("Camera: front view (9)")
+        self._perspective_view.set_camera_view(
+            char_pos + offset,
+            char_pos + np.array([0, 0, 0.8]),
+        )
+
+    def _rotate_camera_azimuth(self, delta_deg: float) -> None:
+        """Rotate camera around the tracked character by delta_deg degrees (XY plane)."""
+        if not hasattr(self, "_perspective_view"):
+            return
+        char_pos = self._get_simulator_root_state(self._camera_target["env"]).root_pos.cpu().numpy()
+        cam_pos = np.array(self._perspective_view.get_camera_state())
+        offset = cam_pos - char_pos
+        rad = np.deg2rad(delta_deg)
+        cos_a, sin_a = np.cos(rad), np.sin(rad)
+        ox, oy = offset[0], offset[1]
+        offset[0] = ox * cos_a - oy * sin_a
+        offset[1] = ox * sin_a + oy * cos_a
+        self._perspective_view.set_camera_view(
+            char_pos + offset,
+            char_pos + np.array([0, 0, 0.8]),
+        )
+        self._cam_prev_char_pos = char_pos.copy()
 
     def _init_camera(self) -> None:
         """
@@ -1028,6 +1106,25 @@ class IsaacLabSimulator(Simulator):
 
         vp_api = get_active_viewport()
         capture_viewport_to_file(vp_api, file_name)
+
+    def is_app_running(self) -> bool:
+        """Return False when the Isaac Sim window has been closed."""
+        return self._simulation_app.is_running()
+
+    def set_window_title(self, title: str) -> None:
+        """Update the Isaac Sim window title bar text."""
+        if self.headless:
+            return
+        try:
+            import carb.windowing
+            import omni.appwindow
+
+            windowing = carb.windowing.acquire_windowing_interface()
+            app_window = omni.appwindow.get_default_app_window()
+            if app_window is not None:
+                windowing.set_window_title(app_window.get_window(), title)
+        except Exception:
+            pass
 
     def close(self) -> None:
         """

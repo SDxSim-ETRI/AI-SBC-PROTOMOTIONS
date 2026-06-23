@@ -1,0 +1,23 @@
+{
+  "robot_name": "skeleton_torque_suit_passive_cable",
+  "simulator": "newton",
+  "num_envs": 2048,
+  "batch_size": 8192,
+  "motion_file": "data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt",
+  "experiment_path": "examples/experiments/mimic/mlp.py",
+  "experiment_name": "mimic_newton_suit_passive_cable",
+  "scenes_file": null,
+  "checkpoint": "checkpoints/v17_newton_suit_16motion/score_based.ckpt",
+  "checkpoint_dir": null,
+  "use_wandb": false,
+  "use_slurm": false,
+  "ngpu": 1,
+  "nodes": 1,
+  "headless": true,
+  "seed": 0,
+  "torch_deterministic": false,
+  "training_max_steps": 10000000000000,
+  "overrides": [],
+  "create_config_only": false,
+  "wandb_id": null
+}

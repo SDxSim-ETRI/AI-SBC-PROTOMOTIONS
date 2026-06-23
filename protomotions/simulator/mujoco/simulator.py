@@ -19,6 +19,7 @@ import atexit
 import logging
 import os
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from typing import Dict, Optional, Tuple
 
@@ -88,6 +89,7 @@ class MujocoSimulator(Simulator):
         self.data: Optional[mujoco.MjData] = None
         self.viewer = None
         self._viewer_initialized = False
+        self._overlay_text_fn = None  # callable() -> str, set externally for HUD text
 
         # Cached control parameters
         self._kp = None  # [num_dofs] stiffness in common DOF order
@@ -113,6 +115,7 @@ class MujocoSimulator(Simulator):
 
         # Debug counter
         self._step_count = 0
+        self._step_wall_time = time.perf_counter()
 
     @staticmethod
     def _load_mjcf_stripped(
@@ -523,19 +526,27 @@ class MujocoSimulator(Simulator):
                 kd = self._kd[dof_idx]
                 effort = self._effort_limits[dof_idx]
 
+            # Compensate for MJCF gear: MuJoCo applies joint_torque = scalar_force * gear,
+            # so divide gains/limits by gear to keep effective torques at intended values.
+            gear = float(self.model.actuator_gear[act_idx, 0])
+            if gear <= 0:
+                gear = 1.0
+            kp_scaled = kp / gear
+            kd_scaled = kd / gear
+            effort_scaled = effort / gear
+
             # Configure as position actuator:
-            # force = gainprm[0] * ctrl + biasprm[0] + biasprm[1] * q + biasprm[2] * qd
-            #       = kp * ctrl + 0 + (-kp) * q + (-kd) * qd
-            #       = kp * (ctrl - q) - kd * qd
-            self.model.actuator_gainprm[act_idx, 0] = kp
+            # scalar_force = kp_scaled * (ctrl - q) - kd_scaled * qd
+            # joint_torque = scalar_force * gear = kp * (ctrl - q) - kd * qd  ✓
+            self.model.actuator_gainprm[act_idx, 0] = kp_scaled
             self.model.actuator_biastype[act_idx] = 1  # mjBIAS_AFFINE
             self.model.actuator_biasprm[act_idx, 0] = 0.0
-            self.model.actuator_biasprm[act_idx, 1] = -kp
-            self.model.actuator_biasprm[act_idx, 2] = -kd
+            self.model.actuator_biasprm[act_idx, 1] = -kp_scaled
+            self.model.actuator_biasprm[act_idx, 2] = -kd_scaled
 
-            # Set force limits on actuator
-            self.model.actuator_forcerange[act_idx, 0] = -effort
-            self.model.actuator_forcerange[act_idx, 1] = effort
+            # Set force limits on actuator (in scalar units, gear compensated)
+            self.model.actuator_forcerange[act_idx, 0] = -effort_scaled
+            self.model.actuator_forcerange[act_idx, 1] = effort_scaled
             self.model.actuator_ctrllimited[act_idx] = (
                 0  # Don't limit ctrl (it's position)
             )
@@ -547,7 +558,7 @@ class MujocoSimulator(Simulator):
             )
             print(
                 f"  Actuator '{act_name}' -> PD: "
-                f"kp={kp:.2f}, kd={kd:.2f}, effort_limit={effort:.0f}"
+                f"kp={kp:.2f}, kd={kd:.2f}, effort_limit={effort:.0f}, gear={gear:.0f}"
             )
 
         print("  Configured all actuators as position (PD) controllers")
@@ -740,8 +751,25 @@ class MujocoSimulator(Simulator):
         if self._step_count % 100 == 1:
             self._print_state_debug()
 
-        # Sync viewer if active
+        # Sync viewer if active, with real-time throttling
         if self.viewer is not None and self._viewer_initialized:
+            if self._overlay_text_fn is not None:
+                try:
+                    text = self._overlay_text_fn()
+                    self.viewer.set_texts(
+                        (mujoco.mjtFontScale.mjFONTSCALE_200,
+                         mujoco.mjtGridPos.mjGRID_TOP,
+                         text, None)
+                    )
+                except Exception:
+                    pass
+            # Throttle to real-time: sleep if simulation ran faster than policy_dt
+            policy_dt = self.decimation / self.config.sim.fps
+            elapsed = time.perf_counter() - self._step_wall_time
+            remaining = policy_dt - elapsed
+            if remaining > 0.001:
+                time.sleep(remaining)
+            self._step_wall_time = time.perf_counter()
             self.viewer.sync()
 
     def _print_state_debug(self) -> None:
