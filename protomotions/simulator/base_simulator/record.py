@@ -57,7 +57,7 @@ class RecordingMixin:
     def _init_recording_state(self) -> None:
         """Initialize all recording-related attributes."""
         self._camera_target: Dict[str, int] = {"env": 0, "element": 0}
-        self._show_markers: bool = True
+        self._show_markers: bool = False
 
         self._user_is_recording, self._user_recording_state_change = False, False
         self._user_recording_video_queue_size = 100000
@@ -288,6 +288,7 @@ class RecordingMixin:
                         "gavs": [],  # rigid_body_ang_vel (global angular velocities)
                         "dps": [],  # dof_pos
                         "dvs": [],  # dof_vel
+                        "dts": [],  # dof_forces (applied joint torques)
                         "contacts": [],  # rigid_body_contacts
                     }
                     self._recorded_markers = {}
@@ -295,48 +296,42 @@ class RecordingMixin:
                     self._recorded_projectiles = []
                     self._recording_env_id = 0
 
-                    if not os.path.exists(self._curr_user_recording_name):
-                        os.makedirs(self._curr_user_recording_name)
+                    os.makedirs(os.path.join(self._curr_user_recording_name, "_frames"), exist_ok=True)
                     print(
                         f"Started recording to folder {self._curr_user_recording_name}"
                     )
                 else:
                     # Finalize recording and create video
-                    from moviepy import ImageSequenceClip
+                    import subprocess
 
-                    image_dir = self._curr_user_recording_name
-                    images = sorted(
+                    # PNG frames are in _frames/ subfolder; output files go in the main folder
+                    image_dir = os.path.join(self._curr_user_recording_name, "_frames")
+                    _stem = os.path.basename(self._curr_user_recording_name)
+                    out_mp4 = os.path.join(self._curr_user_recording_name, f"{_stem}.mp4")
+
+                    # Use ffmpeg directly — robust to async-captured frames with
+                    # minor size variations (unlike moviepy's ImageSequenceClip).
+                    subprocess.run(
                         [
-                            os.path.join(image_dir, f)
-                            for f in os.listdir(image_dir)
-                            if f.endswith(".png")
-                        ]
-                    )
-
-                    clip = ImageSequenceClip(images, fps=30)
-                    clip.write_videofile(
-                        f"{self._curr_user_recording_name}.mp4",
-                        codec="libx264",
-                        audio=False,
-                        threads=32,
-                        preset="veryfast",
-                        ffmpeg_params=[
-                            "-profile:v",
-                            "main",
-                            "-level",
-                            "4.0",
-                            "-pix_fmt",
-                            "yuv420p",
-                            "-movflags",
-                            "+faststart",
-                            "-crf",
-                            "23",
-                            "-x264-params",
-                            "keyint=60:min-keyint=30",
+                            "ffmpeg", "-y",
+                            "-framerate", "30",
+                            "-i", os.path.join(image_dir, "%04d.png"),
+                            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-c:v", "libx264",
+                            "-profile:v", "main",
+                            "-level", "4.0",
+                            "-pix_fmt", "yuv420p",
+                            "-movflags", "+faststart",
+                            "-crf", "23",
+                            "-x264-params", "keyint=60:min-keyint=30",
+                            "-threads", "32",
+                            out_mp4,
                         ],
+                        check=True,
+                        capture_output=True,
                     )
                     self._delete_user_viewer_recordings = True
-                    print(f"Video saved to {self._curr_user_recording_name}.mp4")
+                    print(f"Video saved to {out_mp4}")
 
                     # Save the recorded motion as a .motion file
                     motion_data = build_motion_data(
@@ -344,7 +339,7 @@ class RecordingMixin:
                         fps=30,  # Video recording FPS
                         num_dof=self._num_dof,
                     )
-                    motion_file_path = f"{self._curr_user_recording_name}.motion"
+                    motion_file_path = os.path.join(self._curr_user_recording_name, f"{_stem}.motion")
                     torch.save(motion_data, motion_file_path)
                     print(f"Motion saved to {motion_file_path}")
                     self._recorded_motion = None
@@ -353,17 +348,13 @@ class RecordingMixin:
                     try:
                         if self._recorded_markers:
                             markers_data = self._build_markers_save_data()
-                            markers_path = (
-                                f"{self._curr_user_recording_name}.markers.pt"
-                            )
+                            markers_path = os.path.join(self._curr_user_recording_name, f"{_stem}.markers.pt")
                             torch.save(markers_data, markers_path)
                             print(f"Markers saved to {markers_path}")
 
                         if self._recorded_objects or self._recorded_projectiles:
                             objects_data = self._build_objects_save_data()
-                            objects_path = (
-                                f"{self._curr_user_recording_name}.objects.pt"
-                            )
+                            objects_path = os.path.join(self._curr_user_recording_name, f"{_stem}.objects.pt")
                             torch.save(objects_data, objects_path)
                             print(f"Objects saved to {objects_path}")
                     except Exception as e:
@@ -376,9 +367,10 @@ class RecordingMixin:
 
             # Capture frame if recording
             if self._user_is_recording:
-                file_name = (
-                    self._curr_user_recording_name
-                    + "/%04d.png" % self._user_recording_frame
+                file_name = os.path.join(
+                    self._curr_user_recording_name,
+                    "_frames",
+                    "%04d.png" % self._user_recording_frame,
                 )
                 self._write_viewport_to_file(file_name)
                 self._user_recording_frame += 1
@@ -409,6 +401,10 @@ class RecordingMixin:
                     self._recorded_motion["dvs"].append(
                         robot_state.dof_vel[eid].cpu().clone()
                     )
+                if robot_state.dof_forces is not None:
+                    self._recorded_motion["dts"].append(
+                        robot_state.dof_forces[eid].cpu().clone()
+                    )
                 if robot_state.rigid_body_contacts is not None:
                     self._recorded_motion["contacts"].append(
                         robot_state.rigid_body_contacts[eid].cpu().clone()
@@ -434,12 +430,13 @@ class RecordingMixin:
                     and self.scene_lib.num_objects_per_scene > 0
                 ):
                     obj_state = self.get_object_root_state()
-                    self._recorded_objects.append(
-                        (
-                            obj_state.root_pos[eid].cpu().clone(),
-                            obj_state.root_rot[eid].cpu().clone(),
+                    if obj_state is not None and obj_state.root_pos is not None:
+                        self._recorded_objects.append(
+                            (
+                                obj_state.root_pos[eid].cpu().clone(),
+                                obj_state.root_rot[eid].cpu().clone(),
+                            )
                         )
-                    )
 
                 # Record projectiles (single env only)
                 if (
@@ -454,15 +451,13 @@ class RecordingMixin:
                         )
                     )
 
-            # Clean up temporary files if needed
+            # Clean up temporary PNG frames (_frames/ subfolder only)
             if self._delete_user_viewer_recordings:
-                images = [
-                    img
-                    for img in os.listdir(self._curr_user_recording_name)
-                    if img.endswith(".png")
-                ]
-                for image in images:
-                    os.remove(os.path.join(self._curr_user_recording_name, image))
-                os.removedirs(self._curr_user_recording_name)
+                frames_dir = os.path.join(self._curr_user_recording_name, "_frames")
+                if os.path.exists(frames_dir):
+                    for image in os.listdir(frames_dir):
+                        if image.endswith(".png"):
+                            os.remove(os.path.join(frames_dir, image))
+                    os.rmdir(frames_dir)
                 self._delete_user_viewer_recordings = False
                 self._recorded_motion = None

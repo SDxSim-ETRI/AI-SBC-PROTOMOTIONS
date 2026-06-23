@@ -1,0 +1,449 @@
+<mujoco model="skeleton_torque_suit_31dof">
+  <!--
+    31-DOF skeleton_torque_suit MJCF — BONE MESHES + PRIMITIVE COLLISIONS.
+    For physics-only (training), use skeleton_torque_suit.xml in this folder.
+    Based on GZ_DW_sub01 (Hamner2010 OpenSim) + ETRI exoskeleton suit hardware.
+    Mesh geoms (contype=0) use quat="0.7071067 0.7071067 0 0" (R_x+90deg)
+    to rotate STL Y-up vertices into Z-up body frames.
+    Suit hardware bodies use cylinder/capsule/box primitives only (no separate mesh files).
+    8 joints (subtalar/mtp/wrist) locked via equality constraints (polycoef=0).
+
+    DOF ordering (35 DOFs = 31 skeleton + 4 suit): same as skeleton_torque_suit.xml.
+  -->
+  <compiler angle="radian" inertiafromgeom="false" balanceinertia="true" boundmass="0.001" boundinertia="0.001" meshdir="../../mesh/skeleton"/>
+
+  <default>
+    <joint limited="true" damping="1.0" armature="0.01" stiffness="1.0"/>
+    <geom rgba="0.8 0.6 0.4 1" condim="3"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0"/>
+  </default>
+
+  <asset>
+    <!-- pelvis bones -->
+    <mesh name="sacrum" file="sacrum.stl" scale="1.02105 1.02105 1.02105"/>
+    <mesh name="pelvis" file="pelvis.stl" scale="1.02105 1.02105 1.02105"/>
+    <mesh name="l_pelvis" file="l_pelvis.stl" scale="1.02105 1.02105 1.02105"/>
+    <!-- right leg -->
+    <mesh name="femur_r" file="femur_r.stl" scale="0.908907 0.908907 0.908907"/>
+    <mesh name="tibia_r" file="tibia_r.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="fibula_r" file="fibula_r.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="talus_rv" file="talus_rv.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="foot" file="foot.stl" scale="1.06552 1.06552 1.06552"/>
+    <mesh name="bofoot" file="bofoot.stl" scale="1.06552 1.06552 1.06552"/>
+    <!-- left leg -->
+    <mesh name="femur_l" file="femur_l.stl" scale="0.908907 0.908907 0.908907"/>
+    <mesh name="tibia_l" file="tibia_l.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="fibula_l" file="fibula_l.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="talus_lv" file="talus_lv.stl" scale="1.11668 1.11668 1.11668"/>
+    <mesh name="l_foot" file="l_foot.stl" scale="1.06552 1.06552 1.06552"/>
+    <mesh name="l_bofoot" file="l_bofoot.stl" scale="1.06552 1.06552 1.06552"/>
+    <!-- torso/head -->
+    <mesh name="hat_spine" file="hat_spine.stl" scale="1.07736 1.07736 1.07736"/>
+    <mesh name="hat_jaw" file="hat_jaw.stl" scale="1.07736 1.07736 1.07736"/>
+    <mesh name="hat_skull" file="hat_skull.stl" scale="1.07736 1.07736 1.07736"/>
+    <mesh name="hat_ribs_scap" file="hat_ribs_scap.stl" scale="1.07736 1.07736 1.07736"/>
+    <!-- right arm -->
+    <mesh name="humerus_rv" file="humerus_rv.stl" scale="1.17477 1.17477 1.17477"/>
+    <mesh name="ulna_rv" file="ulna_rv.stl" scale="1.10827 1.10827 1.10827"/>
+    <mesh name="radius_rv" file="radius_rv.stl" scale="1.10827 1.10827 1.10827"/>
+    <!-- right hand -->
+    <mesh name="pisiform_rvs" file="pisiform_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="lunate_rvs" file="lunate_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="scaphoid_rvs" file="scaphoid_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="triquetrum_rvs" file="triquetrum_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="hamate_rvs" file="hamate_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="capitate_rvs" file="capitate_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="trapezoid_rvs" file="trapezoid_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="trapezium_rvs" file="trapezium_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal1_rvs" file="metacarpal1_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal2_rvs" file="metacarpal2_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal3_rvs" file="metacarpal3_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal4_rvs" file="metacarpal4_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal5_rvs" file="metacarpal5_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_proximal_rvs" file="index_proximal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_medial_rvs" file="index_medial_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_distal_rvs" file="index_distal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_proximal_rvs" file="middle_proximal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_medial_rvs" file="middle_medial_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_distal_rvs" file="middle_distal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_proximal_rvs" file="ring_proximal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_medial_rvs" file="ring_medial_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_distal_rvs" file="ring_distal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_proximal_rvs" file="little_proximal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_medial_rvs" file="little_medial_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_distal_rvs" file="little_distal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="thumb_proximal_rvs" file="thumb_proximal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="thumb_distal_rvs" file="thumb_distal_rvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <!-- left arm -->
+    <mesh name="humerus_lv" file="humerus_lv.stl" scale="1.17477 1.17477 1.17477"/>
+    <mesh name="ulna_lv" file="ulna_lv.stl" scale="1.10827 1.10827 1.10827"/>
+    <mesh name="radius_lv" file="radius_lv.stl" scale="1.10827 1.10827 1.10827"/>
+    <!-- left hand -->
+    <mesh name="pisiform_lvs" file="pisiform_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="lunate_lvs" file="lunate_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="scaphoid_lvs" file="scaphoid_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="triquetrum_lvs" file="triquetrum_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="hamate_lvs" file="hamate_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="capitate_lvs" file="capitate_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="trapezoid_lvs" file="trapezoid_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="trapezium_lvs" file="trapezium_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal1_lvs" file="metacarpal1_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal2_lvs" file="metacarpal2_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal3_lvs" file="metacarpal3_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal4_lvs" file="metacarpal4_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="metacarpal5_lvs" file="metacarpal5_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_proximal_lvs" file="index_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_medial_lvs" file="index_medial_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="index_distal_lvs" file="index_distal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_proximal_lvs" file="middle_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_medial_lvs" file="middle_medial_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="middle_distal_lvs" file="middle_distal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_proximal_lvs" file="ring_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_medial_lvs" file="ring_medial_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="ring_distal_lvs" file="ring_distal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_proximal_lvs" file="little_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_medial_lvs" file="little_medial_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="little_distal_lvs" file="little_distal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="thumb_proximal_lvs" file="thumb_proximal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+    <mesh name="thumb_distal_lvs" file="thumb_distal_lvs.stl" scale="0.905691 0.905691 0.905691"/>
+  </asset>
+
+  <worldbody>
+    <body name="pelvis" pos="0 0 0.975">
+      <freejoint name="root"/>
+      <inertial pos="-0.0721882 0 0" mass="13.5729922649758" fullinertia="0.123517 0.0695686 0.104653 0 0 0"/>
+      <geom name="pelvis_col" type="sphere" size="0.12" pos="-0.07 0 -0.04" contype="1" conaffinity="1" group="3"/>
+      <geom name="sacrum_v" type="mesh" mesh="sacrum" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+      <geom name="pelvis_v" type="mesh" mesh="pelvis" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+      <geom name="l_pelvis_v" type="mesh" mesh="l_pelvis" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+      <!-- Right leg -->
+      <body name="femur_r" pos="-0.0721882 -0.0852576 -0.0674914">
+        <joint name="hip_flexion_r"   damping="5" stiffness="10" type="hinge" pos="0 0 0" axis="0 -1 0" range="-0.787 0.787"/>
+        <joint name="hip_adduction_r" damping="5" stiffness="10" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.524 0.524"/>
+        <joint name="hip_rotation_r"  damping="5" stiffness="20" type="hinge" pos="0 0 0" axis="0 0 1" range="-2.0944 2.0944"/>
+        <inertial pos="0 0 -0.154514" mass="10.7198633143794" fullinertia="0.127486 0.134436 0.0334185 0 0 0"/>
+        <geom name="femur_r_col"   type="capsule" size="0.05" fromto="0 0 0 0 0 -0.365" contype="1" conaffinity="1" group="3"/>
+        <geom name="right_hip_ring" type="cylinder" size="0.06 0.06" pos="0 0 -0.2" contype="0" conaffinity="0" rgba="0.0 0.0 0.5 0.8"/>
+        <geom name="femur_r_v" type="mesh" mesh="femur_r" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+        <body name="tibia_r" pos="-0.00167398 0 -0.365545">
+          <joint name="knee_angle_r" type="hinge" pos="0 0 0" axis="0 -1 0" range="-2.0944 0.174533"/>
+          <inertial pos="0 0 -0.208485" mass="4.27289367601238" fullinertia="0.072432 0.073438 0.00732943 0 0 0"/>
+          <geom name="tibia_r_col" type="capsule" size="0.04" fromto="0 0 0 0 0 -0.480" contype="1" conaffinity="1" group="3"/>
+          <geom name="tibia_r_v" type="mesh" mesh="tibia_r" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+          <geom name="fibula_r_v" type="mesh" mesh="fibula_r" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+          <body name="talus_r" pos="0 0 -0.480173">
+            <joint name="ankle_angle_r" stiffness="10" damping="1" type="hinge" pos="0 0 0" axis="-0.105014 -0.979126 -0.174022" range="-1.5708 1.5708"/>
+            <inertial pos="0 0 0" mass="0.11524999800438" fullinertia="0.00143714 0.00143714 0.00143714 0 0 0"/>
+            <geom name="talus_r_col" type="sphere" size="0.035" contype="1" conaffinity="1" group="3"/>
+            <geom name="talus_rv_v" type="mesh" mesh="talus_rv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+            <body name="calcn_r" pos="-0.0544606 -0.00884412 -0.0468448">
+              <joint name="subtalar_angle_r" armature="0.01" type="hinge" pos="0 0 0" axis="0.78718 0.120949 0.604747" range="-1.5708 1.5708"/>
+              <inertial pos="0.106552 0 0.0319656" mass="1.44062497505475" fullinertia="0.00183186 0.00536472 0.00510303 0 0 0"/>
+              <geom name="calcn_r_col" type="box" size="0.105 0.03 0.025" pos="0.125 0 0.000" contype="1" conaffinity="1" group="3"/>
+              <geom name="foot_r_v" type="mesh" mesh="foot" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+              <body name="toes_r" pos="0.190515 -0.00115076 -0.00213104">
+                <joint name="mtp_angle_r" armature="0.01" type="hinge" pos="0 0 0" axis="-0.580954 -0.813936 0" range="-1.5708 1.5708"/>
+                <inertial pos="0.036867 0.0186466 0.00639311" mass="0.249631495677486" fullinertia="0.000130847 0.00130847 0.000261694 0 0 0"/>
+                <geom name="toes_r_col" type="sphere" size="0.025" pos="0.04 0 0" contype="1" conaffinity="1" group="3"/>
+                <geom name="bofoot_r_v" type="mesh" mesh="bofoot" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: right hip cable anchors -->
+        <body name="RH_dump" pos="-0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="RH_dump_col" type="box" size="0.02 0.02 0.02" contype="0" conaffinity="0" rgba="1.0 0.2 0.2 1.0"/>
+          <site name="slider1_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="RH_dump2" pos="0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="RH_dump2_col" type="box" size="0.02 0.02 0.02" contype="0" conaffinity="0" rgba="1.0 0.95 0.0 1.0"/>
+          <site name="slider2_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+
+      <!-- Left leg -->
+      <body name="femur_l" pos="-0.0721882 0.0852576 -0.0674914">
+        <joint name="hip_flexion_l"   damping="5" stiffness="10" type="hinge" pos="0 0 0" axis="0 -1 0" range="-0.787 0.787"/>
+        <joint name="hip_adduction_l" damping="5" stiffness="10" type="hinge" pos="0 0 0" axis="-1 0 0" range="-0.524 0.524"/>
+        <joint name="hip_rotation_l"  damping="5" stiffness="20" type="hinge" pos="0 0 0" axis="0 0 -1" range="-2.0944 2.0944"/>
+        <inertial pos="0 0 -0.154514" mass="10.7198633143794" fullinertia="0.127486 0.134436 0.0334185 0 0 0"/>
+        <geom name="femur_l_col"   type="capsule" size="0.05" fromto="0 0 0 0 0 -0.365" contype="1" conaffinity="1" group="3"/>
+        <geom name="left_hip_ring" type="cylinder" size="0.06 0.06" pos="0 0 -0.2" contype="0" conaffinity="0" rgba="0.0 0.0 0.5 0.8"/>
+        <geom name="femur_l_v" type="mesh" mesh="femur_l" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+        <body name="tibia_l" pos="-0.00167398 0 -0.365545">
+          <joint name="knee_angle_l" type="hinge" pos="0 0 0" axis="0 -1 0" range="-2.0944 0.174533"/>
+          <inertial pos="0 0 -0.208485" mass="4.27289367601238" fullinertia="0.072432 0.073438 0.00732943 0 0 0"/>
+          <geom name="tibia_l_col" type="capsule" size="0.04" fromto="0 0 0 0 0 -0.480" contype="1" conaffinity="1" group="3"/>
+          <geom name="tibia_l_v" type="mesh" mesh="tibia_l" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+          <geom name="fibula_l_v" type="mesh" mesh="fibula_l" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+          <body name="talus_l" pos="0 0 -0.480173">
+            <joint name="ankle_angle_l" stiffness="10" damping="1" type="hinge" pos="0 0 0" axis="0.105014 -0.979126 0.174022" range="-1.0472 1.0472"/>
+            <inertial pos="0 0 0" mass="0.11524999800438" fullinertia="0.00143714 0.00143714 0.00143714 0 0 0"/>
+            <geom name="talus_l_col" type="sphere" size="0.035" contype="1" conaffinity="1" group="3"/>
+            <geom name="talus_lv_v" type="mesh" mesh="talus_lv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+            <body name="calcn_l" pos="-0.0544606 0.00884412 -0.0468448">
+              <joint name="subtalar_angle_l" armature="0.01" type="hinge" pos="0 0 0" axis="-0.78718 0.120949 -0.604747" range="-1.5708 1.5708"/>
+              <inertial pos="0.106552 0 0.0319656" mass="1.44062497505475" fullinertia="0.00183186 0.00536472 0.00510303 0 0 0"/>
+              <geom name="calcn_l_col" type="box" size="0.105 0.03 0.025" pos="0.125 0 0.000" contype="1" conaffinity="1" group="3"/>
+              <geom name="foot_l_v" type="mesh" mesh="l_foot" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+              <body name="toes_l" pos="0.190515 0.00115076 -0.00213104">
+                <joint name="mtp_angle_l" armature="0.01" type="hinge" pos="0 0 0" axis="0.580954 -0.813936 0" range="-1.0472 1.0472"/>
+                <inertial pos="0.036867 -0.0186466 0.00639311" mass="0.249631495677486" fullinertia="0.000130847 0.00130847 0.000261694 0 0 0"/>
+                <geom name="toes_l_col" type="sphere" size="0.025" pos="0.04 0 0" contype="1" conaffinity="1" group="3"/>
+                <geom name="bofoot_l_v" type="mesh" mesh="l_bofoot" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: left hip cable anchors -->
+        <body name="LH_dump" pos="-0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="LH_dump_col" type="box" size="0.02 0.02 0.02" contype="0" conaffinity="0" rgba="0.0 0.9 0.9 1.0"/>
+          <site name="slider3_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="LH_dump2" pos="0.06 0 -0.2">
+          <inertial pos="0 0 0" mass="1.0" diaginertia="0.1 0.1 0.1"/>
+          <geom name="LH_dump2_col" type="box" size="0.02 0.02 0.02" contype="0" conaffinity="0" rgba="1.0 0.55 0.0 1.0"/>
+          <site name="slider4_insertion" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+
+      <!-- Torso -->
+      <body name="torso" pos="-0.10282 0 0.0832155">
+        <joint name="lumbar_extension" stiffness="10" damping="5" type="hinge" pos="0 0 0" axis="0 -1 0" range="-1.5708 0.377"/>
+        <joint name="lumbar_bending"   stiffness="10" damping="5" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.754 0.754"/>
+        <joint name="lumbar_rotation"  stiffness="20" damping="5" type="hinge" pos="0 0 0" axis="0 0 1" range="-0.754 0.754"/>
+        <inertial pos="-0.0323208 0 0.344755" mass="30.9176559646429" fullinertia="1.97246 1.9148 1.01064 0 0 0"/>
+        <geom name="torso_lower_col" type="capsule" size="0.10" fromto="0 0 0.05 0 0 0.40" contype="1" conaffinity="1" group="3"/>
+        <geom name="torso_upper_col" type="capsule" size="0.04" fromto="0 0 0.40 0 0 0.53" contype="1" conaffinity="1" group="3"/>
+        <geom name="head_col" type="sphere" size="0.10" pos="0 0 0.62" contype="1" conaffinity="1" group="3"/>
+        <!-- suit: exo main body on back/torso -->
+        <geom name="exo_main_col" type="box" size="0.04 0.1 0.18" pos="-0.08 0 0.2" contype="0" conaffinity="0" rgba="0.25 0.25 0.35 0.8"/>
+        <geom name="hat_spine_v" type="mesh" mesh="hat_spine" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+        <geom name="hat_jaw_v" type="mesh" mesh="hat_jaw" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+        <geom name="hat_skull_v" type="mesh" mesh="hat_skull" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+        <geom name="hat_ribs_v" type="mesh" mesh="hat_ribs_scap" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+        <!-- Right arm -->
+        <body name="humerus_r" pos="0.00339907 -0.183151 0.400239">
+          <joint name="arm_flex_r" type="hinge" pos="0 0 0" axis="0 -1 0" range="-1.5708 1.5708"/>
+          <joint name="arm_add_r"  type="hinge" pos="0 0 0" axis="1 0 0" range="-2.0944 1.5708"/>
+          <joint name="arm_rot_r"  type="hinge" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708"/>
+          <inertial pos="0 0 -0.193252" mass="2.34245620943902" fullinertia="0.0190007 0.0213276 0.00655464 0 0 0"/>
+          <geom name="humerus_r_col" type="capsule" size="0.035" fromto="0 0 0 0 0 -0.336" contype="1" conaffinity="1" group="3"/>
+          <geom name="humerus_rv_v" type="mesh" mesh="humerus_rv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+          <body name="ulna_r" pos="0.0154412 0.0112719 -0.336305">
+            <joint name="elbow_flex_r" stiffness="0" type="hinge" pos="0 0 0" axis="0.226047 -0.973862 0.022269" range="-0.3 2.618"/>
+            <inertial pos="0 0 -0.133575" mass="0.700143737876607" fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+            <geom name="ulna_r_col" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1" group="3"/>
+            <geom name="ulna_rv_v" type="mesh" mesh="ulna_rv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+            <body name="radius_r" pos="-0.00745535 -0.0289071 -0.0144153">
+              <joint name="pro_sup_r" stiffness="0" type="hinge" pos="0 0 0" axis="0.056398 -0.001952 0.998406" range="-0.6 1.5708"/>
+              <inertial pos="0 0 -0.133575" mass="0.700143737876607" fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+              <geom name="radius_r_col" type="capsule" size="0.02" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1" group="3"/>
+              <geom name="radius_rv_v" type="mesh" mesh="radius_rv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+              <body name="hand_r" pos="-0.00974948 -0.0150836 -0.261376">
+                <joint name="wrist_flex_r" stiffness="0" type="hinge" pos="0 0 0" axis="0 -1 0" range="-1.22173 1.22173"/>
+                <joint name="wrist_dev_r" stiffness="0" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.436332 0.610865"/>
+                <inertial pos="0 0 -0.0725565" mass="0.527268740870037" fullinertia="0.00116715 0.00175335 0.000715732 0 0 0"/>
+                <geom name="hand_r_col" type="sphere" size="0.04" pos="0 0 -0.07" contype="1" conaffinity="1" group="3"/>
+                <geom name="pisiform_rvs_v" type="mesh" mesh="pisiform_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="lunate_rvs_v" type="mesh" mesh="lunate_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="scaphoid_rvs_v" type="mesh" mesh="scaphoid_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="triquetrum_rvs_v" type="mesh" mesh="triquetrum_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="hamate_rvs_v" type="mesh" mesh="hamate_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="capitate_rvs_v" type="mesh" mesh="capitate_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="trapezoid_rvs_v" type="mesh" mesh="trapezoid_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="trapezium_rvs_v" type="mesh" mesh="trapezium_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal1_rvs_v" type="mesh" mesh="metacarpal1_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal2_rvs_v" type="mesh" mesh="metacarpal2_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal3_rvs_v" type="mesh" mesh="metacarpal3_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal4_rvs_v" type="mesh" mesh="metacarpal4_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal5_rvs_v" type="mesh" mesh="metacarpal5_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_prox_rv_v" type="mesh" mesh="index_proximal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_med_rv_v" type="mesh" mesh="index_medial_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_dis_rv_v" type="mesh" mesh="index_distal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_prox_rv_v" type="mesh" mesh="middle_proximal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_med_rv_v" type="mesh" mesh="middle_medial_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_dis_rv_v" type="mesh" mesh="middle_distal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_prox_rv_v" type="mesh" mesh="ring_proximal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_med_rv_v" type="mesh" mesh="ring_medial_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_dis_rv_v" type="mesh" mesh="ring_distal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_prox_rv_v" type="mesh" mesh="little_proximal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_med_rv_v" type="mesh" mesh="little_medial_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_dis_rv_v" type="mesh" mesh="little_distal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="thumb_prox_rv_v" type="mesh" mesh="thumb_proximal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="thumb_dis_rv_v" type="mesh" mesh="thumb_distal_rvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- Left arm -->
+        <body name="humerus_l" pos="0.00339907 0.183151 0.400239">
+          <joint name="arm_flex_l" type="hinge" pos="0 0 0" axis="0 -1 0" range="-1.5708 1.5708"/>
+          <joint name="arm_add_l"  type="hinge" pos="0 0 0" axis="-1 0 0" range="-2.0944 1.5708"/>
+          <joint name="arm_rot_l"  type="hinge" pos="0 0 0" axis="0 0 -1" range="-1.5708 1.5708"/>
+          <inertial pos="0 0 -0.193252" mass="2.34245620943902" fullinertia="0.0190007 0.0213276 0.00655464 0 0 0"/>
+          <geom name="humerus_l_col" type="capsule" size="0.035" fromto="0 0 0 0 0 -0.336" contype="1" conaffinity="1" group="3"/>
+          <geom name="humerus_lv_v" type="mesh" mesh="humerus_lv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+          <body name="ulna_l" pos="0.0154412 -0.0112719 -0.336305">
+            <joint name="elbow_flex_l" stiffness="0" type="hinge" pos="0 0 0" axis="-0.226047 -0.973862 -0.022269" range="-0.3 2.618"/>
+            <inertial pos="0 0 -0.133575" mass="0.700143737876607" fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+            <geom name="ulna_l_col" type="capsule" size="0.025" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1" group="3"/>
+            <geom name="ulna_lv_v" type="mesh" mesh="ulna_lv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+            <body name="radius_l" pos="-0.00745535 0.0289071 -0.0144153">
+              <joint name="pro_sup_l" stiffness="0" type="hinge" pos="0 0 0" axis="-0.056398 -0.001952 -0.998406" range="-0.60 1.5708"/>
+              <inertial pos="0 0 -0.133575" mass="0.700143737876607" fullinertia="0.00419295 0.00454826 0.000874829 0 0 0"/>
+              <geom name="radius_l_col" type="capsule" size="0.02" fromto="0 0 0 0 0 -0.262" contype="1" conaffinity="1" group="3"/>
+              <geom name="radius_lv_v" type="mesh" mesh="radius_lv" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+
+              <body name="hand_l" pos="-0.00974948 0.0150836 -0.261376">
+                <joint name="wrist_flex_l" stiffness="0" type="hinge" pos="0 0 0" axis="0 -1 0" range="-1.22173 1.22173"/>
+                <joint name="wrist_dev_l" stiffness="0" type="hinge" pos="0 0 0" axis="-1 0 0" range="-0.436332 0.610865"/>
+                <inertial pos="0 0 -0.0725565" mass="0.527268740870037" fullinertia="0.00116715 0.00175335 0.000715732 0 0 0"/>
+                <geom name="hand_l_col" type="sphere" size="0.04" pos="0 0 -0.07" contype="1" conaffinity="1" group="3"/>
+                <geom name="pisiform_lvs_v" type="mesh" mesh="pisiform_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="lunate_lvs_v" type="mesh" mesh="lunate_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="scaphoid_lvs_v" type="mesh" mesh="scaphoid_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="triquetrum_lvs_v" type="mesh" mesh="triquetrum_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="hamate_lvs_v" type="mesh" mesh="hamate_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="capitate_lvs_v" type="mesh" mesh="capitate_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="trapezoid_lvs_v" type="mesh" mesh="trapezoid_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="trapezium_lvs_v" type="mesh" mesh="trapezium_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal1_lvs_v" type="mesh" mesh="metacarpal1_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal2_lvs_v" type="mesh" mesh="metacarpal2_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal3_lvs_v" type="mesh" mesh="metacarpal3_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal4_lvs_v" type="mesh" mesh="metacarpal4_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="metacarpal5_lvs_v" type="mesh" mesh="metacarpal5_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_prox_lv_v" type="mesh" mesh="index_proximal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_med_lv_v" type="mesh" mesh="index_medial_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="index_dis_lv_v" type="mesh" mesh="index_distal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_prox_lv_v" type="mesh" mesh="middle_proximal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_med_lv_v" type="mesh" mesh="middle_medial_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="middle_dis_lv_v" type="mesh" mesh="middle_distal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_prox_lv_v" type="mesh" mesh="ring_proximal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_med_lv_v" type="mesh" mesh="ring_medial_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="ring_dis_lv_v" type="mesh" mesh="ring_distal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_prox_lv_v" type="mesh" mesh="little_proximal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_med_lv_v" type="mesh" mesh="little_medial_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="little_dis_lv_v" type="mesh" mesh="little_distal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="thumb_prox_lv_v" type="mesh" mesh="thumb_proximal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+                <geom name="thumb_dis_lv_v" type="mesh" mesh="thumb_distal_lvs" quat="0.7071067 0.7071067 0 0" contype="0" conaffinity="0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- suit: cable slider actuators -->
+        <body name="slider1" pos="-0.14 -0.075 0.15">
+          <joint name="slide1" type="slide" pos="0 0 0" axis="0 0 1" range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider1_col" type="box" size="0.02 0.015 0.02" contype="0" conaffinity="0" rgba="1.0 0.2 0.2 1.0"/>
+          <site name="slider1_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider2" pos="-0.14 -0.035 0.15">
+          <joint name="slide2" type="slide" pos="0 0 0" axis="0 0 1" range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider2_col" type="box" size="0.02 0.015 0.02" contype="0" conaffinity="0" rgba="1.0 0.95 0.0 1.0"/>
+          <site name="slider2_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider3" pos="-0.14 0.075 0.15">
+          <joint name="slide3" type="slide" pos="0 0 0" axis="0 0 1" range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider3_col" type="box" size="0.02 0.015 0.02" contype="0" conaffinity="0" rgba="0.0 0.9 0.9 1.0"/>
+          <site name="slider3_origin" pos="0 0 0" size="0.001"/>
+        </body>
+        <body name="slider4" pos="-0.14 0.035 0.15">
+          <joint name="slide4" type="slide" pos="0 0 0" axis="0 0 1" range="-0.15 0.15" damping="0.1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.01 0.01 0.01"/>
+          <geom name="slider4_col" type="box" size="0.02 0.015 0.02" contype="0" conaffinity="0" rgba="1.0 0.55 0.0 1.0"/>
+          <site name="slider4_origin" pos="0 0 0" size="0.001"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <tendon>
+    <spatial name="cable1" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider1_origin"/>
+      <site site="slider1_insertion"/>
+    </spatial>
+    <spatial name="cable2" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider2_origin"/>
+      <site site="slider2_insertion"/>
+    </spatial>
+    <spatial name="cable3" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider3_origin"/>
+      <site site="slider3_insertion"/>
+    </spatial>
+    <spatial name="cable4" limited="true" range="0 0.51" rgba="0 0.1 1 1" width="0.005">
+      <site site="slider4_origin"/>
+      <site site="slider4_insertion"/>
+    </spatial>
+  </tendon>
+
+  <actuator>
+    <!-- [0-4] right leg — 23dof[0-4] -->
+    <motor name="mot_hip_flexion_r"    gear="275" joint="hip_flexion_r"/>
+    <motor name="mot_hip_adduction_r"  gear="530" joint="hip_adduction_r"/>
+    <motor name="mot_hip_rotation_r"   gear="600" joint="hip_rotation_r"/>
+    <motor name="mot_knee_angle_r"     gear="600" joint="knee_angle_r"/>
+    <motor name="mot_ankle_angle_r"    gear="500" joint="ankle_angle_r"/>
+    <!-- [5-9] left leg — 23dof[5-9] -->
+    <motor name="mot_hip_flexion_l"    gear="275" joint="hip_flexion_l"/>
+    <motor name="mot_hip_adduction_l"  gear="530" joint="hip_adduction_l"/>
+    <motor name="mot_hip_rotation_l"   gear="600" joint="hip_rotation_l"/>
+    <motor name="mot_knee_angle_l"     gear="600" joint="knee_angle_l"/>
+    <motor name="mot_ankle_angle_l"    gear="500" joint="ankle_angle_l"/>
+    <!-- [10-12] lumbar — 23dof[10-12] -->
+    <motor name="mot_lumbar_ext"       gear="160" joint="lumbar_extension"/>
+    <motor name="mot_lumbar_bend"      gear="160" joint="lumbar_bending"/>
+    <motor name="mot_lumbar_rot"       gear="100" joint="lumbar_rotation"/>
+    <!-- [13-17] right arm — 23dof[13-17] -->
+    <motor name="mot_shoulder_flex_r"  gear="250" joint="arm_flex_r"/>
+    <motor name="mot_shoulder_add_r"   gear="250" joint="arm_add_r"/>
+    <motor name="mot_shoulder_rot_r"   gear="250" joint="arm_rot_r"/>
+    <motor name="mot_elbow_flex_r"     gear="250" joint="elbow_flex_r"/>
+    <motor name="mot_pro_sup_r"        gear="250" joint="pro_sup_r"/>
+    <!-- [18-22] left arm — 23dof[18-22] -->
+    <motor name="mot_shoulder_flex_l"  gear="250" joint="arm_flex_l"/>
+    <motor name="mot_shoulder_add_l"   gear="250" joint="arm_add_l"/>
+    <motor name="mot_shoulder_rot_l"   gear="250" joint="arm_rot_l"/>
+    <motor name="mot_elbow_flex_l"     gear="250" joint="elbow_flex_l"/>
+    <motor name="mot_pro_sup_l"        gear="250" joint="pro_sup_l"/>
+    <!-- [23-30] NEW joints appended — zero-initialized in warm_start -->
+    <motor name="mot_subtalar_angle_r" gear="50"  joint="subtalar_angle_r"/>
+    <motor name="mot_mtp_angle_r"      gear="50"  joint="mtp_angle_r"/>
+    <motor name="mot_subtalar_angle_l" gear="50"  joint="subtalar_angle_l"/>
+    <motor name="mot_mtp_angle_l"      gear="50"  joint="mtp_angle_l"/>
+    <motor name="mot_wrist_flex_r"     gear="50"  joint="wrist_flex_r"/>
+    <motor name="mot_wrist_dev_r"      gear="50"  joint="wrist_dev_r"/>
+    <motor name="mot_wrist_flex_l"     gear="50"  joint="wrist_flex_l"/>
+    <motor name="mot_wrist_dev_l"      gear="50"  joint="wrist_dev_l"/>
+    <!-- [31-34] suit cable actuators -->
+    <motor name="cable1" gear="500" joint="slide1" ctrlrange="-2 2"/>
+    <motor name="cable2" gear="500" joint="slide2" ctrlrange="-2 2"/>
+    <motor name="cable3" gear="500" joint="slide3" ctrlrange="-2 2"/>
+    <motor name="cable4" gear="500" joint="slide4" ctrlrange="-2 2"/>
+  </actuator>
+
+</mujoco>

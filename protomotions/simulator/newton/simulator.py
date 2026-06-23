@@ -126,6 +126,7 @@ class NewtonSimulator(Simulator):
 
         self._custom_key_handlers = custom_key_handlers or {}
         self._any_key_pressed = False  # used to avoid repeating the same key press
+        self._show_contacts = False  # toggled by C key
 
         # Configure timing
         self.sim_time = 0.0
@@ -137,9 +138,70 @@ class NewtonSimulator(Simulator):
         self._contact_forces = {}  # Store contact forces per body
         self.contacts = None  # Initialized after solver/sensors are set up
         self._camera_initialized = False
+        self._camera_azimuth = 0.0  # degrees; 0=front, 180=rear, 270=right side (original default)
+        self._camera_distance = 5.0   # meters from character
+        self._camera_height = 1.0     # meters above character root
+
+    def _setup_terrain_heightfield(self) -> None:
+        """Convert ProtoMotions terrain height field to a Newton Heightfield.
+
+        Only activated when the terrain has non-zero heights (i.e. complex terrain
+        with stairs, slopes, etc.).  Flat terrain continues to use the ground plane.
+        Populates self._rough_heightfield and self._rough_heightfield_xform so that
+        _create_envs() can call builder.add_shape_heightfield() with correct placement.
+        """
+        if self.terrain is None or not hasattr(self.terrain, "height_field_raw"):
+            return
+
+        hfr = self.terrain.height_field_raw  # numpy int16, shape [tot_rows, tot_cols]
+        if int(hfr.max()) <= 0:
+            return  # flat terrain — leave _rough_heightfield unset, use ground plane
+
+        hscale = self.terrain.horizontal_scale  # metres / pixel
+        vscale = self.terrain.vertical_scale  # metres / height_unit
+
+        # No downsampling: 0.1 m/pixel resolution preserves 3px-wide steps (0.30 m tread).
+        # ds=4 merges 0.75 px/step into a smooth slope — must keep ds=1 for visible steps.
+        ds = 1
+        hfr_ds = hfr[::ds, ::ds]
+        hscale_ds = hscale * ds
+
+        # Convert int16 height units → float32 metres
+        elevation = hfr_ds.astype(np.float32) * vscale
+
+        # ProtoMotions: row=X axis, col=Y axis.
+        # Newton Heightfield: row→Y axis, col→X axis.
+        # Transpose to fix the 90° rotation between conventions.
+        elevation = elevation.T  # shape: (orig_ncol, orig_nrow) = (Y-dim, X-dim)
+
+        nrow, ncol = elevation.shape  # nrow=Y-dim, ncol=X-dim
+        hx = ncol * hscale_ds / 2.0  # X half-extent = (X-dim pixels) * hscale / 2
+        hy = nrow * hscale_ds / 2.0  # Y half-extent = (Y-dim pixels) * hscale / 2
+
+        self._rough_heightfield = newton.Heightfield(
+            data=elevation,
+            nrow=nrow,
+            ncol=ncol,
+            hx=hx,
+            hy=hy,
+            min_z=float(elevation.min()),
+            max_z=float(elevation.max()),
+        )
+        # The terrain spans [0, 2*hx] in X and [0, 2*hy] in Y starting from world origin.
+        # Newton heightfield is centred at its xform, so shift by (hx, hy).
+        self._rough_heightfield_xform = wp.transform(
+            (hx, hy, 0.0), (0.0, 0.0, 0.0, 1.0)
+        )
+        print(
+            f"[INFO] Newton heightfield terrain: {nrow}×{ncol} grid "
+            f"(원본 {hfr.shape[0]}×{hfr.shape[1]}, {ds}× 다운샘플), "
+            f"world span {2*hx:.1f}m × {2*hy:.1f}m, "
+            f"height range [{elevation.min():.3f}, {elevation.max():.3f}] m"
+        )
 
     def _create_simulation(self) -> None:
         """Create the Newton simulation environment."""
+        self._setup_terrain_heightfield()  # must run before _create_envs
         self._create_envs()
         self._zero_passive_forces()
         self._setup_robot()
@@ -173,9 +235,14 @@ class NewtonSimulator(Simulator):
             else:
                 self._update_pd_targets(zeros.squeeze(1))
 
-            with wp.ScopedCapture() as capture:
-                self._simulate()
-            self.graph = capture.graph
+            try:
+                with wp.ScopedCapture() as capture:
+                    self._simulate()
+                self.graph = capture.graph
+            except Exception as e:
+                print(f"[WARN] CUDA graph creation failed ({e}), falling back to eager execution")
+                self.use_cuda_graph = False
+                self.graph = None
         else:
             print(f"[INFO] {self.control_type.name} mode (no CUDA graph)")
 
@@ -183,7 +250,7 @@ class NewtonSimulator(Simulator):
         """Creates environments and loads robot assets.
 
         Follows the Newton G1 example pattern: configure joint properties
-        on the builder BEFORE finalize, then use replicate() for multi-env.
+        on the builder BEFORE finalize, then build one Newton world per env.
         """
         asset_root = self.robot_config.asset.asset_root
         asset_file = self.robot_config.asset.asset_file_name
@@ -227,15 +294,29 @@ class NewtonSimulator(Simulator):
             body = self.robot.add_body(xform=xform)
             self.robot.add_shape_box(body=body, hx=s, hy=s, hz=s, cfg=shape_cfg)
 
-        # 6. Replicate into worlds with ground plane
+        # 6. Create one Newton world per env.
         builder = newton.ModelBuilder()
-        builder.replicate(self.robot, self.num_envs)
+        self._add_env_worlds_to_builder(builder)
 
         if self.terrain is not None:
             ground_cfg = newton.ModelBuilder.ShapeConfig(
                 mu=self.terrain.sim_config.static_friction,
                 restitution=self.terrain.sim_config.restitution,
             )
+        else:
+            ground_cfg = None
+
+        rough_hf = getattr(self, "_rough_heightfield", None)
+        if rough_hf is not None:
+            hf_cfg = ground_cfg if ground_cfg else newton.ModelBuilder.ShapeConfig()
+            rough_hf_xform = getattr(self, "_rough_heightfield_xform", None)
+            builder.add_shape_heightfield(
+                xform=rough_hf_xform,
+                heightfield=rough_hf,
+                cfg=hf_cfg,
+                color=(0.55, 0.50, 0.45),
+            )
+        elif ground_cfg is not None:
             builder.add_ground_plane(cfg=ground_cfg)
         else:
             builder.add_ground_plane()
@@ -253,6 +334,127 @@ class NewtonSimulator(Simulator):
         num_proj = self._proj_config.num_projectiles
         self._proj_q_stride = self._proj_jq_offset + num_proj * 7
         self._proj_qd_stride = self._proj_jqd_offset + num_proj * 6
+
+    def _add_env_worlds_to_builder(self, builder) -> None:
+        """Add robot worlds, including per-env scene objects when configured."""
+        if self.scene_lib is None or self.scene_lib.num_scenes() == 0:
+            builder.replicate(self.robot, self.num_envs)
+            return
+
+        for env_idx in range(self.num_envs):
+            builder.begin_world()
+            builder.add_builder(self.robot)
+            self._add_scene_objects_to_builder(builder, env_idx)
+            builder.end_world()
+
+    def _add_scene_objects_to_builder(self, builder, env_idx: int) -> None:
+        """Add scene objects (BoxSceneObject etc.) as kinematic bodies to the current world.
+
+        Each env gets its own kinematic body at scene_offset + object_translation.
+        This preserves the correct relative position to each env's character at all RSI times,
+        because scene_offset + obj_translation is always the correct world position
+        (see update_respawn_root_offset_by_env_ids: scene envs use scene_pos directly).
+        """
+        if self.scene_lib is None or self.scene_lib.num_scenes() == 0:
+            return
+
+        from protomotions.components.scene_lib import BoxSceneObject
+        import warp as wp
+
+        scene_offsets = self.scene_lib._scene_offsets  # List[(sx, sy)] per env
+        scene_to_orig = self.scene_lib._scene_to_original_scene_id  # [num_envs]
+
+        orig_idx = int(scene_to_orig[env_idx].item())
+        scene = self.scene_lib._original_scenes[orig_idx]
+        sx, sy = scene_offsets[env_idx]
+
+        for obj in scene.objects:
+            if not isinstance(obj, BoxSceneObject):
+                continue
+
+            obj_pos = obj.translation[0].cpu().numpy()
+            obj_rot = obj.rotation[0].cpu().numpy()  # xyzw
+
+            friction = 1.0
+            if obj.options.static_friction is not None:
+                friction = obj.options.static_friction
+            elif obj.options.dynamic_friction is not None:
+                friction = obj.options.dynamic_friction
+
+            # Fixed joint (0 DOF) to world — avoids the 7-DOF free joint that
+            # add_body(is_kinematic=True) implicitly creates, which destabilises
+            # passive-cable robots through solver coupling.
+            body = builder.add_link(
+                xform=wp.transform(
+                    (sx + obj_pos[0], sy + obj_pos[1], obj_pos[2]),
+                    (obj_rot[0], obj_rot[1], obj_rot[2], obj_rot[3]),
+                ),
+                label=f"scene_box_env_{env_idx}",
+            )
+            joint = builder.add_joint_fixed(parent=-1, child=body)
+            builder.add_articulation(joints=[joint])
+            builder.add_shape_box(
+                body=body,
+                hx=obj.width / 2,
+                hy=obj.depth / 2,
+                hz=obj.height / 2,
+                cfg=newton.ModelBuilder.ShapeConfig(mu=friction),
+                color=(0.55, 0.35, 0.15),
+            )
+
+            # Store info for per-frame visual overlay (shape flags alone are not
+            # enough — Newton viewer hides non-VISIBLE collision boxes by default).
+            if not hasattr(self, "_scene_box_visuals"):
+                self._scene_box_visuals = []
+            self._scene_box_visuals.append(
+                {
+                    "pos": (sx + obj_pos[0], sy + obj_pos[1], obj_pos[2]),
+                    "rot": (obj_rot[0], obj_rot[1], obj_rot[2], obj_rot[3]),
+                    "half": (obj.width / 2, obj.depth / 2, obj.height / 2),
+                    "color": (0.55, 0.35, 0.15),
+                }
+            )
+
+    def _setup_scene_box_render_hook(self) -> None:
+        """Register a render hook that draws scene box objects each frame.
+
+        Newton's viewer hides collision-only box shapes by default (show_visual renders
+        only VISIBLE-flagged shapes, and collision boxes lack that flag after finalization).
+        Drawing via log_shapes bypasses the flag system and guarantees visibility.
+        """
+        boxes = getattr(self, "_scene_box_visuals", [])
+        if not boxes or self.viewer is None:
+            return
+
+        import warp as wp
+
+        xforms = wp.array(
+            [
+                wp.transform(b["pos"], b["rot"])
+                for b in boxes
+            ],
+            dtype=wp.transform,
+        )
+        colors = wp.array(
+            [b["color"] for b in boxes],
+            dtype=wp.vec3,
+        )
+        # All boxes same half-extents (typical for single-scene setups).
+        # Use first box dims; if mixed sizes are needed this can be extended.
+        hx, hy, hz = boxes[0]["half"]  # already half-extents; create_box also takes half-extents
+
+        viewer = self.viewer
+
+        def _draw_scene_boxes():
+            viewer.log_shapes(
+                "/scene/box_objects",
+                newton.GeoType.BOX,
+                (hx, hy, hz),
+                xforms,
+                colors=colors,
+            )
+
+        self._render_hook = _draw_scene_boxes
 
     def _zero_passive_forces(self) -> None:
         """Zero out MuJoCo passive stiffness/damping loaded from MJCF.
@@ -377,7 +579,7 @@ class NewtonSimulator(Simulator):
         self.robot_view = ArticulationView(
             self.model,
             pattern="robot",
-            include_joints=self._newton_dof_names.keys(),
+            include_joints=list(self._newton_dof_names.keys()),
             include_links=self._body_names,
         )
 
@@ -493,10 +695,17 @@ class NewtonSimulator(Simulator):
         self.solver.mjw_model.geom_gap = wp.from_torch(mj_geom_gap, dtype=wp.float32)
 
         self.viewer = None
+        self._render_hook = None  # optional callable: called between log_state and end_frame
         if not self.headless:
+            # PyOpenGL must be initialized in GLX mode before ViewerGL creates
+            # the window. dm_control (imported earlier with MUJOCO_GL=disabled)
+            # no longer pre-initializes PyOpenGL, so this setdefault is effective.
+            os.environ.setdefault("PYOPENGL_PLATFORM", "glx")
             self.viewer = newton.viewer.ViewerGL()
+            self.viewer.show_ui = False
             self.viewer.set_model(self.model)
             self.viewer.vsync = True
+            self._setup_scene_box_render_hook()
 
         self.state_temp = self.model.state()
         self.state_0 = self.model.state()
@@ -697,6 +906,11 @@ class NewtonSimulator(Simulator):
     @staticmethod
     def _count_sensor_sensing_objects(sensor: SensorContact) -> int:
         """Count matched sensing objects across all Newton worlds."""
+        # Newton 1.3.0+: sensing_indices is a flat list of body/shape indices
+        sensing_indices = getattr(sensor, "sensing_indices", None)
+        if sensing_indices is not None:
+            return len(sensing_indices)
+        # Newton 1.2.x fallback: sensing_objs is a list-of-lists (per world)
         return sum(len(world_objs) for world_objs in getattr(sensor, "sensing_objs", []))
 
     @staticmethod
@@ -791,38 +1005,22 @@ class NewtonSimulator(Simulator):
 
     def _physics_step(self) -> None:
         """Performs a physics simulation step."""
-        # Update control targets before simulation
-        if self.control_type == ControlType.BUILT_IN_PD:
-            self._apply_control()
-        elif self.control_type == ControlType.PROPORTIONAL:
-            pd_tar = self._action_to_pd_targets(self._common_actions)
-            if (
-                self._domain_randomization is not None
-                and "action_noise" in self._domain_randomization
-            ):
-                pd_tar[
-                    ..., self._domain_randomization["action_noise"]["dof_indices"]
-                ] += self._domain_randomization["action_noise"]["action_noise"]
-            sim_targets = pd_tar[:, self.data_conversion.dof_convert_to_sim]
-            self._update_pd_targets(sim_targets)
-        elif self.control_type == ControlType.TORQUE:
-            torques = self._action_to_torque_targets(self._common_actions)
-            if (
-                self._domain_randomization is not None
-                and "action_noise" in self._domain_randomization
-            ):
-                torques[
-                    ..., self._domain_randomization["action_noise"]["dof_indices"]
-                ] += self._domain_randomization["action_noise"]["action_noise"]
-            torques = torch.clip(
-                torques, -self._torque_limits_common, self._torque_limits_common
-            )
-            sim_torques = torques[:, self.data_conversion.dof_convert_to_sim]
-            self._update_torques(sim_torques)
+        self._apply_control()
 
         # Run simulation
         if self.use_cuda_graph:
-            wp.capture_launch(self.graph)
+            try:
+                wp.capture_launch(self.graph)
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower() or "graph creation error" in str(e).lower():
+                    print(
+                        f"[WARN] CUDA graph launch failed ({e}), switching to eager execution"
+                    )
+                    self.use_cuda_graph = False
+                    self.graph = None
+                    self._simulate()
+                else:
+                    raise
         else:
             self._simulate()
 
@@ -1222,36 +1420,8 @@ class NewtonSimulator(Simulator):
         )
 
     # ===== Group 6: Rendering & Visualization =====
-    def _init_camera(self) -> None:
-        """Initializes camera."""
-        char_root_pos = (
-            self._get_simulator_root_state([self._camera_target["env"]])
-            .root_pos.flatten()
-            .cpu()
-            .numpy()
-        )
-
-        cam_pos = char_root_pos + np.array([0, -5.0, 1])
-
-        camera_target = char_root_pos + np.array([0, 0, 0.2])
-        vector_to_target = camera_target - cam_pos
-        normalized_vector_to_target = vector_to_target / np.linalg.norm(
-            vector_to_target
-        )
-        pitch = np.rad2deg(np.arcsin(normalized_vector_to_target[2]))
-        yaw = np.rad2deg(
-            np.arctan2(normalized_vector_to_target[1], normalized_vector_to_target[0])
-        )
-
-        self.viewer.set_camera(wp.vec3(cam_pos.tolist()), pitch, yaw)
-        self._cam_prev_char_pos = char_root_pos
-
-    def _init_keyboard(self) -> None:
-        """Initializes keyboard controls."""
-        pass
-
-    def _update_camera(self) -> None:
-        """Updates camera position."""
+    def _get_camera_target_pos(self) -> tuple:
+        """Returns (char_root_pos, look_target_pos) for the current camera target."""
         if self._camera_target["element"] == 0:
             char_root_pos = (
                 self._get_simulator_root_state([self._camera_target["env"]])
@@ -1259,7 +1429,6 @@ class NewtonSimulator(Simulator):
                 .cpu()
                 .numpy()
             )
-            height_offset = 0.2
         else:
             in_scene_object_id = self._camera_target["element"] - 1
             char_root_pos = (
@@ -1269,25 +1438,48 @@ class NewtonSimulator(Simulator):
                 .cpu()
                 .numpy()
             )
-            height_offset = 0
+        look_target = char_root_pos + np.array([0, 0, 0.5])
+        return char_root_pos, look_target
 
-        cam_pos = np.array(self.viewer.camera.pos)
-        cam_delta = cam_pos - self._cam_prev_char_pos
+    def _compute_cam_pos(self, char_root_pos: np.ndarray) -> np.ndarray:
+        """Compute camera position from azimuth/distance/height around character."""
+        cfg_offset = getattr(self.config, "camera_offset", None)
+        if cfg_offset is not None:
+            return char_root_pos + np.array(cfg_offset, dtype=float)
+        az_rad = np.deg2rad(self._camera_azimuth)
+        offset = np.array([
+            self._camera_distance * np.cos(az_rad),
+            self._camera_distance * np.sin(az_rad),
+            self._camera_height,
+        ])
+        return char_root_pos + offset
 
-        new_cam_target = char_root_pos + np.array([0, 0, height_offset])
-        new_cam_pos = char_root_pos + cam_delta
+    def _apply_camera(self, cam_pos: np.ndarray, look_target: np.ndarray) -> None:
+        """Set viewer camera to look from cam_pos toward look_target."""
+        vec = look_target - cam_pos
+        norm = np.linalg.norm(vec)
+        if norm < 1e-6:
+            return
+        vec /= norm
+        pitch = np.rad2deg(np.arcsin(vec[2]))
+        yaw = np.rad2deg(np.arctan2(vec[1], vec[0]))
+        self.viewer.set_camera(wp.vec3(cam_pos.tolist()), pitch, yaw)
 
-        vector_to_target = new_cam_target - new_cam_pos
-        normalized_vector_to_target = vector_to_target / np.linalg.norm(
-            vector_to_target
-        )
-        pitch = np.rad2deg(np.arcsin(normalized_vector_to_target[2]))
-        yaw = np.rad2deg(
-            np.arctan2(normalized_vector_to_target[1], normalized_vector_to_target[0])
-        )
+    def _init_camera(self) -> None:
+        """Initializes camera."""
+        char_root_pos, look_target = self._get_camera_target_pos()
+        cam_pos = self._compute_cam_pos(char_root_pos)
+        self._apply_camera(cam_pos, look_target)
 
-        self.viewer.set_camera(wp.vec3(new_cam_pos.tolist()), pitch, yaw)
-        self._cam_prev_char_pos = char_root_pos
+    def _init_keyboard(self) -> None:
+        """Initializes keyboard controls."""
+        pass
+
+    def _update_camera(self) -> None:
+        """Updates camera position (orbit follows character)."""
+        char_root_pos, look_target = self._get_camera_target_pos()
+        cam_pos = self._compute_cam_pos(char_root_pos)
+        self._apply_camera(cam_pos, look_target)
 
     def close(self) -> None:
         """Closes the simulator and cleans up resources."""
@@ -1296,6 +1488,14 @@ class NewtonSimulator(Simulator):
     def _write_viewport_to_file(self, file_name: str) -> None:
         """Writes viewport to file."""
         pass
+
+    def set_window_title(self, title: str) -> None:
+        """Update the OS window title bar."""
+        if not self.headless and self.viewer is not None:
+            if hasattr(self.viewer, "set_window_title"):
+                self.viewer.set_window_title(title)
+            elif hasattr(self.viewer, "renderer") and hasattr(self.viewer.renderer, "set_title"):
+                self.viewer.renderer.set_title(title)
 
     def render(self) -> None:
         """Renders the current simulation state."""
@@ -1333,6 +1533,33 @@ class NewtonSimulator(Simulator):
                 if not self._any_key_pressed:
                     self._requested_reset()
                 any_key_pressed = True
+            elif self.viewer.is_key_down(91):  # BRACKETLEFT = [
+                # Orbit left (counter-clockwise)
+                self._camera_azimuth = (self._camera_azimuth - 30) % 360
+                any_key_pressed = True
+            elif self.viewer.is_key_down(93):  # BRACKETRIGHT = ]
+                # Orbit right (clockwise)
+                self._camera_azimuth = (self._camera_azimuth + 30) % 360
+                any_key_pressed = True
+            elif self.viewer.is_key_down("b"):
+                # View from behind (180°)
+                if not self._any_key_pressed:
+                    self._camera_azimuth = 180.0
+                    print("[Camera] Rear view (180°)")
+                any_key_pressed = True
+            elif self.viewer.is_key_down("n"):
+                # View from front (0°)
+                if not self._any_key_pressed:
+                    self._camera_azimuth = 0.0
+                    print("[Camera] Front view (0°)")
+                any_key_pressed = True
+            elif self.viewer.is_key_down("c"):
+                if not self._any_key_pressed:
+                    self._show_contacts = not self._show_contacts
+                    self.viewer.show_contacts = self._show_contacts
+                    state_str = "ON" if self._show_contacts else "OFF"
+                    print(f"[Contacts] {state_str}")
+                any_key_pressed = True
             for key, handler in self._custom_key_handlers.items():
                 if self.viewer.is_key_down(key):
                     if not self._any_key_pressed:
@@ -1343,6 +1570,10 @@ class NewtonSimulator(Simulator):
 
             self.viewer.begin_frame(self.sim_time)
             self.viewer.log_state(self.state_0)
+            if self.contacts is not None:
+                self.viewer.log_contacts(self.contacts, self.state_0)
+            if self._render_hook is not None:
+                self._render_hook()
             self.viewer.end_frame()
 
         super().render()
