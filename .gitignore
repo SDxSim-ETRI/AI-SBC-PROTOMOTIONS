@@ -18,5 +18,5 @@ data/amass/*.pkl
 !.claude/commands/
 .cursor/
 .env
-tasks/*/recordings/
+# tasks/*/recordings/  # recordings are tracked via LFS
 .github/workflows/
