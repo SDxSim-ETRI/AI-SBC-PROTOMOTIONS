@@ -19,3 +19,4 @@ data/amass/*.pkl
 .cursor/
 .env
 tasks/*/recordings/
+.github/workflows/
