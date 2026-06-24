@@ -265,6 +265,16 @@ def build_pd_action_offset_scale(
             lim_low[dof_offset] = curr_low
             lim_high[dof_offset] = curr_high
 
+        elif dof_size == 2:
+            # 2-DOF body (e.g. wrist with flex+dev): treat each axis independently like 1-DOF
+            for i in range(dof_size):
+                cl = lim_low[dof_offset + i]
+                ch = lim_high[dof_offset + i]
+                cm = 0.5 * (ch + cl)
+                cs = action_scale * (ch - cl)
+                lim_low[dof_offset + i] = cm - cs
+                lim_high[dof_offset + i] = cm + cs
+
         else:
             raise ValueError(f"Invalid dof size: {dof_size}")
 

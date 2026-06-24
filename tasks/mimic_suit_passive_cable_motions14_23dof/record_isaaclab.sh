@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-PYTHON=/home/user/miniforge3/envs/env_isaaclab/bin/python
+PYTHON=/home/user/venv_isaaclab/bin/python
 cd "$(dirname "$(realpath "$0")")/../.."
 
 CHECKPOINT="${1:-tasks/mimic_suit_passive_cable_motions14_23dof/output_isaaclab/score_based.ckpt}"
