@@ -33,5 +33,7 @@
 |------|------|
 | `train_newton_initial.sh` | Newton 최초 학습 — v18 warm_start (v18 미보관 주의) |
 | `train_newton_resume.sh` | Newton 재개 |
+| `live_viz_newton.sh` | Newton 라이브 시각화 (관절 토크·위치·접촉력) |
+| `collect_newton.sh` | Newton 데이터 수집 → `data/collected/*.zarr` |
 | `train_isaaclab_initial.sh` | IsaacLab 최초 학습 — v18_2 warm_start (sim-to-sim) |
 | `train_isaaclab_resume.sh` | IsaacLab 재개 |
