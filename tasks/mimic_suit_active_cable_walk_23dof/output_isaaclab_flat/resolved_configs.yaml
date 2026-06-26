@@ -1,0 +1,1463 @@
+robot:
+  asset:
+    asset_root: protomotions/data/assets
+    self_collisions: 'True'
+    asset_file_name: mjcf/skeleton_torque_suit.xml
+    usd_asset_file_name: usd/skeleton_torque_suit/skeleton_torque_suit.usda
+    usd_bodies_root_prim_path: /World/envs/env_.*/Robot/pelvis/
+    replace_cylinder_with_capsule: None
+    thickness: None
+    max_angular_velocity: None
+    max_linear_velocity: None
+    density: None
+    angular_damping: None
+    linear_damping: None
+    disable_gravity: None
+    fix_base_link: None
+  common_naming_to_robot_body_names:
+    all_left_foot_bodies:
+    - calcn_l
+    - toes_l
+    all_right_foot_bodies:
+    - calcn_r
+    - toes_r
+    all_left_hand_bodies:
+    - hand_l
+    all_right_hand_bodies:
+    - hand_r
+    head_body_name:
+    - torso
+    torso_body_name:
+    - torso
+  default_root_height: '0.975'
+  default_dof_pos:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  contact_bodies:
+  - calcn_l
+  - toes_l
+  - calcn_r
+  - toes_r
+  trackable_bodies_subset:
+  - torso
+  - calcn_r
+  - calcn_l
+  - hand_r
+  - hand_l
+  non_termination_contact_bodies: all
+  init_state: None
+  reset_noise: None
+  mimic_small_marker_bodies: None
+  anchor_body_name: None
+  contact_pairs_multiplier: '16'
+  control:
+    override_control_info:
+      hip_(flexion|adduction)_[rl]:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      hip_rotation_[rl]:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      knee_angle_[rl]:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      ankle_angle_[rl]:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '10'
+      lumbar_(extension|bending|rotation):
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '160'
+        velocity_limit: '10'
+      arm_(flex|add|rot)_[rl]:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      (elbow_flex|pro_sup)_[rl]:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      slide[1-4]:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '2'
+    control_type: ControlType.BUILT_IN_PD
+    soft_pos_limit: '0.9'
+    control_info:
+      hip_flexion_r:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      hip_adduction_r:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      hip_rotation_r:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      knee_angle_r:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      ankle_angle_r:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '10'
+      hip_flexion_l:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      hip_adduction_l:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      hip_rotation_l:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      knee_angle_l:
+        stiffness: '200.0'
+        damping: '20.0'
+        armature: None
+        friction: None
+        effort_limit: '600'
+        velocity_limit: '10'
+      ankle_angle_l:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '10'
+      lumbar_extension:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '160'
+        velocity_limit: '10'
+      lumbar_bending:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '160'
+        velocity_limit: '10'
+      lumbar_rotation:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '160'
+        velocity_limit: '10'
+      arm_flex_r:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      arm_add_r:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      arm_rot_r:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      elbow_flex_r:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      pro_sup_r:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      arm_flex_l:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      arm_add_l:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      arm_rot_l:
+        stiffness: '100.0'
+        damping: '10.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      elbow_flex_l:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      pro_sup_l:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '250'
+        velocity_limit: '10'
+      slide1:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '2'
+      slide2:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '2'
+      slide3:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '2'
+      slide4:
+        stiffness: '50.0'
+        damping: '5.0'
+        armature: None
+        friction: None
+        effort_limit: '500'
+        velocity_limit: '2'
+  kinematic_info:
+    body_names:
+    - pelvis
+    - femur_r
+    - tibia_r
+    - talus_r
+    - calcn_r
+    - toes_r
+    - RH_dump
+    - RH_dump2
+    - femur_l
+    - tibia_l
+    - talus_l
+    - calcn_l
+    - toes_l
+    - LH_dump
+    - LH_dump2
+    - torso
+    - humerus_r
+    - ulna_r
+    - radius_r
+    - hand_r
+    - humerus_l
+    - ulna_l
+    - radius_l
+    - hand_l
+    - slider1
+    - slider2
+    - slider3
+    - slider4
+    dof_names:
+    - hip_flexion_r
+    - hip_adduction_r
+    - hip_rotation_r
+    - knee_angle_r
+    - ankle_angle_r
+    - hip_flexion_l
+    - hip_adduction_l
+    - hip_rotation_l
+    - knee_angle_l
+    - ankle_angle_l
+    - lumbar_extension
+    - lumbar_bending
+    - lumbar_rotation
+    - arm_flex_r
+    - arm_add_r
+    - arm_rot_r
+    - elbow_flex_r
+    - pro_sup_r
+    - arm_flex_l
+    - arm_add_l
+    - arm_rot_l
+    - elbow_flex_l
+    - pro_sup_l
+    - slide1
+    - slide2
+    - slide3
+    - slide4
+    parent_indices:
+    - -1
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 1
+    - 1
+    - 0
+    - 8
+    - 9
+    - 10
+    - 11
+    - 8
+    - 8
+    - 0
+    - 15
+    - 16
+    - 17
+    - 18
+    - 15
+    - 20
+    - 21
+    - 22
+    - 15
+    - 15
+    - 15
+    - 15
+    local_pos:
+    - - 0.0
+      - 0.0
+      - 0.9750000238418579
+    - - -0.07218819856643677
+      - -0.08525759726762772
+      - -0.06749139726161957
+    - - -0.001673980033956468
+      - 0.0
+      - -0.36554500460624695
+    - - 0.0
+      - 0.0
+      - -0.4801729917526245
+    - - -0.05446060001850128
+      - -0.008844120427966118
+      - -0.04684479907155037
+    - - 0.19051499664783478
+      - -0.0011507599847391248
+      - -0.0021310399752110243
+    - - -0.05999999865889549
+      - 0.0
+      - -0.20000000298023224
+    - - 0.05999999865889549
+      - 0.0
+      - -0.20000000298023224
+    - - -0.07218819856643677
+      - 0.08525759726762772
+      - -0.06749139726161957
+    - - -0.001673980033956468
+      - 0.0
+      - -0.36554500460624695
+    - - 0.0
+      - 0.0
+      - -0.4801729917526245
+    - - -0.05446060001850128
+      - 0.008844120427966118
+      - -0.04684479907155037
+    - - 0.19051499664783478
+      - 0.0011507599847391248
+      - -0.0021310399752110243
+    - - -0.05999999865889549
+      - 0.0
+      - -0.20000000298023224
+    - - 0.05999999865889549
+      - 0.0
+      - -0.20000000298023224
+    - - -0.1028200015425682
+      - 0.0
+      - 0.08321549743413925
+    - - 0.0033990698866546154
+      - -0.1831510066986084
+      - 0.4002389907836914
+    - - 0.015441199764609337
+      - 0.011271899566054344
+      - -0.33630499243736267
+    - - -0.007455349899828434
+      - -0.02890709973871708
+      - -0.014415300451219082
+    - - -0.009749479591846466
+      - -0.015083599835634232
+      - -0.2613759934902191
+    - - 0.0033990698866546154
+      - 0.1831510066986084
+      - 0.4002389907836914
+    - - 0.015441199764609337
+      - -0.011271899566054344
+      - -0.33630499243736267
+    - - -0.007455349899828434
+      - 0.02890709973871708
+      - -0.014415300451219082
+    - - -0.009749479591846466
+      - 0.015083599835634232
+      - -0.2613759934902191
+    - - -0.14000000059604645
+      - -0.07500000298023224
+      - 0.15000000596046448
+    - - -0.14000000059604645
+      - -0.03500000014901161
+      - 0.15000000596046448
+    - - -0.14000000059604645
+      - 0.07500000298023224
+      - 0.15000000596046448
+    - - -0.14000000059604645
+      - 0.03500000014901161
+      - 0.15000000596046448
+    local_rot_ref_mat:
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    - - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 1.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+    hinge_axes_map:
+      1:
+      - - 0.0
+        - -1.0
+        - 0.0
+      - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+      2:
+      - - 0.0
+        - -1.0
+        - 0.0
+      3:
+      - - -0.10501399636268616
+        - -0.9791259765625
+        - -0.17402200400829315
+      8:
+      - - 0.0
+        - -1.0
+        - 0.0
+      - - -1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - -1.0
+      9:
+      - - 0.0
+        - -1.0
+        - 0.0
+      10:
+      - - 0.10501399636268616
+        - -0.9791259765625
+        - 0.17402200400829315
+      15:
+      - - 0.0
+        - -1.0
+        - 0.0
+      - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+      16:
+      - - 0.0
+        - -1.0
+        - 0.0
+      - - 1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - 1.0
+      17:
+      - - 0.22604699432849884
+        - -0.9738619923591614
+        - 0.022268999367952347
+      18:
+      - - 0.056398000568151474
+        - -0.0019519999623298645
+        - 0.9984059929847717
+      20:
+      - - 0.0
+        - -1.0
+        - 0.0
+      - - -1.0
+        - 0.0
+        - 0.0
+      - - 0.0
+        - 0.0
+        - -1.0
+      21:
+      - - -0.22604699432849884
+        - -0.9738619923591614
+        - -0.022268999367952347
+      22:
+      - - -0.056398000568151474
+        - -0.0019519999623298645
+        - -0.9984059929847717
+      24:
+      - - 0.0
+        - 0.0
+        - 1.0
+      25:
+      - - 0.0
+        - 0.0
+        - 1.0
+      26:
+      - - 0.0
+        - 0.0
+        - 1.0
+      27:
+      - - 0.0
+        - 0.0
+        - 1.0
+    nq: '34'
+    nv: '33'
+    num_bodies: '28'
+    num_dofs: '27'
+    dof_limits_lower:
+    - -0.7870000004768372
+    - -0.5239999890327454
+    - -2.094399929046631
+    - -2.094399929046631
+    - -1.5707999467849731
+    - -0.7870000004768372
+    - -0.5239999890327454
+    - -2.094399929046631
+    - -2.094399929046631
+    - -1.0471999645233154
+    - -1.5707999467849731
+    - -0.7540000081062317
+    - -0.7540000081062317
+    - -1.5707999467849731
+    - -2.094399929046631
+    - -1.5707999467849731
+    - -0.30000001192092896
+    - -0.6000000238418579
+    - -1.5707999467849731
+    - -2.094399929046631
+    - -1.5707999467849731
+    - -0.30000001192092896
+    - -0.6000000238418579
+    - -0.15000000596046448
+    - -0.15000000596046448
+    - -0.15000000596046448
+    - -0.15000000596046448
+    dof_limits_upper:
+    - 0.7870000004768372
+    - 0.5239999890327454
+    - 2.094399929046631
+    - 0.17453299462795258
+    - 1.5707999467849731
+    - 0.7870000004768372
+    - 0.5239999890327454
+    - 2.094399929046631
+    - 0.17453299462795258
+    - 1.0471999645233154
+    - 0.37700000405311584
+    - 0.7540000081062317
+    - 0.7540000081062317
+    - 1.5707999467849731
+    - 1.5707999467849731
+    - 1.5707999467849731
+    - 2.618000030517578
+    - 1.5707999467849731
+    - 1.5707999467849731
+    - 1.5707999467849731
+    - 1.5707999467849731
+    - 2.618000030517578
+    - 1.5707999467849731
+    - 0.15000000596046448
+    - 0.15000000596046448
+    - 0.15000000596046448
+    - 0.15000000596046448
+  number_of_actions: '27'
+  anchor_body_index: '0'
+  simulation_params:
+    isaacgym:
+      fps: '40'
+      decimation: '2'
+      substeps: '2'
+      physx:
+        num_threads: '4'
+        solver_type: '1'
+        num_position_iterations: '4'
+        num_velocity_iterations: '0'
+        contact_offset: '0.02'
+        rest_offset: '0.0'
+        bounce_threshold_velocity: '0.2'
+        max_depenetration_velocity: '10.0'
+        default_buffer_size_multiplier: '10.0'
+      flex:
+        num_inner_iterations: '10'
+        warm_start: '0.25'
+    isaaclab:
+      fps: '120'
+      decimation: '6'
+      physx:
+        num_threads: '4'
+        solver_type: '1'
+        num_position_iterations: '4'
+        num_velocity_iterations: '0'
+        contact_offset: '0.02'
+        rest_offset: '0.0'
+        bounce_threshold_velocity: '0.2'
+        max_depenetration_velocity: '10.0'
+        default_buffer_size_multiplier: '10.0'
+        gpu_found_lost_pairs_capacity: '2097152'
+        gpu_max_rigid_contact_count: '8388608'
+        gpu_found_lost_aggregate_pairs_capacity: '33554432'
+        gpu_max_rigid_patch_count: '163840'
+    genesis:
+      fps: '60'
+      decimation: '3'
+      substeps: '2'
+    newton:
+      fps: '120'
+      decimation: '6'
+      solver: newton
+      integrator: implicitfast
+      iterations: '100'
+      ls_iterations: '50'
+      ls_parallel: 'True'
+      impratio: '10.0'
+      njmax: '450'
+      nconmax: '300'
+      cone: pyramidal
+      ccd_iterations: '200'
+    mujoco:
+      fps: '120'
+      decimation: '6'
+simulator:
+  _target_: protomotions.simulator.isaaclab.simulator.IsaacLabSimulator
+  w_last: 'False'
+  headless: 'True'
+  num_envs: '4096'
+  sim:
+    fps: '120'
+    decimation: '6'
+    physx:
+      num_threads: '4'
+      solver_type: '1'
+      num_position_iterations: '4'
+      num_velocity_iterations: '0'
+      contact_offset: '0.02'
+      rest_offset: '0.0'
+      bounce_threshold_velocity: '0.2'
+      max_depenetration_velocity: '10.0'
+      default_buffer_size_multiplier: '10.0'
+      gpu_found_lost_pairs_capacity: '2097152'
+      gpu_max_rigid_contact_count: '8388608'
+      gpu_found_lost_aggregate_pairs_capacity: '33554432'
+      gpu_max_rigid_patch_count: '163840'
+  experiment_name: mimic_suit_active_cable_motions14_23dof_isaaclab
+  camera: None
+  record_viewer: 'False'
+  viewer_record_dir: output/recordings/viewer
+  domain_randomization: None
+  projectile:
+    num_projectiles: '5'
+    cube_half_size_range: (0.05, 0.15)
+    density: '500.0'
+    speed_range: (30.0, 40.0)
+    spawn_distance_range: (4.0, 5.0)
+    spawn_height_range: (-0.65, 1.1)
+    direction_noise_std: '0.1'
+    hide_delay: '2.0'
+    hide_z: '-2.0'
+  pd_target_max_accel: None
+terrain:
+  _target_: protomotions.components.terrains.terrain.Terrain
+  map_length: '20.0'
+  map_width: '20.0'
+  border_size: '40.0'
+  num_levels: '10'
+  num_terrains: '10'
+  terrain_proportions:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+  pyramid_stairs_step_height: None
+  pyramid_stairs_step_width: '0.31'
+  pyramid_stairs_platform_size: '3.0'
+  discrete_obstacles_min_height: '0.025'
+  discrete_obstacles_max_height: '0.175'
+  discrete_obstacles_bevel_size: '0.0'
+  rough_terrain_amplitude: '0.1'
+  rough_terrain_period: '0.2'
+  slope_threshold: '0.9'
+  num_samples_per_axis: '16'
+  sample_width: '1.0'
+  terrain_obs_num_samples: '256'
+  horizontal_scale: '0.1'
+  vertical_scale: '0.005'
+  slope_scale: '0.4'
+  spacing_between_scenes: '10.0'
+  minimal_humanoid_spacing: '1.0'
+  terrain_path: None
+  load_terrain: 'False'
+  save_terrain: 'False'
+  sim_config:
+    static_friction: '1.0'
+    dynamic_friction: '1.0'
+    restitution: '0.0'
+    height_offset: '0.0'
+    combine_mode: CombineMode.AVERAGE
+scene_lib:
+  _target_: protomotions.components.scene_lib.SceneLib
+  scene_file: None
+  subset_method: SubsetMethod.FIRST
+  replicate_method: ReplicationMethod.WEIGHTED
+  pointcloud_samples_per_object: None
+  num_objects_per_env: None
+motion_lib:
+  _target_: protomotions.components.motion_lib.MotionLib
+  motion_file: data/motion_for_trackers/skeleton_torque_suit_motions14.pt
+  get_motion_state_use_blend: 'True'
+env:
+  max_episode_length: '1000'
+  reset_grace_period: '5'
+  num_state_history_steps: '2'
+  _target_: protomotions.envs.base_env.active_cable_env.ActiveCableEnv
+  scene_obs:
+    enabled: 'False'
+    obs_object_index: None
+  motion_manager:
+    _target_: protomotions.envs.motion_manager.mimic_motion_manager.MimicMotionManager
+    init_start_prob: '0.2'
+    subset_method: None
+    exclude_motion_ids: None
+    exclude_motions_file: None
+    realign_motion_with_humanoid_on_each_step: 'False'
+    resample_on_reset: 'True'
+  ref_respawn_offset: '0.05'
+  ref_object_respawn_offset: '0.0'
+  ref_contact_smooth_window: '7'
+  skip_correct_terrain_height_on_flat: 'True'
+  show_terrain_markers: 'False'
+  save_dir: ''
+  reward_components:
+    action_smoothness:
+      compute_func: compute_action_smoothness
+      dynamic_vars:
+        current_processed_action: current_processed_action
+        previous_processed_action: previous_processed_action
+      weight: '-0.02'
+    gt_rew:
+      compute_func: compute_gt_rew
+      dynamic_vars:
+        current_rigid_body_pos: current.rigid_body_pos
+        ref_rigid_body_pos: mimic.ref_state.rigid_body_pos
+      weight: '0.5'
+      coefficient: '-25.0'
+    gr_rew:
+      compute_func: compute_gr_rew
+      dynamic_vars:
+        current_rigid_body_rot: current.rigid_body_rot
+        ref_rigid_body_rot: mimic.ref_state.rigid_body_rot
+      weight: '0.3'
+      coefficient: '-5.0'
+    gv_rew:
+      compute_func: compute_gv_rew
+      dynamic_vars:
+        current_rigid_body_vel: current.rigid_body_vel
+        ref_rigid_body_vel: mimic.ref_state.rigid_body_vel
+      weight: '0.1'
+      coefficient: '-0.5'
+    gav_rew:
+      compute_func: compute_gav_rew
+      dynamic_vars:
+        current_rigid_body_ang_vel: current.rigid_body_ang_vel
+        ref_rigid_body_ang_vel: mimic.ref_state.rigid_body_ang_vel
+      weight: '0.2'
+      coefficient: '-0.1'
+    rh_rew:
+      compute_func: compute_rh_rew
+      dynamic_vars:
+        current_root_height: current.root_height
+        ref_rigid_body_pos: mimic.ref_state.rigid_body_pos
+      weight: '0.2'
+      coefficient: '-100.0'
+    pow_rew:
+      compute_func: compute_pow_rew
+      dynamic_vars:
+        dof_forces: current.dof_forces
+        dof_vel: current.dof_vel
+      weight: -1e-05
+      use_torque_squared: 'False'
+      min_value: '-0.5'
+    contact_match_rew:
+      compute_func: compute_contact_match_rew
+      dynamic_vars:
+        sim_contacts: current.rigid_body_contacts
+        ref_contacts: mimic.ref_state.rigid_body_contacts
+        contact_body_ids: contact_body_ids
+      weight: '-0.1'
+      zero_during_grace_period: 'True'
+  control_components:
+    mimic:
+      _target_: protomotions.envs.control.mimic_control.MimicControl
+      bootstrap_on_episode_end: 'True'
+      future_steps: '1'
+  termination_components:
+    tracking_error:
+      compute_func: compute_tracking_error
+      dynamic_vars:
+        current_rigid_body_pos: current.rigid_body_pos
+        ref_rigid_body_pos: mimic.ref_state.rigid_body_pos
+      threshold: '0.5'
+  observation_components:
+    max_coords_obs:
+      compute_func: compute_humanoid_max_coords_observations
+      dynamic_vars:
+        body_pos: current.rigid_body_pos
+        body_rot: current.rigid_body_rot
+        body_vel: current.rigid_body_vel
+        body_ang_vel: current.rigid_body_ang_vel
+        ground_height: ground_heights
+        body_contacts: body_contacts
+      local_obs: 'True'
+      root_height_obs: 'True'
+      observe_contacts: 'False'
+      w_last: 'True'
+    previous_actions:
+      compute_func: compute_historical_actions_from_state
+      dynamic_vars:
+        historical_actions: historical.actions
+      history_steps: '1'
+    mimic_target_poses:
+      compute_func: build_max_coords_target_poses
+      dynamic_vars:
+        current_state_body_pos: current.rigid_body_pos
+        current_state_body_rot: current.rigid_body_rot
+        current_state_body_vel: current.rigid_body_vel
+        current_state_body_ang_vel: current.rigid_body_ang_vel
+        mimic_ref_pos: mimic.future_pos
+        mimic_ref_rot: mimic.future_rot
+        mimic_ref_vel: mimic.future_vel
+        mimic_ref_ang_vel: mimic.future_ang_vel
+      with_velocities: 'True'
+      with_relative: 'True'
+      w_last: 'True'
+  action_config:
+    fn: normalized_pd_fixed_gains_action
+    pd_action_offset:
+    - 0.0
+    - 0.0
+    - 0.0
+    - -0.9599335193634033
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - -0.9599335193634033
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.1590001583099365
+    - 0.4853999614715576
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.1590001583099365
+    - 0.4853999614715576
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    pd_action_scale:
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 2.268932819366455
+    - 3.1415998935699463
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 2.268932819366455
+    - 2.094399929046631
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 2.9179999828338623
+    - 2.170799970626831
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 3.1415927410125732
+    - 2.9179999828338623
+    - 2.170799970626831
+    - 0.30000001192092896
+    - 0.30000001192092896
+    - 0.30000001192092896
+    - 0.30000001192092896
+    stiffness:
+    - 200.0
+    - 200.0
+    - 200.0
+    - 200.0
+    - 100.0
+    - 200.0
+    - 200.0
+    - 200.0
+    - 200.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 50.0
+    - 50.0
+    - 100.0
+    - 100.0
+    - 100.0
+    - 50.0
+    - 50.0
+    - 50.0
+    - 50.0
+    - 50.0
+    - 50.0
+    damping:
+    - 20.0
+    - 20.0
+    - 20.0
+    - 20.0
+    - 10.0
+    - 20.0
+    - 20.0
+    - 20.0
+    - 20.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 5.0
+    - 5.0
+    - 10.0
+    - 10.0
+    - 10.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    - 5.0
+    action_transform: tanh
+    clamp_value: '1.0'
+agent:
+  batch_size: '16384'
+  training_max_steps: '10000000000000'
+  _target_: protomotions.agents.ppo.agent.PPO
+  model:
+    _target_: protomotions.agents.ppo.model.PPOModel
+    in_keys:
+    - max_coords_obs
+    - mimic_target_poses
+    - previous_actions
+    out_keys:
+    - action
+    - mean_action
+    - neglogp
+    - value
+    actor:
+      mu_key: actor_trunk_out
+      in_keys:
+      - max_coords_obs
+      - mimic_target_poses
+      - previous_actions
+      out_keys:
+      - action
+      - mean_action
+      - neglogp
+      _target_: protomotions.agents.ppo.model.PPOActor
+      mu_model:
+        normalize_obs: 'True'
+        norm_clamp_value: '5'
+        num_out: '27'
+        layers:
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        - units: '1024'
+          activation: relu
+          use_layer_norm: 'False'
+        _target_: protomotions.agents.common.mlp.MLPWithConcat
+        in_keys:
+        - max_coords_obs
+        - mimic_target_poses
+        - previous_actions
+        out_keys:
+        - actor_trunk_out
+        output_activation: None
+        module_operations:
+        - {}
+      num_out: '27'
+      actor_logstd: '-2.9'
+      learnable_std: 'False'
+    critic:
+      normalize_obs: 'True'
+      norm_clamp_value: '5'
+      num_out: '1'
+      layers:
+      - units: '1024'
+        activation: relu
+        use_layer_norm: 'False'
+      - units: '1024'
+        activation: relu
+        use_layer_norm: 'False'
+      - units: '1024'
+        activation: relu
+        use_layer_norm: 'False'
+      - units: '1024'
+        activation: relu
+        use_layer_norm: 'False'
+      _target_: protomotions.agents.common.mlp.MLPWithConcat
+      in_keys:
+      - max_coords_obs
+      - mimic_target_poses
+      - previous_actions
+      out_keys:
+      - value
+      output_activation: None
+      module_operations:
+      - {}
+    actor_optimizer:
+      _target_: torch.optim.Adam
+      lr: 2e-06
+      weight_decay: '0.0'
+      eps: 1e-08
+      betas: (0.9, 0.999)
+    critic_optimizer:
+      _target_: torch.optim.Adam
+      lr: 1e-05
+      weight_decay: '0.0'
+      eps: 1e-08
+      betas: (0.9, 0.999)
+  num_steps: '32'
+  gradient_clip_val: '50.0'
+  fail_on_bad_grads: 'False'
+  check_grad_mag: 'True'
+  gamma: '0.99'
+  bounds_loss_coef: '0.0'
+  task_reward_w: '1.0'
+  num_mini_epochs: '1'
+  training_early_termination: None
+  save_epoch_checkpoint_every: '1000'
+  save_last_checkpoint_every: '10'
+  max_episode_length_manager: None
+  evaluator:
+    _target_: protomotions.agents.evaluators.mimic_evaluator.MimicEvaluator
+    evaluation_components:
+      gt_error:
+        compute_func: mean_body_pos_error
+        dynamic_vars:
+          current_rigid_body_pos: current.rigid_body_pos
+          ref_rigid_body_pos: mimic.ref_state.rigid_body_pos
+        threshold: '0.5'
+      gr_error:
+        compute_func: mean_body_rot_error
+        dynamic_vars:
+          current_rigid_body_rot: current.rigid_body_rot
+          ref_rigid_body_rot: mimic.ref_state.rigid_body_rot
+      max_joint_error:
+        compute_func: max_body_pos_error
+        dynamic_vars:
+          current_rigid_body_pos: current.rigid_body_pos
+          ref_rigid_body_pos: mimic.ref_state.rigid_body_pos
+    max_eval_steps: '600'
+    eval_metrics_every: '200'
+    save_predicted_motion_lib_every: '3'
+    motion_weights_rules:
+      motion_weights_update_success_discount: '0.999'
+      motion_weights_update_failure_discount: '0'
+      min_motion_weight: 1/num_motions
+    eval_action_ema_alpha: None
+  normalize_rewards: 'True'
+  normalized_reward_clamp_value: '5.0'
+  tau: '0.95'
+  e_clip: '0.2'
+  clip_critic_loss: 'True'
+  actor_clip_frac_threshold: '0.6'
+  entropy_coef: '0.005'
+  l2c2:
+    enabled: 'False'
+    lambda_l2c2: '0.1'
+    obs_pairs: {}
+  adaptive_lr:
+    enabled: 'False'
+    desired_kl: '0.01'
+    min_lr: 1e-05
+    max_lr: '0.01'
+  advantage_normalization:
+    enabled: 'True'
+    shift_mean: 'True'
+    use_ema: 'True'
+    ema_alpha: '0.05'
+    min_std: '0.02'
+    clamp_range: '4.0'
