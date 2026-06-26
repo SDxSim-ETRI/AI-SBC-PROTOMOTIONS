@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>고관절 토크 IL — 데이터 검증 & 카탈로그</title>
+<style>
+  :root {
+    --paper: #faf9f7;
+    --surface: #ffffff;
+    --ink: #1b1f27;
+    --muted: #646b78;
+    --faint: #8a93a0;
+    --hair: #e7e4df;
+    --hair-strong: #d8d3ca;
+    --slate: #3a4a63;
+    --slate-soft: #eef1f6;
+    --signal: #b85c1e;
+    --signal-soft: #f7ede3;
+    --ok: #2e8b57;
+    --warn: #c2912a;
+    --bad: #b23b3b;
+    --mono: "Cascadia Code", "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+    --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+  }
+
+  /* ── Header ──────────────────────────────────────────── */
+  header.masthead {
+    padding: 56px 0 36px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin: 0 0 18px;
+    font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(28px, 4.4vw, 40px);
+    line-height: 1.12;
+    letter-spacing: -0.018em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+    font-weight: 700;
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--muted);
+    margin: 0;
+    max-width: 64ch;
+  }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  /* ── Sections ────────────────────────────────────────── */
+  section { margin-top: 52px; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--slate);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    flex: none;
+    padding-top: 2px;
+  }
+  h2 {
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    margin: 0;
+    font-weight: 700;
+    text-wrap: balance;
+  }
+  .sec-head .sub {
+    font-size: 14px;
+    color: var(--faint);
+    margin-left: auto;
+    font-family: var(--mono);
+    align-self: flex-end;
+  }
+  p { margin: 0 0 14px; }
+  p.note { color: var(--muted); font-size: 15px; }
+
+  /* ── Verdict cards ───────────────────────────────────── */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: 10px;
+    padding: 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .card .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card .tag::before {
+    content: "";
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .card.good { border-top: 3px solid var(--ok); }
+  .card.good .tag { color: var(--ok); }
+  .card.good .tag::before { background: var(--ok); }
+  .card.caution { border-top: 3px solid var(--warn); }
+  .card.caution .tag { color: var(--warn); }
+  .card.caution .tag::before { background: var(--warn); }
+  .card.target { border-top: 3px solid var(--signal); }
+  .card.target .tag { color: var(--signal); }
+  .card.target .tag::before { background: var(--signal); }
+  .card h3 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+  }
+  .card p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .card code { font-size: 12.5px; }
+
+  /* ── Proof chain ─────────────────────────────────────── */
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-radius: 10px;
+    padding: 8px;
+    margin-bottom: 20px;
+  }
+  .chain .node {
+    flex: 1 1 150px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: relative;
+  }
+  .chain .node:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    right: -9px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--signal);
+    font-weight: 700;
+    z-index: 1;
+  }
+  .chain .node .k {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--slate);
+    font-weight: 600;
+  }
+  .chain .node .v {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  /* ── Tables ──────────────────────────────────────────── */
+  .scroll { overflow-x: auto; border: 1px solid var(--hair); border-radius: 10px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    background: var(--surface);
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    padding: 0 0 10px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hair);
+    vertical-align: top;
+  }
+  thead th {
+    background: var(--slate-soft);
+    color: var(--slate);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.idx, td.num, th.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+  td.mono, th.mono { font-family: var(--mono); font-size: 13px; }
+  tr.hl td { background: var(--signal-soft); }
+  tr.hl td.mono { color: var(--signal); font-weight: 600; }
+  .x { color: var(--bad); font-weight: 600; }
+  .ck { color: var(--ok); font-weight: 600; }
+
+  .dot {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; white-space: nowrap;
+  }
+  .dot::before { content:""; width:8px; height:8px; border-radius:50%; flex:none; }
+  .dot.g::before { background: var(--ok); }
+  .dot.w::before { background: var(--warn); }
+  .dot.r::before { background: var(--bad); }
+
+  /* ── Code ────────────────────────────────────────────── */
+  pre {
+    margin: 0;
+    background: #1c2230;
+    color: #e8eaf0;
+    border-radius: 10px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.66;
+    tab-size: 4;
+  }
+  pre .c { color: #7f8aa3; }      /* comment */
+  pre .s { color: #d9a066; }      /* string  */
+  pre .k { color: #82aaff; }      /* keyword */
+  pre .f { color: #87d3b0; }      /* func/attr */
+  pre .n { color: #e0a8d8; }      /* number  */
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--slate-soft);
+    color: var(--slate);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+
+  /* ── Target callout ──────────────────────────────────── */
+  .target-box {
+    background: var(--signal-soft);
+    border: 1px solid #e8c9aa;
+    border-left: 4px solid var(--signal);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 22px;
+  }
+  .target-box .tag {
+    font-family: var(--mono);
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--signal); font-weight: 700; margin: 0 0 8px;
+  }
+  .target-box h3 { margin: 0 0 8px; font-size: 17px; }
+  .target-box p { margin: 0; font-size: 14.5px; color: #6b4a30; }
+  .target-box code { background: #fff; color: var(--signal); }
+
+  /* ── Callout (insight) ───────────────────────────────── */
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--hair);
+    border-left: 4px solid var(--slate);
+    border-radius: 10px;
+    padding: 20px 22px;
+  }
+  .callout h3 { margin: 0 0 8px; font-size: 16px; }
+  .callout p { font-size: 14.5px; color: var(--muted); }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .eq {
+    font-family: var(--mono);
+    background: var(--slate-soft);
+    color: var(--slate);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 12px 0;
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ── Checklist (next steps) ──────────────────────────── */
+  ul.steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  ul.steps li {
+    background: var(--surface); border: 1px solid var(--hair); border-radius: 9px;
+    padding: 14px 16px 14px 44px; position: relative; font-size: 14.5px;
+  }
+  ul.steps li::before {
+    content: counter(step);
+    counter-increment: step;
+    position: absolute; left: 14px; top: 13px;
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    color: #fff; background: var(--slate);
+    width: 20px; height: 20px; border-radius: 50%;
+    display: grid; place-items: center;
+  }
+  ul.steps { counter-reset: step; }
+  ul.steps li b { color: var(--ink); }
+  ul.steps li code { font-size: 12.5px; }
+
+  a { color: var(--slate); text-decoration: underline; text-underline-offset: 2px; }
+  a:focus-visible, *:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; border-radius: 3px; }
+
+  .foot {
+    margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--hair);
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    display: flex; flex-wrap: wrap; gap: 6px 18px;
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media (max-width: 560px) {
+    .sec-head .sub { display: none; }
+    h1 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Data Review · Skeleton Walking Inference</p>
+    <h1>고관절 토크 IL — 데이터 검증 &amp; 카탈로그</h1>
+    <p class="lede">
+      <code>collect_data_suit.py</code> 로 뽑은 zarr 데이터를 <b>순수 코드 리딩으로 검증</b>한 결과입니다.
+      핵심 결론: <b>물리 상태 배열은 모두 올바르게 정렬되어 정상</b>이며, <b>토크 라벨도 준비되어 있습니다</b>.
+      단, 케이블·고관절 <b>파생 헬퍼 필드의 하드코딩 인덱스는 27-DOF suit 모델 전용</b>이라는 점만 주의하면 됩니다.
+    </p>
+  </header>
+
+  <!-- ───────────────────────── §1 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>한눈에 보는 결론</h2>
+      <span class="sub">verdict</span>
+    </div>
+    <div class="cards">
+      <div class="card good">
+        <span class="tag">정상 · 그대로 사용</span>
+        <h3>핵심 물리 배열</h3>
+        <p><code>dof_pos</code>, <code>dof_vel</code>, <code>dof_forces</code>, <code>body_*</code>, <code>contacts</code>, <code>actions</code> 모두 <code>dof_names</code>·<code>body_names</code> 순서와 정확히 정렬. <code>dof_forces</code> = 시뮬레이터가 실제 인가한 관절 토크(N·m).</p>
+      </div>
+      <div class="card caution">
+        <span class="tag">주의 · 모델 의존</span>
+        <h3>파생 헬퍼 필드</h3>
+        <p><code>hip_angles</code>, <code>cable_*</code>, <code>dofc_*</code> 는 <code>_HIP_L_IDX=5</code> / <code>slice(23,27)</code> 하드코딩. <b>27-DOF suit 에서만 정확</b>하고, 31-DOF 계열이면 엉뚱한 관절을 가리킴.</p>
+      </div>
+      <div class="card target">
+        <span class="tag">학습 타깃 · 준비됨</span>
+        <h3>고관절 6-DOF 토크</h3>
+        <p>예측 라벨은 <code>dof_forces</code> 에서 추출. 인덱스를 하드코딩하지 말고 <code>dof_names</code> 에서 <code>hip_*</code> 를 찾아 유도하면 모델 무관하게 안전.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── §2 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>왜 신뢰할 수 있나 — 정렬 증명</h2>
+      <span class="sub">ordering proof</span>
+    </div>
+    <p class="note">
+      시뮬레이터가 읽은 원시 토크는 <code>convert_to_common()</code> 을 거쳐 <code>_dof_names</code> 순서로 재정렬된 뒤 반환되고
+      (<code>simulator.py:903–907</code>, <code>264–268</code>), 수집 스크립트가 바로 그 <code>_dof_names</code> 를 zarr 속성으로 저장합니다
+      (<code>collect_data_suit.py:406</code>). 따라서 <b>zarr 의 <code>dof_names</code> 속성이 모든 <code>dof_*</code> 배열 컬럼의 권위 있는 인덱스 맵</b>입니다.
+    </p>
+    <div class="chain" role="img" aria-label="원시 토크에서 zarr 저장까지의 정렬 흐름">
+      <div class="node"><span class="k">sim 원시 토크</span><span class="v">엔진별 native 순서 (N·m)</span></div>
+      <div class="node"><span class="k">convert_to_common()</span><span class="v">dof_convert_to_common 인덱싱</span></div>
+      <div class="node"><span class="k">_dof_names 순서</span><span class="v">= asset DOF 선언 순서</span></div>
+      <div class="node"><span class="k">zarr.attrs</span><span class="v">dof_names + dof_forces 동일 순서</span></div>
+    </div>
+    <div class="scroll">
+      <table>
+        <caption>// 시뮬레이터별 dof_forces 신뢰도</caption>
+        <thead>
+          <tr><th>Simulator</th><th>소스</th><th>의미</th><th>토크 라벨 신뢰도</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">newton</td><td class="mono">get_dof_forces()</td><td>실제 인가 토크</td><td><span class="dot g">높음</span></td></tr>
+          <tr><td class="mono">isaacgym</td><td class="mono">_dof_force_tensor</td><td>실제 인가 토크</td><td><span class="dot g">높음</span></td></tr>
+          <tr><td class="mono">isaaclab</td><td class="mono">applied_torque</td><td>실제 인가 토크</td><td><span class="dot g">높음</span></td></tr>
+          <tr><td class="mono">genesis</td><td class="mono">get_dofs_force()</td><td>실제 인가 토크</td><td><span class="dot g">높음</span></td></tr>
+          <tr><td class="mono">mujoco</td><td class="mono">_last_applied_torques</td><td>마지막 <b>명령값</b> (반력 아님)</td><td><span class="dot w">낮음 · CPU·1env</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── §3 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>모델별 DOF 인덱스 맵 — 핵심 주의점</h2>
+      <span class="sub">the crux</span>
+    </div>
+    <p class="note">
+      MJCF 관절 선언 순서(= <code>dof_forces</code> 컬럼 순서)를 원본에서 직접 추출해 비교했습니다.
+      <code>collect_data_suit.py</code> 의 가정(<code>_HIP_R_IDX=0</code>, <code>_HIP_L_IDX=5</code>, <code>_CABLE_SLICE=slice(23,27)</code>)은
+      <b>27-DOF suit 에서만</b> 성립합니다. 주황색 행이 고관절입니다.
+    </p>
+    <div class="scroll">
+      <table>
+        <caption>// idx 5 와 23 이 모델에 따라 완전히 다른 관절을 가리킴</caption>
+        <thead>
+          <tr>
+            <th class="num">idx</th>
+            <th class="mono">27-DOF · skeleton_torque_suit</th>
+            <th class="mono">31/35-DOF · 31dof/…</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="hl"><td class="idx">0</td><td class="mono">hip_flexion_r</td><td class="mono">hip_flexion_r</td></tr>
+          <tr class="hl"><td class="idx">1</td><td class="mono">hip_adduction_r</td><td class="mono">hip_adduction_r</td></tr>
+          <tr class="hl"><td class="idx">2</td><td class="mono">hip_rotation_r</td><td class="mono">hip_rotation_r</td></tr>
+          <tr><td class="idx">3</td><td class="mono">knee_angle_r</td><td class="mono">knee_angle_r</td></tr>
+          <tr><td class="idx">4</td><td class="mono">ankle_angle_r</td><td class="mono">ankle_angle_r</td></tr>
+          <tr><td class="idx">5</td><td class="mono"><span class="ck">hip_flexion_l ✓</span></td><td class="mono"><span class="x">subtalar_angle_r ✗</span></td></tr>
+          <tr><td class="idx">6</td><td class="mono">hip_adduction_l</td><td class="mono">mtp_angle_r</td></tr>
+          <tr><td class="idx">7</td><td class="mono">hip_rotation_l</td><td class="mono">hip_flexion_l</td></tr>
+          <tr><td class="idx">8</td><td class="mono">knee_angle_l</td><td class="mono">hip_adduction_l</td></tr>
+          <tr><td class="idx">…</td><td class="mono">…</td><td class="mono">…</td></tr>
+          <tr><td class="idx">23</td><td class="mono"><span class="ck">slide1 ✓ (cable)</span></td><td class="mono"><span class="x">wrist_dev_r ✗</span></td></tr>
+          <tr><td class="idx">24–26</td><td class="mono">slide2 / 3 / 4</td><td class="mono">arm_flex_l / add_l / rot_l</td></tr>
+          <tr><td class="idx">31–34</td><td class="mono">— (없음)</td><td class="mono">slide1–4 (suit인 경우)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:16px">
+      <b>판정 단서:</b> 이 스크립트는 <code>slice(23,27)</code> 와 <code>mimic_…_suit_…23dof</code> 태스크명·
+      <code>skeleton_torque_suit_motions14.pt</code> 모션파일을 전제로 작성되어 있어,
+      <b>27-DOF <code>skeleton_torque_suit</code> 모델용으로 설계</b>된 스크립트입니다.
+      31-DOF 계열을 돌렸다면 <code>cable_*</code>/<code>hip_angles</code> 가 조용히 손목·발목을 가리키게 됩니다.
+    </p>
+  </section>
+
+  <!-- ───────────────────────── §4 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>필드별 검증 체크리스트</h2>
+      <span class="sub">field audit</span>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>zarr 키</th><th>shape</th><th>내용</th><th>판정</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">dof_pos</td><td class="mono">[N, n_dof]</td><td>관절각 (rad) — dof_names 정렬</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">dof_vel</td><td class="mono">[N, n_dof]</td><td>관절 각속도 (rad/s)</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">dof_forces</td><td class="mono">[N, n_dof]</td><td><b>관절 토크 (N·m) — 라벨 소스</b></td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">body_pos / rot</td><td class="mono">[N, n_b, 3·4]</td><td>링크 위치 / 쿼터니언(xyzw) — body_names 정렬</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">body_vel / ang_vel</td><td class="mono">[N, n_b, 3]</td><td>링크 선·각속도</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">contacts</td><td class="mono">[N, n_b]</td><td>접촉 플래그 (calcn/toes_r·l)</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">contact_forces</td><td class="mono">[N, n_b, 3]</td><td>링크별 접촉력 (N)</td><td><span class="dot g">정상</span></td></tr>
+          <tr><td class="mono">actions</td><td class="mono">[N, n_act]</td><td>raw 정책 출력 (PD 스케일 <b>이전</b>); n_act = 구동 DOF(보통 23)</td><td><span class="dot g">정상 ·주1</span></td></tr>
+          <tr><td class="mono">hip_angles</td><td class="mono">[N, 2]</td><td>[hip_flex_r, hip_flex_l] — <b>굴곡각만</b>, idx 5 가정</td><td><span class="dot w">조건부</span></td></tr>
+          <tr><td class="mono">cable_pos / forces</td><td class="mono">[N, 4]</td><td>slide1–4, slice(23,27) 가정</td><td><span class="dot w">조건부</span></td></tr>
+          <tr><td class="mono">dofc_targets / balance</td><td class="mono">[N, 2·1]</td><td>DOFC A버전 계산값</td><td><span class="dot w">조건부</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">
+      <b>주1.</b> <code>actions</code> 폭(보통 23)이 <code>dof_*</code> 폭(27)과 다릅니다 — passive/케이블 DOF는 정책이 구동하지 않기 때문.
+      다행히 앞쪽 23개(몸통 DOF)는 같은 순서라, 고관절 action 인덱스는 <code>dof_pos</code> 의 고관절 인덱스와 동일합니다.
+      <b>조건부</b> = 27-DOF suit + <code>--active-cable</code> 일 때만 의미 있음.
+    </p>
+  </section>
+
+  <!-- ───────────────────────── §5 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <h2>IL 데이터 카탈로그</h2>
+      <span class="sub">inputs &amp; target</span>
+    </div>
+
+    <div class="target-box">
+      <p class="tag">🎯 Prediction Target</p>
+      <h3>고관절 6-DOF 토크 — <code>dof_forces[:, hip_idx]</code></h3>
+      <p>오른쪽 3 (flexion·adduction·rotation) + 왼쪽 3 = <b>6차원, 단위 N·m</b>.
+      27-DOF suit 기준 인덱스 <code>[0,1,2, 5,6,7]</code>. 인덱스는 항상 <code>dof_names</code> 에서 유도하세요(§6).</p>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <caption>// 입력 피처 후보 — 토크 예측 관련도 순</caption>
+        <thead>
+          <tr><th>우선도</th><th>zarr 키</th><th>차원</th><th>이유</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">★★★</td><td class="mono">dof_pos[:, hip]</td><td class="num">6</td><td>고관절 각도 — PD 토크에 직결</td></tr>
+          <tr><td class="mono">★★★</td><td class="mono">dof_vel[:, hip]</td><td class="num">6</td><td>고관절 각속도 — PD 감쇠항</td></tr>
+          <tr><td class="mono">★★★</td><td class="mono">actions[:, hip]</td><td class="num">6</td><td>위치 타깃 — (target − q) 오차가 토크 결정</td></tr>
+          <tr><td class="mono">★★</td><td class="mono">dof_pos / dof_vel (전신)</td><td class="num">23–31</td><td>자세·속도 컨텍스트 (중력·커플링)</td></tr>
+          <tr><td class="mono">★★</td><td class="mono">contacts</td><td class="num">n_b</td><td>발 지지 → 하중 분배</td></tr>
+          <tr><td class="mono">★</td><td class="mono">contact_forces</td><td class="num">n_b×3</td><td>지면 반력 (비접촉 시 0)</td></tr>
+          <tr><td class="mono">★</td><td class="mono">body_pos/rot/vel/ang_vel</td><td class="num">n_b×3–4</td><td>전신 포즈 (고차원, 선택)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">
+      시퀀스 모델을 쓴다면 <code>meta/episode_ends</code> 로 에피소드 경계를 끊고(윈도가 경계를 넘지 않게),
+      <code>attrs.fps</code>/<code>attrs.dt</code> 로 시간축을 맞추세요. 1행 = 1 제어 스텝입니다.
+    </p>
+  </section>
+
+  <!-- ───────────────────────── §6 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <h2>바로 쓰는 로더 — 인덱스 자동 검출</h2>
+      <span class="sub">copy &amp; run</span>
+    </div>
+    <p class="note">다른 머신에서 그대로 실행. 하드코딩 없이 <code>dof_names</code> 로부터 고관절 인덱스를 유도하므로 23/27/31-DOF 어느 모델이든 안전합니다.</p>
+<pre><span class="k">import</span> zarr, numpy <span class="k">as</span> np
+
+ds = zarr.<span class="f">open</span>(<span class="s">"dataset_suit.zarr"</span>, <span class="s">"r"</span>)
+dof_names = <span class="f">list</span>(ds.attrs[<span class="s">"dof_names"</span>])
+
+<span class="c"># ── 0) 모델 버전 sanity check ───────────────────────────</span>
+<span class="f">print</span>(<span class="s">"n_dof ="</span>, ds[<span class="s">"data/dof_pos"</span>].shape[<span class="n">1</span>], <span class="s">"| dof_names[5] ="</span>, dof_names[<span class="n">5</span>])
+<span class="c"># 'hip_flexion_l' → 23/27-DOF (인덱스 가정 정상)</span>
+<span class="c"># 'subtalar_angle_r' → 31-DOF 계열 (cable/hip_angles 필드 신뢰 금지)</span>
+
+<span class="c"># ── 1) 고관절 6-DOF 인덱스 자동 검출 ────────────────────</span>
+<span class="k">def</span> <span class="f">hip_idx</span>(names):
+    keys = (<span class="s">"hip_flexion"</span>, <span class="s">"hip_adduction"</span>, <span class="s">"hip_rotation"</span>)
+    r = [i <span class="k">for</span> i,n <span class="k">in</span> <span class="f">enumerate</span>(names) <span class="k">if</span> n.endswith(<span class="s">"_r"</span>) <span class="k">and</span> <span class="f">any</span>(k <span class="k">in</span> n <span class="k">for</span> k <span class="k">in</span> keys)]
+    l = [i <span class="k">for</span> i,n <span class="k">in</span> <span class="f">enumerate</span>(names) <span class="k">if</span> n.endswith(<span class="s">"_l"</span>) <span class="k">and</span> <span class="f">any</span>(k <span class="k">in</span> n <span class="k">for</span> k <span class="k">in</span> keys)]
+    <span class="k">return</span> r + l
+
+HIP = <span class="f">hip_idx</span>(dof_names)
+<span class="f">print</span>(<span class="s">"hip idx ="</span>, HIP, <span class="s">"→"</span>, [dof_names[i] <span class="k">for</span> i <span class="k">in</span> HIP])
+
+<span class="c"># ── 2) 타깃 라벨 & 입력 피처 ────────────────────────────</span>
+y     = ds[<span class="s">"data/dof_forces"</span>][:, HIP]          <span class="c"># [N, 6]  고관절 토크 (N·m)</span>
+q     = ds[<span class="s">"data/dof_pos"</span>][:]                  <span class="c"># [N, n_dof]</span>
+qd    = ds[<span class="s">"data/dof_vel"</span>][:]                  <span class="c"># [N, n_dof]</span>
+act   = ds[<span class="s">"data/actions"</span>][:]                  <span class="c"># [N, n_act] raw 정책출력</span>
+cont  = ds[<span class="s">"data/contacts"</span>][:]                 <span class="c"># [N, n_body]</span>
+
+X = np.concatenate([q[:, HIP], qd[:, HIP], act[:, HIP], q, qd, cont], axis=-<span class="n">1</span>)
+
+<span class="c"># ── 3) 에피소드 경계 (시퀀스 윈도용) ────────────────────</span>
+ends = ds[<span class="s">"meta/episode_ends"</span>][:]            <span class="c"># 윈도가 이 경계를 넘지 않게</span>
+<span class="f">print</span>(<span class="s">"X"</span>, X.shape, <span class="s">"| y"</span>, y.shape, <span class="s">"| episodes"</span>, <span class="f">len</span>(ends))
+<span class="f">print</span>(<span class="s">"hip torque N·m range:"</span>, y.min(), y.max())</pre>
+  </section>
+
+  <!-- ───────────────────────── §7 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <h2>Toy 문제 설계 노트 — 한 가지 중요한 함정</h2>
+      <span class="sub">design caveat</span>
+    </div>
+    <div class="callout">
+      <h3>제어가 <code>BUILT_IN_PD</code> 이므로 토크는 거의 해석적입니다</h3>
+      <p>skeleton 설정의 고관절 제어는 <code>BUILT_IN_PD</code>(<code>stiffness=200, damping=20, effort_limit=600</code>).
+      즉 시뮬레이터가 보고하는 고관절 토크는 1차적으로 다음 PD 법칙입니다:</p>
+      <span class="eq">τ_hip ≈ clip( 200·(target − q) − 20·q̇ ,  ±600 )</span>
+      <p>여기서 <code>target</code> 은 정책 action(아핀 스케일), <code>q</code>·<code>q̇</code> 는 고관절 각도·각속도입니다.
+      <b>따라서 입력에 action + 고관절 pos/vel 을 넣으면 IL 모델이 토크를 거의 그대로 복원</b>합니다 —
+      좋은 sanity 베이스라인이지만 학습 난이도는 낮습니다.</p>
+      <p>더 의미 있는 과제를 원하면 <b>action 을 빼고</b> 운동학·접촉만으로 토크를 예측하게 하세요
+      (역동역학에 가까운 진짜 추론 문제가 됩니다). 어느 쪽을 택할지 먼저 정하는 게 핵심입니다.</p>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── §8 ───────────────────────── -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">08</span>
+      <h2>다음 단계</h2>
+      <span class="sub">action items</span>
+    </div>
+    <ul class="steps">
+      <li><b>모델 버전 확정.</b> §6 코드의 0번 블록으로 <code>n_dof</code> 와 <code>dof_names[5]</code> 출력 → 27-DOF suit 인지 확인. (실행은 원래 머신에서)</li>
+      <li><b>토크 라벨은 항상 <code>dof_names</code> 기반으로 추출.</b> <code>_HIP_L_IDX=5</code> 같은 하드코딩에 의존하지 말 것.</li>
+      <li><b>MuJoCo 로 수집했다면 토크 라벨 재검토.</b> 명령값만 저장되어 실제 반력이 아님 — 가능하면 Newton/IsaacGym 데이터를 사용.</li>
+      <li><b>action 포함 여부 결정.</b> sanity 베이스라인(쉬움) vs 운동학-only 추론(의미 있음) — §7 참고.</li>
+      <li><b>(선택) 31-DOF 였다면 스크립트 수정.</b> <code>_HIP_L_IDX</code>·<code>_CABLE_SLICE</code> 를 <code>dof_names</code> 검출로 교체 후 재수집.</li>
+    </ul>
+  </section>
+
+  <div class="foot">
+    <span>VERIFIED BY CODE READING</span>
+    <span>·</span>
+    <span>simulator.py:264–268, 893–907</span>
+    <span>·</span>
+    <span>collect_data_suit.py:135–137, 406</span>
+    <span>·</span>
+    <span>mjcf/skeleton_torque_suit.xml · mjcf/31dof/</span>
+  </div>
+
+</div>
+</body>
+</html>
