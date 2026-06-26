@@ -1,0 +1,79 @@
+You are using a CUDA device ('NVIDIA GeForce RTX 4080') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/1
+----------------------------------------------------------------------------------------------------
+distributed_backend=nccl
+All distributed processes registered. Starting with 1 processes
+----------------------------------------------------------------------------------------------------
+
+DEBUG:asyncio: Using selector: EpollSelector
+DEBUG:trimesh.util: falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+DEBUG:h5py._conv: Creating converter from 7 to 5
+DEBUG:h5py._conv: Creating converter from 5 to 7
+DEBUG:h5py._conv: Creating converter from 7 to 5
+DEBUG:h5py._conv: Creating converter from 5 to 7
+[Warning] [simulation_app.simulation_app] Modules: ['omni.kit_app'] were loaded before SimulationApp was started and might not be loaded correctly.
+[Warning] [simulation_app.simulation_app] Please check to make sure no extra omniverse or pxr modules are imported before the call to SimulationApp(...)
+Loading user config located at: '/home/user/venv_isaaclab/lib/python3.10/site-packages/omni/data/Kit/Isaac-Sim/4.5/user.config.json'
+[Info] [carb] Logging to file: /home/user/venv_isaaclab/lib/python3.10/site-packages/omni/logs/Kit/Isaac-Sim/4.5/kit_20260626_123414.log
+2026-06-26 03:34:15 [0ms] [Warning] [omni.kit.app.plugin] No crash reporter present, dumps uploading isn't available.
+2026-06-26 03:34:15 [12ms] [Warning] [omni.ext.plugin] [ext: rendering_modes] Extensions config 'extension.toml' doesn't exist '/home/user/IsaacLab/apps/isaacsim_4_5/rendering_modes' or '/home/user/IsaacLab/apps/isaacsim_4_5/rendering_modes/config'
+2026-06-26 03:34:15 [547ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-06-26 03:34:16 [1,268ms] [Warning] [omni.datastore] OmniHub is inaccessible
+2026-06-26 03:34:16 [1,330ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-06-26 03:34:17 [2,466ms] [Error] [omni.physx.plugin] PhysX error: Could not load libcuda.so: libcuda.so: cannot open shared object file: No such file or directory
+, FILE /builds/omniverse/physics/physx/source/physx/src/gpu/PxPhysXGpuModuleLoader.cpp, LINE 204
+INFO:absl: MUJOCO_GL is not set, so an OpenGL backend will be chosen automatically.
+INFO:absl: Successfully imported OpenGL backend: glfw
+INFO:absl: MuJoCo library version is: 3.10.0
+INFO:protomotions.utils.config_utils: Applying 2 config override(s)...
+INFO:protomotions.utils.config_utils:   robot.asset.usd_asset_file_name: usd/skeleton_torque_suit/skeleton_torque_suit.usda -> usd/skeleton_torque_suit_mesh/skeleton_torque_suit_mesh.usda
+INFO:protomotions.utils.config_utils:   robot.asset.asset_root: protomotions/data/assets -> /home/user/ProtoMotions/protomotions/data/assets
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/user/IsaacLab/apps/isaacsim_4_5/isaaclab.python.headless.kit
+Initial heightfield size: 2800x3100 = 8680000 vertices
+Optimizing mesh by merging flat regions...
+Optimized mesh vertex count: 56
+Creating empty SceneLib (no scenes)
+Loading motions from packaged file which is faster
+Loading motion library from data/motion_for_trackers/skeleton_torque_suit_walk.pt
+
+[36m======================================================================================[0m
+[36m[1m[INFO][IsaacLab]: Logging to file: /tmp/isaaclab/logs/isaaclab_2026-06-26_12-34-19.log[0m
+[36m======================================================================================[0m
+
+[33m12:34:19 [stage.py] WARNING: Isaac Sim < 5.0 does not support thread-local stage contexts. Skipping use_stage().[0m
+[33m12:34:19 [simulation_context.py] WARNING: The `enable_external_forces_every_iteration` parameter in the PhysxCfg is set to False. If you are experiencing noisy velocities, consider enabling this flag. You may need to slightly increase the number of velocity iterations (setting it to 1 or 2 rather than 0), together with this flag, to improve the accuracy of velocity updates.[0m
+[33m12:34:25 [prims.py] WARNING: Could not perform 'modify_collision_properties' on any prims under: '/World/envs/env_0/Robot'. This might be because of the following reasons:
+	(1) The desired attribute does not exist on any of the prims.
+	(2) The desired attribute exists on an instanced prim.
+		Discovered list of instanced prim paths: ['/World/envs/env_0/Robot/pelvis/pelvis/collisions', '/World/envs/env_0/Robot/pelvis/femur_r/collisions', '/World/envs/env_0/Robot/pelvis/tibia_r/collisions', '/World/envs/env_0/Robot/pelvis/talus_r/collisions', '/World/envs/env_0/Robot/pelvis/calcn_r/collisions', '/World/envs/env_0/Robot/pelvis/toes_r/collisions', '/World/envs/env_0/Robot/pelvis/RH_dump/collisions', '/World/envs/env_0/Robot/pelvis/RH_dump2/collisions', '/World/envs/env_0/Robot/pelvis/femur_l/collisions', '/World/envs/env_0/Robot/pelvis/tibia_l/collisions', '/World/envs/env_0/Robot/pelvis/talus_l/collisions', '/World/envs/env_0/Robot/pelvis/calcn_l/collisions', '/World/envs/env_0/Robot/pelvis/toes_l/collisions', '/World/envs/env_0/Robot/pelvis/LH_dump/collisions', '/World/envs/env_0/Robot/pelvis/LH_dump2/collisions', '/World/envs/env_0/Robot/pelvis/torso/collisions', '/World/envs/env_0/Robot/pelvis/humerus_r/collisions', '/World/envs/env_0/Robot/pelvis/ulna_r/collisions', '/World/envs/env_0/Robot/pelvis/radius_r/collisions', '/World/envs/env_0/Robot/pelvis/hand_r/collisions', '/World/envs/env_0/Robot/pelvis/humerus_l/collisions', '/World/envs/env_0/Robot/pelvis/ulna_l/collisions', '/World/envs/env_0/Robot/pelvis/radius_l/collisions', '/World/envs/env_0/Robot/pelvis/hand_l/collisions', '/World/envs/env_0/Robot/pelvis/slider1/collisions', '/World/envs/env_0/Robot/pelvis/slider2/collisions', '/World/envs/env_0/Robot/pelvis/slider3/collisions', '/World/envs/env_0/Robot/pelvis/slider4/collisions', '/World/envs/env_0/Robot/pelvis/RH_dump/sites/slider1_insertion', '/World/envs/env_0/Robot/pelvis/RH_dump2/sites/slider2_insertion', '/World/envs/env_0/Robot/pelvis/LH_dump/sites/slider3_insertion', '/World/envs/env_0/Robot/pelvis/LH_dump2/sites/slider4_insertion', '/World/envs/env_0/Robot/pelvis/slider1/sites/slider1_origin', '/World/envs/env_0/Robot/pelvis/slider2/sites/slider2_origin', '/World/envs/env_0/Robot/pelvis/slider3/sites/slider3_origin', '/World/envs/env_0/Robot/pelvis/slider4/sites/slider4_origin'][0m
+2026-06-26 03:34:19 [4,717ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPreviewSurface.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,718ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdUVTexture.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,718ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_float.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,718ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_float2.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,719ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_float3.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,719ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_float4.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,719ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_int.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,720ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_string.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,720ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_normal.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,721ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_point.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,721ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_vector.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,721ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdPrimvarReader_matrix.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+2026-06-26 03:34:19 [4,722ms] [Warning] [omni.usd] Warning: in GetNodeDiscoveryResults at line 136 of /builds/omniverse/usd-ci/USD/pxr/usd/usdShade/shaderDefUtils.cpp -- Unable to resolve info:sourceAsset </UsdTransform2d.info:mdl:sourceAsset> with value @UsdPreviewSurface.mdl@.
+
+[INFO]: Setup complete...
+Smoothing contact labels with window size 7...
+Contact smoothing complete for 1 motions. Contacts are now float values in [0, 1].
+[33m12:34:20 [articulation.py] WARNING: Spatial tendons are not supported in Isaac Sim < 5.0: patching spatial-tendon getter and setter to use dummy value[0m

@@ -1,0 +1,25 @@
+# terrain 학습 결과 (단계별 push)
+output_isaaclab_discrete/
+output_isaaclab_rough_slope/
+output_isaaclab_smooth_slope/
+output_isaaclab_mixed/
+
+# terrain mlp 설정 (단계별 push)
+mlp/mlp_isaaclab_suit_active_cable_discrete*.py
+mlp/mlp_isaaclab_suit_active_cable_sand05.py
+mlp/mlp_isaaclab_suit_active_cable_smooth13.py
+mlp/mlp_isaaclab_suit_active_cable_mixed*.py
+
+# terrain 학습 스크립트 (단계별 push)
+train_isaaclab_discrete.sh
+train_isaaclab_rough_slope.sh
+train_isaaclab_smooth_slope.sh
+train_isaaclab_mixed.sh
+train_isaaclab_poles.sh
+train_isaaclab_stairs_up.sh
+train_isaaclab_stairs_down.sh
+train_isaaclab_stepping.sh
+
+# Python cache
+mlp/__pycache__/
+__pycache__/
