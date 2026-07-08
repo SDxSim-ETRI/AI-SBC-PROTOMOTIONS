@@ -707,6 +707,12 @@ class NewtonSimulator(Simulator):
             self.viewer.vsync = True
             self._setup_scene_box_render_hook()
 
+        # Expose MuJoCo's per-DOF actuator forces on every solver step
+        # (state.mujoco.qfrc_actuator, filled by SolverMuJoCo). Under
+        # BUILT_IN_PD the actuation is implicit (solver-internal) and never
+        # written to control.joint_f, so this readback is the only way to
+        # observe the torques actually applied to the joints.
+        self.model.request_state_attributes("mujoco:qfrc_actuator")
         self.state_temp = self.model.state()
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
@@ -1218,10 +1224,24 @@ class NewtonSimulator(Simulator):
         return ObjectState(state_conversion=StateConversion.SIMULATOR)
 
     def _get_simulator_dof_forces(self, env_ids=None):
-        """Returns the DOF forces."""
-        dof_forces = wp.to_torch(self.robot_view.get_dof_forces(self.control)).squeeze(
-            1
-        )
+        """Returns the DOF forces.
+
+        BUILT_IN_PD actuates inside the MuJoCo solver and never writes
+        control.joint_f, so the applied torques are read from the
+        qfrc_actuator extended-state readback (requested in _setup_sim).
+        Per-env flat DOF layout: [free-joint 6 | robot DOFs | projectiles].
+        """
+        if self.control_type == ControlType.BUILT_IN_PD:
+            qfrc = wp.to_torch(self.state_0.mujoco.qfrc_actuator).view(
+                self.num_envs, self._pd_qd_stride
+            )
+            dof_forces = qfrc[
+                :, self._pd_qd_dof_start : self._pd_qd_dof_start + self._pd_num_dofs
+            ]
+        else:
+            dof_forces = wp.to_torch(
+                self.robot_view.get_dof_forces(self.control)
+            ).squeeze(1)
         if env_ids is not None:
             dof_forces = dof_forces[env_ids]
         return RobotState(
@@ -1486,8 +1506,17 @@ class NewtonSimulator(Simulator):
         pass
 
     def _write_viewport_to_file(self, file_name: str) -> None:
-        """Writes viewport to file."""
-        pass
+        """Writes viewport to file (RecordingMixin frame capture).
+
+        Uses ViewerGL.get_frame() (PBO/CUDA readback of the last rendered
+        frame). No-op when running headless (no viewer exists).
+        """
+        if self.viewer is None or not hasattr(self.viewer, "get_frame"):
+            return
+        frame = self.viewer.get_frame()  # (H, W, 3) uint8, top-left origin
+        from PIL import Image
+
+        Image.fromarray(frame.numpy()).save(file_name)
 
     def set_window_title(self, title: str) -> None:
         """Update the OS window title bar."""
