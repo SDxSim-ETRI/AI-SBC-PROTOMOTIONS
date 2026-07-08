@@ -20,3 +20,6 @@ data/amass/*.pkl
 .env
 # tasks/*/recordings/  # recordings are tracked via LFS
 .github/workflows/
+
+# ManiFlow inference results
+tasks/*/maniflow_infer_results/
