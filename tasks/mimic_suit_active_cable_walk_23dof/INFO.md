@@ -85,9 +85,13 @@ tasks/mimic_suit_active_cable_walk_23dof/
 ├── output_isaaclab_mixed/                 ← IsaacLab 혼합 지형 계열 (train_isaaclab_mixed.sh)
 │   └── mixed_slope13_discrete15/          ←   smooth_slope 40% + discrete 40% + flat 20%
 │
-└── zarr_data/                             ← zarr 에피소드 수집 결과
-    └── {terrain_tag}/
-        └── {terrain_tag}-{timestamp}.zarr
+├── zarr_data/                             ← zarr 에피소드 수집 결과
+│   └── {terrain_tag}/
+│       └── {terrain_tag}-{timestamp}.zarr
+│
+├── infer_maniflow_newton.{py,sh}          ← ManiFlow hip-torque 추정기 폐루프 inference
+├── MANIFLOW_INFERENCE.md                  ←   실행법·주의사항 문서 (GUI/녹화 포함)
+└── maniflow_infer_results/                ←   inference 결과 (gitignore)
 ```
 
 각 `output_*/하위폴더/`에는 `config.yaml`이 있어 학습 파라미터를 기록.  
