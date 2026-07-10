@@ -6,6 +6,48 @@ ProtoMotions 시뮬레이터(기본 Newton) 안에서 폐루프로 돌리고, �
 
 ---
 
+## TL;DR — 다시 시작할 때 먼저 읽을 것
+
+1. **스크립트 두 개, 목적이 다름**:
+   - `infer_maniflow_newton.{py,sh}` — RL이 걷고 ManiFlow는 **관찰만**(예측 vs
+     실제 토크 비교). 로봇 동작에 영향 없음.
+   - `compare_maniflow_control_newton.{py,sh}` — ManiFlow 예측 토크를 **실제로
+     로봇에 인가**하는 A/B 비교. Agent A(순수 RL, 고스트) vs Agent B(estimator
+     채널만 ManiFlow 토크 + 나머지는 RL, 메시)를 같은 씬에 겹쳐 실행.
+     자세한 구조는 아래 "폐루프 제어 A/B 비교" 섹션.
+2. **⚠️ 채널 계약 (2026-07-09 전면 정정)**: 파이프라인 전체(수집→학습→추론)가
+   이제 **순수 hip 6개 DOF = 공통 [0,1,2,5,6,7]** =
+   `[hip_flexion_r, hip_adduction_r, hip_rotation_r, hip_flexion_l,
+   hip_adduction_l, hip_rotation_l]`을 사용합니다 (이름 기반 파생 —
+   `protomotions.maniflow.channels`). **이전에 학습된 모델(run01_seed42)은
+   legacy**: 수집 버그로 공통 DOF 0-5(오른다리 전체 + 왼쪽 hip flexion,
+   knee/ankle 포함)를 예측하며, 그 모델과 비교할 때만 스크립트에
+   `--action-dofs first6`을 넘겨야 합니다. ManiFlow_Policy repo 쪽
+   (process/eval/train/dataset)도 같은 날 정정 완료 — "관측 계약" 섹션 참고.
+3. **현재 결과 (2026-07-10, newton-hips-run02 모델)**:
+   - **관찰(passive) 예측**: 오프라인 val split R²≈1.000 · corr 1.000 ·
+     MAE 0.16–0.68 N·m, **Newton 폐루프도 R²≥0.998 · corr 1.000 · MAE ≤0.8
+     N·m** (`maniflow_infer_results/2026-07-10_08-14-01`). legacy corr≈0.1
+     문제 완전 해소.
+   - **제어(active) 인가**: `compare_maniflow_control_newton.sh` 기본 설정에선
+     여전히 Agent B가 초반에 낙상 (`maniflow_control_results/2026-07-10_08-15-01`).
+     예측이 완벽해도 **상태 피드백 없는 피드포워드 토크 재생**이라 미세 오차가
+     상태 드리프트로 누적되기 때문 — 이 로봇은 explicit PD조차 발산하는
+     특성(아래 참고)이라 예상된 결과. 제어 활용은 잔여 PD 결합·torque-scale
+     블렌딩·estimator-in-the-loop 등 별도 과제.
+   - legacy(run01) 모델이 나빴던 원인 (a) 채널 오배선(무릎/발목 포함),
+     (b) IsaacLab↔Newton 도메인 갭, (c) 학습 데이터 낙상 오염(1000개 중
+     172개 에피소드 root z −4000 m대, termination 부재로 done 필터 무력)은
+     모두 해결됨: hip 채널 정정 + Newton 재수집(자체 낙상 필터) + 재학습.
+4. **아직 커밋 안 됨**: 이번 통합 작업 전체가 uncommitted 상태입니다
+   (`git status`로 확인). 커밋 전에 `pre-commit run --files <목록>`으로 lint
+   확인 권장(이 머신엔 pre-commit이 안 깔려 있어 `py_compile`로만 문법 확인함 —
+   실제 커밋 전에는 ruff가 있는 환경에서 한 번 더 검증 필요).
+5. **막히면**: 이 문서의 "알아두면 좋은 것들" 섹션에 Newton PD 이슈, 녹화
+   인프라, obs 정합성 등 이번에 부딪혔던 문제와 해결책이 정리돼 있음.
+
+---
+
 ## 핵심 구조: 보행은 RL policy가, ManiFlow는 관찰자
 
 **ManiFlow의 예측 토크는 로봇에 적용되지 않습니다.** 로봇을 걷게 하는 것은
@@ -25,10 +67,12 @@ RL walking policy ──PD 위치 타겟──▶ 시뮬레이터 (BUILT_IN_PD�
                                             (MuJoCo qfrc_actuator readback)
 ```
 
-- 예측 토크로 로봇을 직접 구동하는 모드는 **아직 없습니다**. 만들려면 hip 6개
-  DOF만 TORQUE 제어 + 나머지는 PD로 두는 하이브리드 제어가 필요합니다 (미구현).
-- 데이터 수집(IsaacLab, `collect_walk_zarr.py`)과 동일한 관계입니다 — 그때도
-  RL policy가 걷고 hip torque는 기록만 했으며, ManiFlow는 그 기록으로 학습됨.
+- 예측 토크로 로봇을 **직접 구동하는 폐루프 A/B 비교**는
+  `compare_maniflow_control_newton.{py,sh}`로 별도 구현되어 있습니다 —
+  아래 "폐루프 제어 A/B 비교" 섹션 참고.
+- 데이터 수집(`collect_walk_zarr.py`, 기본 Newton)과 동일한 관계입니다 —
+  수집에서도 RL policy가 걷고 estimator 채널(hip 6개) 토크는 기록만 하며,
+  ManiFlow는 그 기록으로 학습됩니다.
 
 ---
 
@@ -62,6 +106,7 @@ bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
 | `--record` | off | mp4 + 토크 합성 비디오 (뷰어 자동 활성화) |
 | `--no-mesh` | off | 시각화를 캡슐 에셋으로 (수집 조건 물리 완전 재현) |
 | `--predict-mode` | `receding` | 4스텝 청크 예측(오프라인 eval과 동일) / `every_step` |
+| `--action-dofs` | `hips` | ManiFlow action 채널 매핑: `hips`=순수 hip 6개(공통 [0,1,2,5,6,7], 신규 계약) / `first6`=공통 0-5(legacy 모델 전용). 체크포인트 학습 채널과 일치 필수 |
 | `--control-mode` | `config` | 체크포인트 설정 그대로(=BUILT_IN_PD). `proportional`은 이 로봇에서 발산 — 금지 |
 | `--overrides` | — | ProtoMotions config override 패스스루 |
 
@@ -90,16 +135,112 @@ bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
 
 ---
 
+## 폐루프 제어 A/B 비교 (`compare_maniflow_control_newton.{py,sh}`)
+
+ManiFlow 예측 토크를 **실제 제어에 사용**했을 때를 순수 RL과 나란히 확인하는
+스크립트입니다. Newton 멀티월드(2 envs)에 두 agent를 **같은 위치에 겹쳐**
+스폰합니다 — env별 world가 분리되어 있어 물리적 상호 간섭은 없습니다:
+
+| | 제어 | 뷰어 표현 |
+|---|------|-----------|
+| **Agent A** (env 0) | RL policy + built-in PD (순수 RL) | 반투명 라인 스켈레톤 (고스트) |
+| **Agent B** (env 1) | estimator 채널(기본 hip 6개 = 공통 [0,1,2,5,6,7]) = ManiFlow 토크, 나머지 = RL policy + built-in PD | 일반 메시 |
+
+```bash
+# headless 지표만
+bash tasks/mimic_suit_active_cable_walk_23dof/compare_maniflow_control_newton.sh
+
+# 실시간 GUI (고스트 A + 메시 B 중첩, 라이브 플롯)
+bash tasks/.../compare_maniflow_control_newton.sh --viewer
+
+# 동영상 (sim mp4 + 토크 패널 합성 sim_with_torque.mp4)
+bash tasks/.../compare_maniflow_control_newton.sh --record --episode-steps 600
+
+# 최종 학습 모델로
+bash tasks/.../compare_maniflow_control_newton.sh \
+    --maniflow-ckpt ~/Projects/ManiFlow_Policy/.../checkpoints/latest.ckpt
+```
+
+### 주요 옵션
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--rl-checkpoint` | `output_newton_flat/score_based.ckpt` | 두 agent 모두가 쓰는 보행 RL policy |
+| `--maniflow-ckpt` / `--maniflow-run-dir` | run01_seed42 best topk 자동 | ManiFlow 체크포인트 (topk 이슈는 "체크포인트" 섹션 참고) |
+| `--maniflow-root` | `$MANIFLOW_ROOT` 또는 관례 경로 | maniflow 패키지 위치 |
+| `--episode-steps` | 1200 | 총 rollout 스텝 (에피소드 끝나면 이어서 진행) |
+| `--predict-mode` | `receding` | 4스텝 청크 예측 / `every_step`(매 스텝 재예측) |
+| `--action-dofs` | `hips` | override 채널: `hips`=순수 hip 6개(공통 [0,1,2,5,6,7]) / `first6`=legacy 모델 전용 |
+| `--chunk-offset` | 1 | 청크 시작 인덱스. 1=다음 전이용(권장), 0=한 스텝 지연 사후추정 |
+| `--torque-scale` | 1.0 | Agent B 인가 토크 배율. 0 = 해당 채널 무동력 sanity check |
+| `--fall-z` / `--fall-hold` | 0.5 / 10 | 넘어짐 판정: root 높이[m] × 연속 유지 스텝 수 |
+| `--divergence-reset` | 5.0 | A↔B root XY 거리[m] 초과 시 에피소드 종료 (<=0 비활성) |
+| `--min-episode-seconds` | 5.0 | 넘어짐/발산 감지돼도 이 시간까진 리셋 안 함(그대로 시뮬 지속) — grace period |
+| `--viewer` / `--record` | off / off | 실시간 GUI / mp4+토크 합성 영상 저장 (record는 viewer 자동 활성화) |
+| `--no-mesh` | off | 캡슐 에셋(기본은 skeleton mesh) |
+| `--ghost-alpha` / `--ghost-line-width` | 0.5 / 3.5 | Agent A 고스트 라인 투명도 / 두께[px] |
+| `--seed` | 42 | RNG seed |
+| `--output` | `maniflow_control_results/<timestamp>/` | 결과 디렉토리 |
+
+뷰어 조작키는 `infer_maniflow_newton.sh`와 동일 (같은 NewtonSimulator 뷰어 — 위
+"뷰어 조작키" 표 참고).
+
+동작 방식:
+- **하이브리드 제어**: `protomotions.maniflow.JointTorqueOverride`가 env 1의
+  estimator 채널만 PD 게인을 0으로 만들고(`notify_model_changed`, per-world 게인)
+  ManiFlow 토크를 `control.joint_f`(→`qfrc_applied`)로 주입. effort limit으로
+  클램프, decimation 구간 동안 상수 유지(표준 토크 제어). Agent B의 해당 채널
+  qfrc_actuator 잔여가 0인지 런타임 자체 검증.
+- **동기화 에피소드**: 두 env는 항상 같은 모션(id 0)·t=0·같은 스폰 위치에서
+  시작하고, 한쪽이 done/낙상/과대발산하면 **둘 다 함께 리셋**. inference
+  config에는 termination이 없으므로 스크립트가 자체 감지:
+  `--fall-z 0.5`(root 높이) × `--fall-hold 10`(연속 스텝), `--divergence-reset
+  5.0`(A↔B 거리 m).
+- **최소 에피소드 길이**: `--min-episode-seconds 5.0`(기본) 동안은 넘어짐/발산이
+  감지돼도 리셋하지 않고 **쓰러진 채로 시뮬레이션을 계속**합니다 — 매
+  에피소드가 최소 5초는 관찰 가능하도록 보장하는 grace period. env 자체의 진짜
+  termination(현재는 거의 발생 안 함)은 게이트 없이 즉시 반영됩니다. 실제
+  control step 주파수(`1/env.simulator.dt`)로 스텝 수를 계산하므로 fps/decimation
+  설정이 달라져도 초 단위 의미가 유지됩니다.
+- **정렬**: 수집 관례상 chunk[0]은 직전 전이의 사후 추정치라 제어에는
+  `--chunk-offset 1`(기본)부터 사용. Agent A에 대해서는 같은 chunk 원소를 수동
+  예측으로 기록해 기존 passive 비교도 함께 얻습니다.
+- `--torque-scale 0`으로 "해당 채널 무동력" sanity check 가능.
+
+출력(`maniflow_control_results/<timestamp>/`): `metrics.{json,txt}`(에피소드
+통계·종료 원인·트래킹 오차 A vs B·채널별 토크 통계), `traces.npz`,
+`torque_channels_{full,zoom}.png`, `tracking_{full,zoom}.png`,
+(`--record`) `sim-<ts>.mp4` + `sim_with_torque.mp4`.
+
+첫 실행 결과 (legacy epoch30 ckpt, first6 채널, Newton, 기본 설정): **Agent B는 낙상 자체는 매
+에피소드 약 1초 내에 감지**되지만(fall-hold 0.5s 포함), min-episode-seconds
+grace period로 실제 리셋은 5초까지 지연되어 **쓰러진 채로 나머지 구간을
+시뮬레이션**합니다(물리적으로 안정적으로 확인됨 — NaN/발산 없음). 6채널
+트래킹 오차 A 0.23→B 0.94 rad, 보상 A 0.84→B -0.05. 현재 sim2sim 예측 품질(corr≈0.1)로는
+예상된 결과이며, 아래 "현재 Newton 예측 품질이 낮은 이유"의 개선 루프(재수집→
+재학습→본 스크립트로 재평가)를 위한 기준선입니다.
+
+---
+
 ## 체크포인트
 
 - **RL (보행)**: `output_newton_flat/{score_based,last}.ckpt` — Newton에서 학습된
-  tracker. `output_isaaclab_flat/score_based.ckpt`(수집 데이터를 만든 policy)를
-  Newton에서 sim2sim으로 돌릴 수도 있음 (자세가 더 무너짐 — 아래 도메인 갭 참고).
-- **ManiFlow**: 학습 run이 2026-07-08 완주 (epoch 225, 최종 eval loss ~0.0003).
-  ⚠️ **topk 파일이 `epoch=0030`에서 갱신되지 않은 이슈**가 있어 자동 선택이 epoch30을
-  집습니다. 최종 모델을 쓰려면 `--maniflow-ckpt .../latest.ckpt` 명시.
-  (학습이 끝났으므로 latest.ckpt를 읽어도 안전. 학습 재개 시에는 latest.ckpt가
-  주기적으로 재작성되므로 topk 파일을 쓸 것.)
+  tracker. 수집·추론 모두 이걸 사용 (도메인 일치).
+- **ManiFlow (신규, hip 6채널 — 기본 사용)**: Newton 재수집 데이터
+  (`walking-flat-newton-hips.zarr`, 2000 eps)로 2026-07-09~10 학습 완료 —
+  `.../outputs/walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42`,
+  best topk `epoch=0190-val_loss=0.000716.ckpt` (자동 선택 정상).
+  infer/compare 스크립트의 `--maniflow-run-dir`을 이 run으로 지정하고
+  `--action-dofs hips`(기본값) 사용. Newton 폐루프 passive 예측
+  R²≥0.998/corr 1.000.
+- **ManiFlow (legacy, first6 채널 — 사용 비권장)**: run01_seed42, 2026-07-08
+  완주 (epoch 225, 최종 eval loss ~0.0003). **채널이 오른다리 전체+왼 hip
+  flexion**이고 학습 데이터에 낙상 오염이 있음. 비교 재현 시에만
+  `--action-dofs first6`과 함께 사용. ⚠️ topk 파일이 `epoch=0030`에서 갱신되지
+  않은 이슈가 있어 자동 선택이 epoch30을 집음 — 최종 모델은
+  `--maniflow-ckpt .../latest.ckpt` 명시.
+- 학습 진행 중인 run에서 로드할 때는 latest.ckpt가 주기적으로 재작성되므로
+  topk(`epoch=*-val_loss=*.ckpt`) 파일을 쓸 것.
 
 ## 환경
 
@@ -132,27 +273,46 @@ substep 채움)에서 토크를 읽습니다 → **학습과 동일한 actuation
 ### 2. 관측 계약 (수집·학습·inference 모두 동일해야 함)
 ```
 obs(88) = dof_pos(27) + dof_vel(27) + root_pos(3) + root_vel(3) + contacts(28)
-action(6) = hip torque  [hip_flexion_r, hip_adduction_r, hip_rotation_r,
-                         hip_flexion_l, hip_adduction_l, hip_rotation_l]
+action(6) = 순수 hip 6개 DOF 적용 토크 (공통 DOF [0,1,2,5,6,7])
+          = [hip_flexion_r, hip_adduction_r, hip_rotation_r,
+             hip_flexion_l, hip_adduction_l, hip_rotation_l]
 ```
+채널 인덱스는 하드코딩하지 말고 `protomotions.maniflow.channels`의
+`hip_dof_indices(dof_names)`로 이름 기반 파생하세요. 공통 DOF 순서는
+kinematic tree 순서(오른다리 체인→왼다리 체인→…)라서 앞 6개를 자르면(`[:6]`)
+DOF 3, 4에 오른쪽 무릎/발목이 섞입니다 — 초기 수집 스크립트가 바로 이
+가정(hips=0-5)을 잘못해서 legacy 모델이 오른다리 전체+왼 hip flexion을
+학습했습니다.
+
+⚠️ **Legacy 구분법**: 새 수집본은 zarr attrs에 `action_dof_names`/
+`action_dof_indices`가 있습니다(자기술). 없는 zarr(예: `flat-2026-06-26-*`)은
+legacy — `hip_torque` 필드가 실제로는 공통 DOF 0-5이고,
+`process_data_walking.py`가 `--allow_legacy_channels` 없이는 거부합니다.
+infer/compare 스크립트에서 legacy 모델을 돌릴 때는 `--action-dofs first6`.
+
 `Simulator.get_robot_state()`가 모든 필드를 common ordering으로 변환하므로
 시뮬레이터가 달라도 레이아웃이 유지됩니다. root_pos/vel = pelvis(body 0) 월드
 위치/선속도, contacts = binary flag.
 
-### 3. 현재 Newton 예측 품질이 낮은 이유 (배선 문제 아님 — 도메인 갭)
+### 3. 구(legacy) 모델의 Newton 예측 품질이 낮았던 이유 — 전부 해결됨
 - **배선 검증**: 학습 zarr 데이터를 estimator 경로로 흘리면 R²≈0.98–0.997 —
-  obs 조립/정렬/정규화 정상.
-- **Newton 폐루프**: corr ~0.15–0.18. 원인 진단 결과:
-  1. Newton에서 실현되는 보행 자세가 학습 데이터(IsaacLab, 모션 추종 타이트)보다
-     레퍼런스에서 크게 이탈 (ankle ~1 rad 수준까지) — newton-policy든
-     isaaclab-policy sim2sim이든 마찬가지.
-  2. 발뒤꿈치 contact 플래그(contacts[4]/[11])가 학습 데이터에선 **항상 1**인데
-     Newton에선 0.16~0.22로 토글 — 모델이 본 적 없는 입력.
-  3. (학습 데이터 자체 이슈) root_pos z에 낙하 쓰레기 값(-4032 m)이 섞여 있어
-     normalizer가 높이 정보를 사실상 소거함.
-- **개선 방향**: Newton에서 데이터 재수집 후 재학습/파인튜닝 (이 스크립트가
-  `traces.npz`에 obs까지 저장하므로 수집기로 재사용 가능), 또는 obs 정제
-  (절대 x,y 제거, contact 정합화) 후 재학습.
+  obs 조립/정렬/정규화 자체는 정상이었음.
+- **Newton 폐루프**: corr ~0.15–0.18. 원인 진단과 해결:
+  1. (도메인 갭) Newton에서 실현되는 보행 자세가 학습 데이터(IsaacLab)보다
+     레퍼런스에서 크게 이탈 (ankle ~1 rad 수준까지)
+     → **해결**: 수집을 Newton에서 직접 수행 (`collect_walk_zarr.py`가
+     `--simulator newton` 기본, RL ckpt도 Newton 학습본 사용).
+  2. (도메인 갭) 발뒤꿈치 contact 플래그(contacts[4]/[11])가 IsaacLab 수집
+     데이터에선 **항상 1**인데 Newton에선 0.16~0.22로 토글 — 모델이 본 적
+     없는 입력 → **해결**: Newton 수집 데이터도 동일 분포(스모크 수집에서
+     0.16~0.22 확인).
+  3. (데이터 오염) 구 수집본 1000개 중 172개 에피소드에 낙상 구간이 통째로
+     기록됨(root z 최저 -4098 m — inference config에 termination이 없어
+     done 필터가 무력) → normalizer가 높이 정보를 사실상 소거
+     → **해결**: 수집기 자체 낙상 감지(`--fall-z 0.5` × `--fall-hold 10`,
+     비유한값 감지 포함)로 해당 에피소드 폐기.
+  4. (채널 오배선) 애초에 action 6채널에 오른쪽 무릎/발목이 섞여 있었음
+     → **해결**: hip 6개([0,1,2,5,6,7])로 재수집·재학습.
 
 ### 4. 영상/플롯의 동기
 `simulator.step()`이 물리 스텝 직후 `render()`를 1회 호출 → **mp4 프레임 k =
@@ -166,23 +326,98 @@ rollout 스텝 k** 가 보장됩니다. `sim_with_torque.mp4`의 파란 커서�
 (뷰어 창)가 필요 — headless 녹화가 필요해지면 `ViewerGL(headless=True)`
 오프스크린 모드를 추가할 것.
 
-### 6. walk 모션 파일
+### 6. 고스트(반투명) 렌더링 구현 — 깨지면 여기를 볼 것
+Newton의 메시 셰이더(PBR)는 인스턴스별 alpha를 지원하지 않아 "반투명 메시"는
+불가능. 대신 `GhostSkeletonRenderer`(`compare_maniflow_control_newton.py`)가
+Agent A를 **반투명 라인 스켈레톤**으로 그림:
+- `viewer.set_visible_worlds([MANIFLOW_ENV])`로 world 0(A)의 메시 렌더링을 끔
+- 매 프레임 `_render_hook`에서 kinematic tree의 parent→child 본을
+  `viewer.log_lines()`로 그림 (라인 파이프라인만 블렌딩을 지원)
+- `RendererGL._wireframe_shader.update_frame`을 몽키패치해 `alpha` 유니폼을
+  강제로 덮어써서 반투명 적용 (newton 내부 구조가 바뀌면 `_patch_line_alpha`의
+  `AttributeError` 폴백으로 불투명 라인이 되며 경고 로그 출력)
+- `viewer.set_world_offsets((0,0,0))`로 Newton이 world별로 자동으로 벌려 그리는
+  간격을 0으로 고정 (두 world가 실제 물리 좌표에서 겹쳐야 하므로)
+
+### 7. walk 모션 파일
 `data/motion_for_trackers/skeleton_torque_suit_walk.pt`(walk 1클립)가 이 머신에
 없어서 `extract_walk_motion.py`로 학습용 멀티모션 파일
 (`skeleton_torque_suit_motions_11+koo_4.pt`)의 walk 클립(idx 10)에서 추출·복원해
 두었습니다. play/record/collect 스크립트 전부가 이 파일을 참조합니다.
 
-### 7. 관련 파일 맵 (이번 통합에서 만든/수정한 파일 포함 — 커밋 시 참고)
+### 8. 관련 파일 맵 (ManiFlow 통합 전체)
+
+`git status --short`로 최신 미커밋 목록을 직접 확인하세요 — 아래 "상태"는 이
+문서 작성 시점 기준입니다.
 
 | 위치 | 상태 | 내용 |
 |------|------|------|
-| `protomotions/maniflow/` | 신규 | 통합 레이어 (loader + ManiFlowTorqueEstimator + README) |
-| `protomotions/simulator/newton/simulator.py` | 수정 | qfrc_actuator readback(GT 토크) + `_write_viewport_to_file` 프레임 캡처 구현 |
-| `tasks/.../infer_maniflow_newton.{py,sh}` | 신규 | 이 문서의 메인 스크립트 |
-| `tasks/.../extract_walk_motion.py` | 신규 | walk 모션 클립 추출 유틸 |
-| `tasks/.../MANIFLOW_INFERENCE.md` | 신규 | 이 문서 |
-| `data/motion_for_trackers/skeleton_torque_suit_walk.pt` | 복원 | walk 1클립 모션 (extract_walk_motion.py 산출물) |
-| `.gitignore` | 수정 | `tasks/*/maniflow_infer_results/` 제외 추가 |
-| `tasks/.../collect_walk_zarr.py` | 기존 | (IsaacLab) 학습 데이터 수집기 — obs 레이아웃의 원본 정의 |
-| `~/Projects/ManiFlow_Policy/scripts/eval_walking_lowdim.py` | 기존 | 오프라인 eval (val split 전체) |
-| `~/Projects/ManiFlow_Policy/.../lowdim_obs_encoder.py` | 수정 | create_mlp 인라인 (pytorch3d 의존 제거, ManiFlow repo 쪽) |
+| `protomotions/maniflow/channels.py` | 신규, uncommitted | **채널 계약 단일 소스** — `HIP_DOF_NAMES`, `hip_dof_indices()`, `resolve_action_dofs()` |
+| `protomotions/maniflow/hybrid_control.py` | 신규, uncommitted | `JointTorqueOverride` — per-env/per-DOF 토크 오버라이드 |
+| `protomotions/maniflow/{README,__init__,torque_estimator}.py` | 수정, uncommitted | channels 등록 + hip 채널 계약으로 문서/주석 정정 |
+| `tasks/.../infer_maniflow_newton.py` | 수정, uncommitted | 수동(passive) 비교 — `--action-dofs hips/first6` (기본 hips) |
+| `tasks/.../compare_maniflow_control_newton.{py,sh}` | 신규, uncommitted | 폐루프 제어 A/B 비교 — `--action-dofs hips/first6` (기본 hips) |
+| `tasks/.../collect_walk_zarr.{py,sh}` | 수정, uncommitted | 수집기 — hip 6채널([0,1,2,5,6,7]) 기록, `--simulator newton` 기본, 자체 낙상 필터, zarr v2 포맷 고정, attrs 자기술 |
+| `tasks/.../MANIFLOW_INFERENCE.md` | 수정, uncommitted | 이 문서 |
+| `.gitignore` | 수정, uncommitted | `tasks/*/maniflow_{infer,control}_results/` 제외 |
+| `protomotions/simulator/newton/simulator.py` | 이전 세션에 커밋됨 | qfrc_actuator readback(GT 토크) + `_write_viewport_to_file` 프레임 캡처 구현 |
+| `tasks/.../infer_maniflow_newton.sh` | 이전 세션에 커밋됨 | 수동(passive) 비교 스크립트 실행 wrapper |
+| `tasks/.../extract_walk_motion.py` | 이전 세션에 커밋됨 | walk 모션 클립 추출 유틸 |
+| `data/motion_for_trackers/skeleton_torque_suit_walk.pt` | 이전 세션에 커밋됨 | walk 1클립 모션 (extract_walk_motion.py 산출물) |
+| `~/ManiFlow_Policy/scripts/process_data_walking.py` | ManiFlow_Policy repo, 수정 | 채널 계약 검증(legacy 거부, `--allow_legacy_channels`), attrs 전파, 기본 출력 `walking-flat-newton-hips.zarr` |
+| `~/ManiFlow_Policy/scripts/eval_walking_lowdim.py` | ManiFlow_Policy repo, 수정 | 채널 라벨을 데이터셋 attrs에서 파생 (hip_j 하드코딩 제거) |
+| `~/ManiFlow_Policy/scripts/train_walking.sh` | ManiFlow_Policy repo, 수정 | zarr_path 6번째 인자화, 기본값 신규 hips 데이터셋 |
+| `~/ManiFlow_Policy/.../config/walking_task/walking_flat.yaml` | ManiFlow_Policy repo, 수정 | 기본 zarr_path 신규 데이터셋 + 채널 주석 |
+| `~/ManiFlow_Policy/.../dataset/walking_dataset.py` | ManiFlow_Policy repo, 수정 | 로드 시 action 채널 계약 출력/legacy 경고 |
+| `~/ManiFlow_Policy/.../lowdim_obs_encoder.py` | ManiFlow_Policy repo, 이전 세션에 수정 | create_mlp 인라인 (pytorch3d 의존 제거) |
+
+---
+
+## 재수집·재학습 파이프라인 (2026-07-09 — hip 6채널)
+
+위 "다음 단계" 후보였던 항목들이 실행되었습니다:
+
+1. **재수집 (완료)**: Newton에서 hip 6채널로 재수집.
+   ```bash
+   bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh \
+       tasks/mimic_suit_active_cable_walk_23dof/output_newton_flat/score_based.ckpt flat 64 2000
+   # → zarr_data/flat/flat-newton-<ts>.zarr (attrs: action_dof_indices=[0,1,2,5,6,7])
+   ```
+2. **변환 (완료)**: ManiFlow flat 레이아웃으로.
+   ```bash
+   cd ~/Projects/ManiFlow_Policy
+   python scripts/process_data_walking.py \
+       --zarr_paths <ProtoMotions>/tasks/.../zarr_data/flat/flat-newton-<ts>.zarr \
+       --save_path ManiFlow/data/walking-flat-newton-hips.zarr
+   ```
+3. **재학습 (완료, 2026-07-09~10)**: maniflow conda env에서.
+   ```bash
+   conda activate maniflow && cd ~/Projects/ManiFlow_Policy
+   bash scripts/train_walking.sh maniflow_lowdim_policy_walking walking_flat \
+       newton-hips-run02 42 0
+   # zarr_path 기본값이 walking-flat-newton-hips.zarr (6번째 인자로 변경 가능)
+   ```
+   200 epochs ≈ 11시간 @ RTX 5090, best topk epoch=0190-val_loss=0.000716.
+4. **평가 (완료)**:
+   - 오프라인 val split: R²≈1.000 / corr 1.000 / MAE 0.16–0.68 N·m.
+   - Newton 폐루프 passive (`infer_maniflow_newton.sh --maniflow-run-dir
+     <run02>`): R²≥0.998 / corr 1.000 / MAE ≤0.8 N·m — legacy corr≈0.1
+     완전 해소 (`maniflow_infer_results/2026-07-10_08-14-01`).
+   - 폐루프 제어 A/B (`compare_maniflow_control_newton.sh`): 예측 토크
+     피드포워드 인가만으로는 여전히 B 낙상 — 피드백 부재로 인한 오차 누적
+     (`maniflow_control_results/2026-07-10_08-15-01`). 제어 활용은 아래
+     탐색 옵션 참고.
+
+남은 탐색 옵션 (제어 활용 — 예측은 완벽하나 피드포워드 인가만으론 낙상):
+- **잔여 PD 결합**: hip 채널에 ManiFlow 토크 + 낮은 게인의 PD를 병행(안정화
+  피드백 확보). `JointTorqueOverride`의 게인 zero-out을 부분 스케일로 바꾸는
+  확장 필요.
+- **`--torque-scale` 블렌딩**: 0~1 스케일로 ManiFlow 기여도를 낮춰 PD와
+  섞으며(단, 현재 구현은 해당 채널 PD를 완전히 끄므로 스케일<1은 무동력에
+  가까움) 어느 정도가 그럴듯한지 탐색.
+- **`--predict-mode every_step`**: 매 스텝 재예측으로 최신 상태 반영(드리프트
+  누적 완화 — 근본 해결은 아님).
+- **estimator-in-the-loop 학습**(DAgger류): 자기 예측으로 굴린 상태 분포를
+  데이터에 섞어 재학습.
+- **obs 정제**(선택): 절대 x,y 제거 등 — Newton 재수집으로 도메인 갭이
+  해소되어 우선순위 낮음.

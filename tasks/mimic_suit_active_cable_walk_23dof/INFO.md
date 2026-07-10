@@ -89,9 +89,12 @@ tasks/mimic_suit_active_cable_walk_23dof/
 │   └── {terrain_tag}/
 │       └── {terrain_tag}-{timestamp}.zarr
 │
-├── infer_maniflow_newton.{py,sh}          ← ManiFlow hip-torque 추정기 폐루프 inference
-├── MANIFLOW_INFERENCE.md                  ←   실행법·주의사항 문서 (GUI/녹화 포함)
-└── maniflow_infer_results/                ←   inference 결과 (gitignore)
+├── infer_maniflow_newton.{py,sh}          ← ManiFlow 추정기 관찰(passive) inference — 제어에 영향 없음
+├── compare_maniflow_control_newton.{py,sh}←   ManiFlow 토크를 실제 제어에 사용하는 A/B 비교
+│                                              (Agent A=순수 RL 고스트, Agent B=ManiFlow+RL 메시)
+├── MANIFLOW_INFERENCE.md                  ←   두 스크립트 실행법·주의사항 문서 (GUI/녹화 포함)
+├── maniflow_infer_results/                ←   passive inference 결과 (gitignore)
+└── maniflow_control_results/              ←   A/B 비교 결과 (gitignore)
 ```
 
 각 `output_*/하위폴더/`에는 `config.yaml`이 있어 학습 파라미터를 기록.  
@@ -140,23 +143,27 @@ bash tasks/mimic_suit_active_cable_walk_23dof/train_isaaclab_mixed.sh -in mixed_
 
 ---
 
-## zarr 수집
+## zarr 수집 (ManiFlow hip-torque 학습 데이터)
+
+기본 시뮬레이터는 **Newton**(RL ckpt·추론 도메인과 일치), `hip_torque` 필드는
+순수 hip 6 DOF(공통 [0,1,2,5,6,7])를 기록. 비평지는 `SIMULATOR=isaaclab`.
 
 ```bash
-cd /home/user/ProtoMotions
+# 기본 (Newton, flat, 10 envs, 1000 에피소드)
+bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh
 
-# 기본 (10 envs)
-bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh <checkpoint> <terrain_tag>
-
-# 1024 envs (대량 수집)
+# Newton flat 대량 수집 (64 envs, 2000 에피소드 ≈ 13분 @ RTX 5090)
 bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh \
-    tasks/mimic_suit_active_cable_walk_23dof/output_isaaclab_flat/score_based.ckpt flat 1024
+    tasks/mimic_suit_active_cable_walk_23dof/output_newton_flat/score_based.ckpt flat 64 2000
 
-bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh \
-    tasks/mimic_suit_active_cable_walk_23dof/output_isaaclab_discrete/discrete05/score_based.ckpt discrete05 1024
+# 비평지 (IsaacLab 전용)
+SIMULATOR=isaaclab bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr.sh \
+    tasks/mimic_suit_active_cable_walk_23dof/output_isaaclab_discrete/discrete05/score_based.ckpt discrete05 64
 ```
 
-출력: `zarr_data/{terrain_tag}/{terrain_tag}-{timestamp}.zarr`
+출력: `zarr_data/{terrain_tag}/{terrain_tag}-{simulator}-{timestamp}.zarr`
+(⚠️ `flat-2026-06-26-*` 등 구 수집본은 legacy — action 채널이 공통 DOF 0-5로
+잘못돼 있고 낙상 오염 있음. attrs `action_dof_indices` 유무로 구분)
 
 ---
 
