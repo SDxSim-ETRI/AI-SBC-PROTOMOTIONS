@@ -13,8 +13,10 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
 
 | 파일 | 역할 |
 |------|------|
+| `channels.py` | action 채널 계약의 단일 소스 — `HIP_DOF_NAMES`, `hip_dof_indices()`(이름 기반 공통 인덱스 파생), `resolve_action_dofs()`(`hips`/`first6` 해석). 수집·학습·inference가 모두 이걸 사용 |
 | `loader.py` | `maniflow` 패키지 위치 해석 + 학습 workspace 체크포인트를 inference 전용 정책으로 로드 (workspace/dataset/wandb 등 학습 의존성 우회) |
 | `torque_estimator.py` | `ManiFlowTorqueEstimator` — `RobotState`(common ordering) → 관측 벡터 구성, obs history 관리, receding-horizon 토크 예측 |
+| `hybrid_control.py` | `JointTorqueOverride` — Newton BUILT_IN_PD 위에서 특정 env의 특정 DOF만 직접 토크 구동 (per-world PD 게인 zero-out + `control.joint_f`→`qfrc_applied` 주입). ManiFlow 예측 토크를 실제 제어에 사용할 때 씀 |
 
 ## maniflow 패키지 해석 순서 (`ensure_maniflow_importable`)
 
@@ -30,8 +32,22 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
 
 ```
 obs(88) = dof_pos(27) + dof_vel(27) + root_pos(3) + root_vel(3) + contacts(28)
-action(6) = hip torque (DOF 0-5, common ordering)
+action(6) = 순수 hip 6개 DOF 적용 토크 (공통 DOF [0,1,2,5,6,7])
+          = [hip_flexion_r, hip_adduction_r, hip_rotation_r,
+             hip_flexion_l, hip_adduction_l, hip_rotation_l]
 ```
+
+채널 인덱스는 반드시 `channels.hip_dof_indices(dof_names)`로 이름 기반
+파생하세요 — 공통 DOF 순서는 kinematic tree 순서(오른다리 체인 → 왼다리
+체인 → …)라서 앞 6개를 자르면(`[:6]`) knee_angle_r(3)/ankle_angle_r(4)가
+섞입니다.
+
+⚠️ **Legacy 모델 주의 (2026-07-09 이전 수집·학습)**: 초기 수집 스크립트가
+hips=0-5로 잘못 가정해, 그때 학습된 모델(`walking_flat-...-run01_seed42`)은
+공통 DOF 0-5 = **오른다리 전체 + 왼쪽 hip flexion**을 예측합니다. 그런 모델과
+비교할 때만 task 스크립트의 `--action-dofs first6`을 사용하세요. 신규
+수집본은 zarr attrs의 `action_dof_names`/`action_dof_indices`로 채널 계약을
+자기술(self-describe)합니다.
 
 - `root_pos`/`root_vel` = pelvis(body 0) 월드 위치/선속도
 - `contacts` = binary rigid-body contact flag (`get_binary_body_contacts`)
@@ -56,7 +72,34 @@ for t in range(T):
         torque_chunk = estimator.predict()  # (N, n_action_steps, 6), raw N·m
 ```
 
-엔트리 포인트: `tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.{py,sh}`
+엔트리 포인트:
+- `tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.{py,sh}` —
+  수동(passive) 평가: RL이 보행하고 ManiFlow는 예측만, 적용 토크와 비교
+- `tasks/mimic_suit_active_cable_walk_23dof/compare_maniflow_control_newton.{py,sh}` —
+  폐루프 제어 A/B: Agent A(순수 RL, 고스트)와 Agent B(estimator 채널을
+  ManiFlow 토크로 구동, 나머지는 RL+built-in PD)를 같은 씬에 겹쳐 비교
+
+## 폐루프 제어 (JointTorqueOverride)
+
+```python
+from protomotions.maniflow import JointTorqueOverride, hip_dof_indices
+
+hips = hip_dof_indices(env.robot_config.kinematic_info.dof_names)  # [0,1,2,5,6,7]
+override = JointTorqueOverride(env.simulator, env_ids=[1],
+                               common_dof_indices=hips)
+override.engage()                      # env 1의 hip 채널 PD 게인 0 + notify
+...
+tau = estimator.predict()[1, k]        # (6,) raw N·m
+override.set_torques(tau[None])        # effort limit 클램프 후 qfrc 주입
+```
+
+동작 원리: MuJoCo Warp는 actuator 게인을 world(env)별로 저장하므로
+`joint_target_ke/kd`를 해당 env만 0으로 만들고
+`notify_model_changed(JOINT_DOF_PROPERTIES)`를 호출하면 그 env의 해당 DOF만
+implicit PD가 꺼집니다. 토크는 `ArticulationView.set_dof_forces`(→
+`control.joint_f` → `qfrc_applied`)로 주입하며, 이는 actuator 힘과 독립적으로
+매 substep 가산됩니다(decimation 구간 동안 상수 유지 = 표준 토크 제어).
+in-place scatter라 CUDA graph와도 안전하게 공존합니다.
 
 ## GUI 확인 / 동영상 저장
 

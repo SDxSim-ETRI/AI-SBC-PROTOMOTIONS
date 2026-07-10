@@ -23,16 +23,28 @@ ManiFlow model code into this repo later only requires changes inside this
 package.
 
 Modules:
+    channels         — estimator action-channel contract (hip DOF names and
+                       name-based COMMON-index derivation). Single source of
+                       truth shared by collection, training, and inference.
     loader           — resolve/import the ``maniflow`` package and load
                        workspace checkpoints into inference-ready policies.
     torque_estimator — closed-loop wrapper turning ProtoMotions
                        ``RobotState`` into ManiFlow observations and hip
                        torque predictions.
+    hybrid_control   — per-env/per-DOF torque override on top of Newton
+                       BUILT_IN_PD, for applying ManiFlow torques to a
+                       subset of joints while the rest stay PD-driven.
 """
 
+from protomotions.maniflow.channels import (  # noqa: F401
+    HIP_DOF_NAMES,
+    hip_dof_indices,
+    resolve_action_dofs,
+)
 from protomotions.maniflow.loader import (  # noqa: F401
     discover_best_checkpoint,
     ensure_maniflow_importable,
     load_maniflow_policy,
 )
 from protomotions.maniflow.torque_estimator import ManiFlowTorqueEstimator  # noqa: F401
+from protomotions.maniflow.hybrid_control import JointTorqueOverride  # noqa: F401

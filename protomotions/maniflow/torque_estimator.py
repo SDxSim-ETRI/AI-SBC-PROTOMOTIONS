@@ -29,6 +29,18 @@ velocity and contacts are binary rigid-body contact flags. Because
 ``Simulator.get_robot_state()`` already converts every field to COMMON
 ordering, the same estimator works unchanged across Newton / IsaacLab /
 IsaacGym backends.
+
+NOTE on action channels: the estimator itself only returns the policy's raw
+6-dim action — which COMMON DOFs those channels map to is a training-data
+contract, resolved by the caller via ``protomotions.maniflow.channels``.
+Current contract (``hips``): the six hip DOFs, COMMON [0, 1, 2, 5, 6, 7] =
+[hip_flexion_r, hip_adduction_r, hip_rotation_r, hip_flexion_l,
+hip_adduction_l, hip_rotation_l]. Legacy checkpoints trained before
+2026-07-09 used COMMON DOFs 0-5 instead (``first6`` — right leg + left hip
+flexion, a collection-script bug); pass ``--action-dofs first6`` in the
+task scripts to compare against those. Never hard-code channel names —
+derive them from ``robot_config.kinematic_info.dof_names`` via
+``hip_dof_indices()`` / ``resolve_action_dofs()``.
 """
 
 from typing import Optional
