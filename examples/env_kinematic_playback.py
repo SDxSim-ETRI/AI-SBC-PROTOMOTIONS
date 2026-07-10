@@ -95,6 +95,30 @@ def create_parser():
     parser.add_argument(
         "--seed", type=int, default=0, help="Random seed for reproducibility"
     )
+    parser.add_argument(
+        "--overrides",
+        nargs="*",
+        default=[],
+        help="Config overrides in key=value format (e.g. robot.asset.asset_file_name=mjcf/...)",
+    )
+    parser.add_argument(
+        "--auto-record",
+        action="store_true",
+        default=False,
+        help="Automatically start recording and exit after --record-steps steps",
+    )
+    parser.add_argument(
+        "--record-steps",
+        type=int,
+        default=5600,
+        help="Number of steps to record when --auto-record is set",
+    )
+    parser.add_argument(
+        "--cycle-seconds",
+        type=float,
+        default=20.0,
+        help="Seconds per motion clip when cycling through multiple motions",
+    )
 
     return parser
 
@@ -135,7 +159,10 @@ def main():
     experiment_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(experiment_module)
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
+
+    # Apply overrides to configs after building
+    _overrides = {kv.split("=")[0]: kv.split("=", 1)[1] for kv in (args.overrides or []) if "=" in kv}
 
     print("\n=== Environment Kinematic Playback Configuration ===")
     print(f"Experiment path: {args.experiment_path}")
@@ -193,6 +220,17 @@ def main():
 
     robot_config: RobotConfig = configs["robot"]
     simulator_config: SimulatorConfig = configs["simulator"]
+
+    # Apply CLI overrides (e.g. robot.asset.asset_file_name=mjcf/31dof/skeleton_torque_mesh.xml)
+    if _overrides:
+        from protomotions.utils.config_utils import apply_config_overrides
+        apply_config_overrides(
+            _overrides,
+            env_config=configs.get("env"),
+            simulator_config=simulator_config,
+            robot_config=robot_config,
+        )
+        print(f"Applied overrides: {_overrides}")
     terrain_config = configs["terrain"]
     scene_lib_config = configs["scene_lib"]
     motion_lib_config = configs["motion_lib"]
@@ -310,39 +348,218 @@ def main():
 
     actions = torch.zeros(env.num_envs, robot_config.number_of_actions, device=device)
 
-    try:
-        step_count = 0
-        while env.is_simulation_running():
-            obs, rewards, dones, terminated, infos = env.step(actions)
+    if args.auto_record:
+        import os, time as _time
+        simulator = env.simulator
+        num_motions = env.motion_lib.num_motions()
+        policy_fps = round(1.0 / simulator.dt) if hasattr(simulator, "dt") and simulator.dt > 0 else 20
+        cycle_steps = int(args.cycle_seconds * policy_fps) if args.cycle_seconds > 0 and num_motions > 1 else 0
+        cursor = [0]
+        steps_in_cycle = [0]
 
-            step_count += 1
+        def _get_motion_name(mid):
+            base = os.path.splitext(os.path.basename(env.motion_lib.motion_files[mid]))[0]
+            names = {"02-constspeed_reduced_humanoid": "constspeed", "walk": "walk (ETRI)", "walk_koo": "walk_koo (김범호)"}
+            return names.get(base, base)
 
-            # Print information every 100 steps
-            if step_count % 100 == 0 and env.motion_manager is not None:
-                motion_times = env.motion_manager.motion_times
-                motion_ids = env.motion_manager.motion_ids
+        def _reset_to_motion(mid):
+            env.motion_manager.motion_ids[:] = mid
+            env.motion_manager.motion_times[:] = 0.0
+            env_ids = torch.arange(env.num_envs, dtype=torch.long, device=device)
+            env.reset(env_ids)
 
-                print(f"\nStep {step_count}:")
-                print(
-                    f"  Motion IDs: {motion_ids[:4].tolist()}..."
-                    if env.num_envs > 4
-                    else f"  Motion IDs: {motion_ids.tolist()}"
-                )
-                print(
-                    f"  Motion times: {motion_times[:4].tolist()}..."
-                    if env.num_envs > 4
-                    else f"  Motion times: {motion_times.tolist()}"
-                )
-                print(f"  Rewards: {rewards.mean().item():.4f} (mean)")
-                print(f"  Dones: {dones.sum().item()} environments reset")
+        print(f"\nAuto-record: {args.record_steps} steps, {num_motions} motions, cycle={args.cycle_seconds:.0f}s ({cycle_steps} steps)")
+        for i in range(num_motions):
+            print(f"  [{i+1}/{num_motions}] {_get_motion_name(i)}")
 
-    except KeyboardInterrupt:
-        print("\n\nSimulation stopped by user")
-    finally:
-        env.close()
+        # inference_agent.py와 동일한 패턴: ImGui 라이브 오버레이 + 녹화 후 PIL 자막 처리
+        _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        _SUBTITLE_FONT_SIZE = 32
+
+        def _overlay_subtitles_on_frames(frame_dir, labels):
+            import glob
+            from PIL import Image, ImageDraw, ImageFont
+            try:
+                font = ImageFont.truetype(_FONT_PATH, _SUBTITLE_FONT_SIZE)
+            except OSError:
+                font = ImageFont.load_default()
+            frames = sorted(glob.glob(os.path.join(frame_dir, "*.png")))
+            print(f"\nOverlaying subtitles on {len(frames)} frames...")
+            for i, fpath in enumerate(frames):
+                label = labels[i] if i < len(labels) else labels[-1]
+                try:
+                    img = Image.open(fpath).convert("RGB")
+                except Exception:
+                    continue
+                draw = ImageDraw.Draw(img)
+                w, h = img.size
+                bbox = draw.textbbox((0, 0), label, font=font)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                x, y, pad = (w - tw) // 2, 14, 8
+                bg = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                bg_draw = ImageDraw.Draw(bg)
+                bg_draw.rounded_rectangle([x-pad, y-pad, x+tw+pad, y+th+pad], radius=6, fill=(0, 0, 0, 160))
+                img = Image.alpha_composite(img.convert("RGBA"), bg).convert("RGB")
+                draw = ImageDraw.Draw(img)
+                draw.text((x, y), label, font=font, fill=(255, 255, 255))
+                img.save(fpath)
+            print("Subtitle overlay complete.")
+
+        def _register_motion_title_ui(sim, state):
+            def _motion_title_ui(imgui):
+                title = state.get("current_title", "")
+                if not title:
+                    return
+                io = imgui.get_io()
+                dw = io.display_size[0]
+                imgui.set_next_window_pos(imgui.ImVec2(dw / 2, 10), pivot=imgui.ImVec2(0.5, 0.0))
+                imgui.set_next_window_bg_alpha(0.6)
+                flags = (imgui.WindowFlags_.no_decoration.value | imgui.WindowFlags_.always_auto_resize.value |
+                         imgui.WindowFlags_.no_saved_settings.value | imgui.WindowFlags_.no_focus_on_appearing.value |
+                         imgui.WindowFlags_.no_nav.value | imgui.WindowFlags_.no_move.value)
+                if imgui.begin("##motion_title", flags=flags):
+                    imgui.push_font(None, 26.0)
+                    imgui.text(title)
+                    imgui.pop_font()
+                imgui.end()
+            if hasattr(sim, "viewer") and sim.viewer is not None and hasattr(sim.viewer, "register_ui_callback"):
+                sim.viewer.register_ui_callback(_motion_title_ui, position="free")
+
+        _auto_record_state = {"current_title": ""}
+        _register_motion_title_ui(simulator, _auto_record_state)
+
+        _reset_to_motion(0)
+        simulator._toggle_video_record()
+        print("Recording started.")
+
+        motion_labels: list = []
+
+        try:
+            for step in range(args.record_steps):
+                if cycle_steps > 0 and steps_in_cycle[0] >= cycle_steps:
+                    cursor[0] = (cursor[0] + 1) % num_motions
+                    steps_in_cycle[0] = 0
+                    _reset_to_motion(cursor[0])
+                    print(f"\n→ [{cursor[0]+1}/{num_motions}] {_get_motion_name(cursor[0])}")
+
+                title = f"[{cursor[0]+1}/{num_motions}] {_get_motion_name(cursor[0])}"
+                _auto_record_state["current_title"] = title
+                try:
+                    simulator.set_window_title(title)
+                except Exception:
+                    pass
+
+                obs, rewards, dones, terminated, infos = env.step(actions)
+                steps_in_cycle[0] += 1
+                motion_labels.append(title)
+
+                name = _get_motion_name(cursor[0])
+                dur = env.motion_lib.get_motion_length(cursor[0]).item() if hasattr(env.motion_lib, "get_motion_length") else args.cycle_seconds
+                t = steps_in_cycle[0] / policy_fps
+                print(f"\r[{step+1:5d}/{args.record_steps}] motion: {name:<30s} {t:5.2f}s / {dur:.2f}s ({t/dur*100:5.1f}%)", end="", flush=True)
+        except KeyboardInterrupt:
+            print("\nRecording interrupted.")
+        finally:
+            # PIL 자막 오버레이 → Newton이 MP4 컴파일하기 전에 PNG에 굽기
+            if motion_labels and hasattr(simulator, "_curr_user_recording_name"):
+                frames_dir = os.path.join(simulator._curr_user_recording_name, "_frames")
+                _overlay_subtitles_on_frames(frames_dir, motion_labels)
+            simulator._toggle_video_record()
+            print("\nRecording saved.")
+            env.simulator.render()
+            env.close()
+    else:
+        import os as _os
+
+        def _motion_name_from_idx(idx):
+            files = env.motion_lib.motion_files if hasattr(env.motion_lib, "motion_files") else []
+            if idx < len(files):
+                return _os.path.splitext(_os.path.basename(files[idx]))[0]
+            return f"motion_{idx}"
+
+        _ui_state = {"title": ""}
+
+        def _motion_title_ui(imgui):
+            title = _ui_state.get("title", "")
+            if not title:
+                return
+            io = imgui.get_io()
+            dw = io.display_size[0]
+            imgui.set_next_window_pos(imgui.ImVec2(dw / 2, 10), pivot=imgui.ImVec2(0.5, 0.0))
+            imgui.set_next_window_bg_alpha(0.6)
+            flags = (
+                imgui.WindowFlags_.no_decoration.value
+                | imgui.WindowFlags_.always_auto_resize.value
+                | imgui.WindowFlags_.no_saved_settings.value
+                | imgui.WindowFlags_.no_focus_on_appearing.value
+                | imgui.WindowFlags_.no_nav.value
+                | imgui.WindowFlags_.no_move.value
+            )
+            if imgui.begin("##motion_title", flags=flags):
+                imgui.push_font(None, 26.0)
+                imgui.text(title)
+                imgui.pop_font()
+            imgui.end()
+
+        sim = env.simulator
+        if hasattr(sim, "viewer") and sim.viewer is not None and hasattr(sim.viewer, "register_ui_callback"):
+            sim.viewer.register_ui_callback(_motion_title_ui, position="free")
+
+        # Sequential cycling: cycle through motions in order when --cycle-seconds is set
+        num_motions = env.motion_lib.num_motions()
+        policy_fps = round(1.0 / sim.dt) if hasattr(sim, "dt") and sim.dt > 0 else 20
+        cycle_steps = int(args.cycle_seconds * policy_fps) if args.cycle_seconds > 0 else 0
+        seq_cursor = 0
+        steps_in_cycle = 0
+
+        def _reset_to_motion(mid):
+            env.motion_manager.motion_ids[:] = mid
+            env.motion_manager.motion_times[:] = 0.0
+            env_ids = torch.arange(env.num_envs, dtype=torch.long, device=device)
+            env.reset(env_ids)
+
+        if cycle_steps > 0:
+            # Patch sample_motions so internal resets don't pick a random motion
+            _original_sample = env.motion_manager.sample_motions
+
+            def _sequential_sample(env_ids):
+                env.motion_manager.motion_ids[env_ids] = seq_cursor
+
+            env.motion_manager.sample_motions = _sequential_sample
+            _reset_to_motion(0)
+            print(f"Sequential mode: {num_motions} motions, {cycle_steps} steps each ({args.cycle_seconds:.0f}s)")
+
+        try:
+            step_count = 0
+            while env.is_simulation_running():
+                # Sequential cycling: advance motion when cycle_steps reached
+                if cycle_steps > 0 and steps_in_cycle >= cycle_steps:
+                    seq_cursor = (seq_cursor + 1) % num_motions
+                    steps_in_cycle = 0
+                    _reset_to_motion(seq_cursor)
+                    print(f"\n→ [{seq_cursor+1}/{num_motions}] {_motion_name_from_idx(seq_cursor)}")
+
+                obs, rewards, dones, terminated, infos = env.step(actions)
+                step_count += 1
+                steps_in_cycle += 1
+
+                if env.motion_manager is not None:
+                    mid = seq_cursor if cycle_steps > 0 else int(env.motion_manager.motion_ids[0].item())
+                    num = num_motions
+                    name = _motion_name_from_idx(mid)
+                    title = f"[{mid+1}/{num}] {name}"
+                    _ui_state["title"] = title
+                    try:
+                        sim.set_window_title(title)
+                    except Exception:
+                        pass
+        except KeyboardInterrupt:
+            print("\n\nSimulation stopped by user")
+        finally:
+            env.close()
 
     print("\n=== Playback Complete ===")
-    print(f"Total steps: {step_count}")
+    print(f"Total steps: {step_count if not args.auto_record else args.record_steps}")
     print("Environment closed successfully")
 
 

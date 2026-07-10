@@ -39,16 +39,16 @@ parser.add_argument(
 parser.add_argument(
     "--simulator",
     type=str,
-    choices=["isaacgym", "isaaclab", "newton"],
+    choices=["isaacgym", "isaaclab", "newton", "mujoco"],
     default="isaacgym",
-    help="Simulator to use (isaacgym, isaaclab, newton)",
+    help="Simulator to use (isaacgym, isaaclab, newton, mujoco)",
 )
 parser.add_argument(
     "--robot",
     type=str,
-    choices=["g1", "rigv1", "h1_2", "smpl", "soma23"],
+    choices=["g1", "rigv1", "h1_2", "smpl", "soma23", "skeleton_torque", "skeleton_torque_suit", "skeleton_torque_suit_muscle"],
     default="g1",
-    help="Robot to load (g1, rigv1, h1_2, smpl, or soma23)",
+    help="Robot to load (g1, rigv1, h1_2, smpl, soma23, skeleton_torque, skeleton_torque_suit, or skeleton_torque_suit_muscle)",
 )
 parser.add_argument("--headless", action="store_true", help="Run in headless mode")
 parser.add_argument(
@@ -62,6 +62,12 @@ parser.add_argument(
     type=float,
     default=1.0,
     help="Playback speed multiplier (1.0 = normal speed)",
+)
+parser.add_argument(
+    "--motion_idx",
+    type=int,
+    default=0,
+    help="Initial motion index to play from the packaged MotionLib",
 )
 parser.add_argument(
     "--smoothness_threshold",
@@ -94,7 +100,59 @@ parser.add_argument(
     default=[0.0, 0.0],
     help="Target x,y position to move all motions to (default: 0.0 0.0)",
 )
+parser.add_argument(
+    "--scene-file",
+    type=str,
+    default=None,
+    help="Path to a SceneLib .pt file to overlay in every environment (e.g. data/scenes/suit_sit_stand_chair.pt)",
+)
+parser.add_argument(
+    "--no-markers",
+    action="store_true",
+    help="Disable smoothness/contact overlay markers (removes floating boxes in Newton viewer)",
+)
+parser.add_argument(
+    "--use-skin",
+    action="store_true",
+    help="skeleton_torque/skeleton_torque_suit/skeleton_torque_suit_muscle: load bone mesh skin instead of primitive shapes",
+)
+parser.add_argument(
+    "--use-skin-cable",
+    action="store_true",
+    help="Load bone mesh skin AND show cable visualization (implies --use-skin, adds cable lines for suit robots)",
+)
+parser.add_argument(
+    "--camera-offset",
+    type=float,
+    nargs=3,
+    default=[0.0, -5.0, 1.0],
+    metavar=("X", "Y", "Z"),
+    help="Camera offset from character root for Newton viewer (default: 0 -5 1 = front view; use 0 5 1 for back view)",
+)
+parser.add_argument(
+    "--font-scale",
+    type=float,
+    default=1.5,
+    help="Newton viewer UI font scale (default: 1.5; use 1.0 for original size)",
+)
+parser.add_argument(
+    "--use-terrain",
+    action="store_true",
+    default=False,
+    help="Replace flat ground with slope terrain (smooth slope 100%%)",
+)
+parser.add_argument(
+    "--terrain-slope",
+    type=float,
+    default=0.04,
+    help="Bump amplitude in meters for --use-terrain rough ground (default: 0.04m)",
+)
 args = parser.parse_args()
+
+# Apply font scale before Newton/Warp initializes the viewer
+import os as _os
+if args.font_scale != 1.0:
+    _os.environ["NEWTON_FONT_SCALE"] = str(args.font_scale)
 
 # Import simulator before torch - isaacgym/isaaclab must be imported before torch
 # This also returns AppLauncher if using isaaclab, None otherwise
@@ -117,6 +175,7 @@ from protomotions.robot_configs.base import ControlType  # noqa: E402
 from protomotions.components.motion_lib import MotionLib  # noqa: E402
 from protomotions.components.scene_lib import (  # noqa: E402
     SceneLib,
+    BoxSceneObject,
     MeshSceneObject,
     Scene,
     ObjectOptions,
@@ -150,6 +209,15 @@ ROBOT_SPECS = {
         viz_bodies=[],
     ),
     "soma23": RobotSpec(
+        viz_bodies=[],
+    ),
+    "skeleton_torque": RobotSpec(
+        viz_bodies=[],
+    ),
+    "skeleton_torque_suit": RobotSpec(
+        viz_bodies=[],
+    ),
+    "skeleton_torque_suit_muscle": RobotSpec(
         viz_bodies=[],
     ),
 }
@@ -242,7 +310,9 @@ def purposeful_jerk_from_vel(vel, dt, eps=1e-8):
 
 
 def create_checkerboard_ground(
-    num_envs: int, device: torch.device, simulator_type: str = "isaacgym"
+    num_envs: int, device: torch.device, simulator_type: str = "isaacgym",
+    extra_scene_objects=None,
+    extra_scene_objects_per_env=None,
 ) -> SceneLib:
     """
     Create a visual checkerboard ground plane using a textured mesh.
@@ -286,7 +356,7 @@ def create_checkerboard_ground(
     # IMPORTANT: Each scene needs its own MeshSceneObject instance,
     # otherwise attributes get overwritten during _process_scene_objects()
     scenes = []
-    for _ in range(num_envs):
+    for env_idx in range(num_envs):
         ground_mesh = MeshSceneObject(
             object_path=asset_path,
             translation=(0.0, 0.0, -0.005),  # Slightly below zero
@@ -297,7 +367,13 @@ def create_checkerboard_ground(
                 texture_path=texture_path,  # Texture for IsaacGym (None for IsaacLab)
             ),
         )
-        scenes.append(Scene(objects=[ground_mesh], offset=(0.0, 0.0)))
+        import copy
+        objects = [ground_mesh]
+        if extra_scene_objects_per_env and env_idx < len(extra_scene_objects_per_env):
+            objects += extra_scene_objects_per_env[env_idx]
+        elif extra_scene_objects:
+            objects += [copy.deepcopy(obj) for obj in extra_scene_objects]
+        scenes.append(Scene(objects=objects, offset=(0.0, 0.0)))
 
     # Configure scene lib
     scene_lib_config = SceneLibConfig(
@@ -317,6 +393,24 @@ def create_checkerboard_ground(
     )
 
 
+def create_rough_heightfield_data(amplitude: float = 0.06, nrow: int = 120, ncol: int = 120):
+    """Create a rough gravel height array for Newton's native heightfield terrain.
+
+    Heights are shifted so the maximum is at z=0 (feet level) and the terrain
+    only dips below — the robot's feet appear to stand on top of the gravel.
+    """
+    import numpy as np
+    from scipy.ndimage import uniform_filter
+
+    np.random.seed(42)
+    coarse = np.random.uniform(-amplitude * 2.0, amplitude * 2.0, (nrow, ncol))
+    fine = np.random.uniform(-amplitude * 0.5, amplitude * 0.5, (nrow, ncol))
+    coarse = uniform_filter(coarse, size=8)
+    data = coarse + fine
+    data = data - data.max()  # shift so terrain maximum is exactly at z=0
+    return data.astype(np.float32)
+
+
 class MotionVisualizerSmoothness:
     def __init__(
         self,
@@ -330,6 +424,7 @@ class MotionVisualizerSmoothness:
         metric: str = "nj",
         use_data_vel: bool = False,
         window_sec: float = 2.0,
+        motion_idx: int = 0,
     ):
         self.motion_files = [Path(f) for f in motion_files]
         self.robot_name = robot_name
@@ -354,22 +449,32 @@ class MotionVisualizerSmoothness:
             for motion_file in self.motion_files
         ]
 
+        # Record GT (env 0) initial root XY BEFORE translation — used for scene object alignment.
+        # Each env's target_xy is args.origin_xy + [i, 0].  The chair's world position must equal
+        # target_xy_i + (chair_original_XY - gt_initial_root_XY) so that the relative offset
+        # between chair and character is preserved after translation.
+        self._gt_initial_root_xy = self.motion_libs[0].gts[0, 0, :2].clone()
+        self._motion_target_xy = []
+        for i in range(self.num_envs):
+            t = torch.tensor(args.origin_xy, device=self.device) + torch.tensor(
+                [1.0 * i, 0.0], device=self.device
+            )
+            self._motion_target_xy.append(t)
+
         # Move all motions to the specified origin
         for i, motion_lib in enumerate(self.motion_libs):
-            target_xy = torch.tensor(args.origin_xy, device=self.device)
-            target_xy = target_xy + torch.tensor([1.0 * i, 0.0], device=self.device)
+            target_xy = self._motion_target_xy[i]
             print(f"Translating motion library {i} to origin {target_xy}")
             motion_lib.translate_all_motions_to_origin(target_xy)
 
         # Motion playback state
-        self.current_motion_idx = 0
         self.current_frame = 0
         # Use the first motion lib to determine total motions and current motion length
         self.total_motions = self.motion_libs[0].num_motions()
-        self.current_motion_length = (
-            self.motion_libs[0]
-            .get_motion_num_frames(None)[self.current_motion_idx]
-            .item()
+        self.current_motion_idx = motion_idx % self.total_motions
+        self.current_motion_length = min(
+            ml.get_motion_num_frames(None)[self.current_motion_idx].item()
+            for ml in self.motion_libs
         )
 
         print(
@@ -379,9 +484,39 @@ class MotionVisualizerSmoothness:
         print(
             f"Current motion {self.current_motion_idx} has {self.current_motion_length} frames"
         )
+        print(
+            f"Current motion: {self.motion_libs[0].motion_files[self.current_motion_idx]}"
+        )
 
         # Load robot configuration using factory function
         self.robot_cfg = robot_config(robot_name)
+
+        # Switch to bone mesh / muscle asset when --use-skin is requested
+        _SKIN_ASSET = {
+            "skeleton_torque":             "mjcf/skeleton_torque_mesh.xml",
+            "skeleton_torque_suit":        "mjcf/skeleton_torque_suit_mesh.xml",
+            "skeleton_torque_suit_muscle": "mjcf/skeleton_torque_suit_muscle_mesh.xml",
+        }
+        # Robots whose mesh MJCF has only mesh geoms (no collision shapes):
+        # Newton cannot do stable FK with these, so use a separate MuJoCo viewer.
+        _NEWTON_SKIN_NEEDS_SEPARATE_VIEWER = {"skeleton_torque_suit_muscle"}
+
+        # --use-skin-cable implies --use-skin (skin asset + cable lines)
+        if args.use_skin_cable:
+            args.use_skin = True
+
+        self._skin_mjcf_path = None  # set below if Newton separate viewer needed
+        if args.use_skin and robot_name in _SKIN_ASSET:
+            mesh_file = _SKIN_ASSET[robot_name]
+            if simulator_type == "newton" and robot_name in _NEWTON_SKIN_NEEDS_SEPARATE_VIEWER:
+                # Mesh MJCF has no collision geoms — keep plain MJCF in Newton,
+                # open synchronized MuJoCo skin viewer instead.
+                asset_root = self.robot_cfg.asset.asset_root
+                self._skin_mjcf_path = str(Path(asset_root) / mesh_file)
+                print(f"{robot_name}: Newton skin → separate MuJoCo viewer ({mesh_file})")
+            else:
+                self.robot_cfg.asset.asset_file_name = mesh_file
+                print(f"{robot_name}: using bone mesh skin ({mesh_file})")
 
         # Store kinematic info for later use
         self.kinematic_info = self.robot_cfg.kinematic_info
@@ -395,6 +530,9 @@ class MotionVisualizerSmoothness:
             experiment_name="motion_viz_smoothness",
         )
 
+        # Disable projectiles for clean visualization (no floating boxes)
+        self.simulator_cfg.projectile.num_projectiles = 0
+
         # Override robot asset settings for motion visualization
         self.robot_cfg.asset.disable_gravity = True
         self.robot_cfg.asset.fix_base_link = False
@@ -406,8 +544,10 @@ class MotionVisualizerSmoothness:
         # Create visualization markers
         self.viz_markers = self._create_visualization_markers()
 
-        # Initialize body markers after kinematic info is loaded
-        self._initialize_body_markers()
+        # Initialize body markers after kinematic info is loaded (skip if --no-markers)
+        self.show_markers = not args.no_markers
+        if self.show_markers:
+            self._initialize_body_markers()
 
         # Create custom key handlers for speed and threshold control
         custom_key_handlers = {
@@ -417,29 +557,137 @@ class MotionVisualizerSmoothness:
             "4": self.decrease_smoothness_threshold,  # Key 4: Decrease smoothness threshold
         }
 
-        # Create checkerboard ground for visualization
-        print("Creating checkerboard ground plane...")
-        scene_lib = create_checkerboard_ground(
-            self.num_envs, self.device, self.simulator_type
-        )
-        print("Checkerboard ground loaded successfully")
-        terrain = None
+        # Create ground / terrain
+        _rough_heightfield = None
+        if simulator_type == "mujoco":
+            from protomotions.components.scene_lib import SceneLib, SceneLibConfig
+            scene_lib = SceneLib(SceneLibConfig(), terrain=None, device=self.device)
+            terrain = None
+            print("MuJoCo: using empty scene (no checkerboard ground)")
+        elif args.use_terrain and simulator_type == "newton":
+            from protomotions.components.scene_lib import SceneLib, SceneLibConfig
+            scene_lib = SceneLib(SceneLibConfig(), terrain=None, device=self.device)
+            terrain = None
+            print(f"Creating rough gravel heightfield (amplitude={args.terrain_slope}m)...")
+            import newton as _newton_mod
+            hf_data = create_rough_heightfield_data(amplitude=args.terrain_slope)
+            nrow, ncol = hf_data.shape
+            _rough_heightfield = _newton_mod.Heightfield(
+                data=hf_data, nrow=nrow, ncol=ncol, hx=12.0, hy=12.0
+            )
+            print("Rough heightfield created successfully")
+        else:
+            print("Creating checkerboard ground plane...")
+            extra_scene_objects_per_env = None
+            if args.scene_file:
+                from protomotions.components.scene_lib import SceneLib as _SceneLibLoader
+                _extra_scenes = _SceneLibLoader._load_scenes_from_file(args.scene_file, str(self.device))
+                if _extra_scenes:
+                    base_objects = _extra_scenes[0].objects
+                    # Align each env's scene objects to the translated character position.
+                    # The chair in the scene file is relative to the GT character's initial XY.
+                    # After translate_all_motions_to_origin, env i's character starts at
+                    # _motion_target_xy[i].  We preserve the relative offset:
+                    #   chair_world_i = _motion_target_xy[i] + (chair_original_XY - gt_initial_XY)
+                    import copy as _copy
+                    gt_init_xy = getattr(self, "_gt_initial_root_xy", None)
+                    motion_targets = getattr(self, "_motion_target_xy", None)
+                    extra_scene_objects_per_env = []
+                    for env_i in range(self.num_envs):
+                        env_objs = []
+                        for obj in base_objects:
+                            new_obj = _copy.deepcopy(obj)
+                            if (
+                                isinstance(new_obj, BoxSceneObject)
+                                and gt_init_xy is not None
+                                and motion_targets is not None
+                            ):
+                                orig_xy = new_obj.translation[0, :2].clone().cpu()
+                                relative_xy = orig_xy - gt_init_xy.cpu()
+                                target_xy_i = motion_targets[env_i].cpu()
+                                new_xy = target_xy_i + relative_xy
+                                new_obj.translation = new_obj.translation.clone()
+                                new_obj.translation[0, 0] = new_xy[0].item()
+                                new_obj.translation[0, 1] = new_xy[1].item()
+                            env_objs.append(new_obj)
+                        extra_scene_objects_per_env.append(env_objs)
+                    print(
+                        f"Scene file loaded: {len(base_objects)} objects from {args.scene_file}, "
+                        f"position-aligned to each env"
+                    )
+            scene_lib = create_checkerboard_ground(
+                self.num_envs, self.device, self.simulator_type,
+                extra_scene_objects_per_env=extra_scene_objects_per_env,
+            )
+            terrain = None
+            print("Checkerboard ground loaded successfully")
 
         # Get simulator class and instantiate
         SimulatorClass = get_class(self.simulator_cfg._target_)
 
         extra_params = extra_simulator_params or {}
-        self.simulator = SimulatorClass(
+        sim_kwargs = dict(
             config=self.simulator_cfg,
             robot_config=self.robot_cfg,
             terrain=terrain,
             device=self.device,
             scene_lib=scene_lib,
-            custom_key_handlers=custom_key_handlers,
+        )
+        # MuJoCo simulator does not accept custom_key_handlers
+        if simulator_type != "mujoco":
+            sim_kwargs["custom_key_handlers"] = custom_key_handlers
+        self.simulator = SimulatorClass(
+            **sim_kwargs,
             **extra_params,
         )
+        # Apply camera offset for Newton viewer (front/back/side view)
+        if simulator_type == "newton" and hasattr(self.simulator, "_camera_offset"):
+            import numpy as np
+            self.simulator._camera_offset = np.array(args.camera_offset)
+        # Attach rough heightfield before init so _create_envs() picks it up
+        if _rough_heightfield is not None:
+            self.simulator._rough_heightfield = _rough_heightfield
         # Initialize the simulator with visualization markers
         self.simulator._initialize_with_markers(self.viz_markers)
+
+        # Newton skin: launch separate MuJoCo viewer after simulator is ready
+        self._skin_mj_model = None
+        self._skin_mj_data = None
+        self._skin_mj_viewer = None
+        if self._skin_mjcf_path is not None:
+            self._init_mujoco_skin_viewer()
+
+        # Register motion-name overlay for Newton viewer
+        self._register_motion_info_overlay()
+
+        # Register suit cable render hook:
+        #   plain mode (no --use-skin):        always show cables
+        #   --use-skin:                         no cables
+        #   --use-skin-cable:                   skin mesh + cables
+        # cables shown only when explicitly requested via --use-skin-cable
+        # suit_muscle plain: no cables (MuJoCo native tendons handle it)
+        # suit plain:        no cables (clean training view)
+        _show_cables = args.use_skin_cable
+        if (
+            simulator_type == "newton"
+            and _show_cables
+            and hasattr(self.simulator, "_render_hook")
+        ):
+            self.simulator._render_hook = self._draw_suit_cables
+            if not self.simulator.headless and self.simulator.viewer is not None:
+                self.simulator.viewer.renderer.line_width = 4.0
+        elif simulator_type == "mujoco":
+            # Enable MuJoCo native tendon rendering:
+            #   - --use-skin-cable: cable tendons (suit robots)
+            #   - --use-skin on muscle robot: muscle tendons always shown
+            import mujoco
+
+            viewer = getattr(self.simulator, "viewer", None)
+            if viewer is not None:
+                show_tendon = _show_cables or (
+                    args.use_skin and "muscle" in robot_name
+                )
+                viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TENDON] = show_tendon
 
         print(f"Loaded {robot_name} robot using {simulator_type}")
         print(f"Visualizing bodies: {self.robot_spec.viz_bodies}")
@@ -460,7 +708,7 @@ class MotionVisualizerSmoothness:
         print("  '4' - Decrease smoothness threshold by 1.5x (NumPad 4 for IsaacLab)")
         print("Motion will play automatically and loop")
 
-        self.simulator.user_requested_reset = True
+        self.simulator.user_requested_reset = False
 
         # Speed control state
         self.speed_change_factor = 1.5  # 150% speed change
@@ -491,6 +739,9 @@ class MotionVisualizerSmoothness:
         self.contact_marker_name = "contact_markers"
         # We'll create these markers in the simulator initialization
 
+        # Light-purple overlay markers for env 0 (reference motion)
+        self.ref_overlay_marker_name = "ref_overlay_markers"
+
         # Create visualization marker groups (initially empty, will be populated after config loading)
         markers = {
             "body_markers": VisualizationMarkerConfig(
@@ -513,6 +764,14 @@ class MotionVisualizerSmoothness:
             for _ in range(num_bodies)
         ]
 
+        # Ref overlay markers for ALL bodies of env 0 (light purple)
+        ref_marker_configs = [MarkerConfig(size="regular") for _ in range(num_bodies)]
+        self.viz_markers[self.ref_overlay_marker_name] = VisualizationMarkerConfig(
+            type="sphere",
+            color=(0.78, 0.57, 1.0),  # light purple / lavender
+            markers=ref_marker_configs,
+        )
+
         # Add the body markers to the existing visualization markers
         self.viz_markers[self.joint_marker_name] = VisualizationMarkerConfig(
             type="sphere",
@@ -530,10 +789,9 @@ class MotionVisualizerSmoothness:
         """Switch to the next motion in the dataset"""
         self.current_motion_idx = (self.current_motion_idx + 1) % self.total_motions
         self.current_frame = 0
-        self.current_motion_length = (
-            self.motion_libs[0]
-            .get_motion_num_frames(None)[self.current_motion_idx]
-            .item()
+        self.current_motion_length = min(
+            ml.get_motion_num_frames(None)[self.current_motion_idx].item()
+            for ml in self.motion_libs
         )
 
         print(
@@ -728,6 +986,24 @@ class MotionVisualizerSmoothness:
             )
         }
 
+    def _update_ref_overlay_markers(self) -> Dict[str, MarkerState]:
+        """Show light-purple spheres at every body of env 0 (reference motion)."""
+        all_body_state = self.simulator.get_bodies_state()
+        all_translations = all_body_state.rigid_body_pos.detach().clone()  # [num_envs, all_bodies, 3]
+        all_orientations = all_body_state.rigid_body_rot.detach().clone()
+
+        # Hide env 1+ markers below ground — only env 0 visible
+        hidden_pos = torch.tensor([0.0, 0.0, -100.0], device=self.device).view(1, 1, 3)
+        ref_translations = all_translations.clone()
+        if ref_translations.shape[0] > 1:
+            ref_translations[1:] = hidden_pos
+
+        return {
+            self.ref_overlay_marker_name: MarkerState(
+                translation=ref_translations, orientation=all_orientations
+            )
+        }
+
     def _update_joint_highlights(self) -> Dict[str, MarkerState]:
         """Get which joints to highlight based on pre-computed smoothness metrics and return marker states."""
 
@@ -803,6 +1079,89 @@ class MotionVisualizerSmoothness:
         env_ids = torch.arange(self.num_envs, device=self.device)
         self.simulator.reset_envs(current_state, env_ids=env_ids)
 
+        # Sync MuJoCo skin viewer (Newton only)
+        if self._skin_mj_viewer is not None and rigid_body_pos is not None:
+            self._sync_mujoco_skin(dof_pos[0], rigid_body_pos[0, 0], rigid_body_rot[0, 0])
+
+    def _register_motion_info_overlay(self):
+        """Register a Newton imgui overlay showing current motion name and frame."""
+        if self.simulator_type != "newton":
+            return
+        viewer = getattr(self.simulator, "viewer", None)
+        if viewer is None or not hasattr(viewer, "register_ui_callback"):
+            return
+
+        def _overlay(imgui):
+            io = imgui.get_io()
+            overlay_w = 1000.0
+            imgui.set_next_window_pos(
+                imgui.ImVec2((io.display_size[0] - overlay_w) * 0.5, 10)
+            )
+            imgui.set_next_window_size(imgui.ImVec2(overlay_w, 0))
+            imgui.set_next_window_bg_alpha(0.65)
+            flags = (
+                imgui.WindowFlags_.no_title_bar.value
+                | imgui.WindowFlags_.no_resize.value
+                | imgui.WindowFlags_.no_move.value
+                | imgui.WindowFlags_.no_scrollbar.value
+                | imgui.WindowFlags_.always_auto_resize.value
+                | imgui.WindowFlags_.no_focus_on_appearing.value
+            )
+            imgui.begin("##motion_info_overlay", None, flags)
+
+            # Push 2× font size: compute unscaled base from current rendered size
+            try:
+                font_scale_main = imgui.get_style().font_scale_main
+            except AttributeError:
+                font_scale_main = 1.0
+            current_rendered = imgui.get_font_size()  # rendered size (base × scale)
+            base_size_2x = (current_rendered * 2.0) / max(font_scale_main, 0.01)
+            imgui.push_font(imgui.get_font(), base_size_2x)
+
+            # Clean up motion name: use just the stem of the filename
+            raw = self.motion_libs[0].motion_files[self.current_motion_idx]
+            motion_name = Path(str(raw)).stem
+
+            imgui.text(
+                f"[{self.current_motion_idx + 1}/{self.total_motions}]  {motion_name}"
+            )
+            imgui.text(
+                f"Frame: {self.current_frame} / {self.current_motion_length - 1}"
+            )
+            imgui.pop_font()
+            imgui.end()
+
+        viewer.register_ui_callback(_overlay, position="free")
+
+    def _init_mujoco_skin_viewer(self):
+        import mujoco
+        import mujoco.viewer as mj_viewer
+        self._skin_mj_model = mujoco.MjModel.from_xml_path(self._skin_mjcf_path)
+        self._skin_mj_data = mujoco.MjData(self._skin_mj_model)
+        mujoco.mj_forward(self._skin_mj_model, self._skin_mj_data)
+        self._skin_mj_viewer = mj_viewer.launch_passive(
+            self._skin_mj_model, self._skin_mj_data
+        )
+        print(f"MuJoCo skin viewer opened: {self._skin_mjcf_path}")
+
+    def _sync_mujoco_skin(self, dof_pos, root_pos, root_rot_xyzw):
+        import mujoco
+        import numpy as np
+        d = self._skin_mj_data
+        # Root position
+        d.qpos[0:3] = root_pos.cpu().numpy()
+        # Root quaternion: ProtoMotions xyzw → MuJoCo wxyz
+        r = root_rot_xyzw.cpu().numpy()
+        d.qpos[3] = r[3]
+        d.qpos[4] = r[0]
+        d.qpos[5] = r[1]
+        d.qpos[6] = r[2]
+        # 31 joint DOFs (qpos[7:38])
+        dp = dof_pos.cpu().numpy()
+        d.qpos[7 : 7 + len(dp)] = dp
+        mujoco.mj_forward(self._skin_mj_model, d)
+        self._skin_mj_viewer.sync()
+
     def _get_updated_marker_positions(self):
         """Update marker positions to follow the specified bodies"""
         if not self.viz_markers:
@@ -829,13 +1188,15 @@ class MotionVisualizerSmoothness:
             translation=all_positions, orientation=all_orientations
         )
 
-        # Add/update joint highlight markers
-        joint_marker_states = self._update_joint_highlights()
-        marker_states.update(joint_marker_states)
+        if self.show_markers:
+            ref_overlay_states = self._update_ref_overlay_markers()
+            marker_states.update(ref_overlay_states)
 
-        # Add/update contact markers
-        contact_marker_states = self._update_contact_markers()
-        marker_states.update(contact_marker_states)
+            joint_marker_states = self._update_joint_highlights()
+            marker_states.update(joint_marker_states)
+
+            contact_marker_states = self._update_contact_markers()
+            marker_states.update(contact_marker_states)
 
         return marker_states
 
@@ -872,6 +1233,51 @@ class MotionVisualizerSmoothness:
             print(f"Smoothness threshold decreased to {self.smoothness_threshold:.3f}")
         else:
             print(f"Smoothness threshold at minimum: {self.smoothness_threshold:.3f}")
+
+    def _draw_suit_cables(self):
+        """Draw suit tendon cables as taut straight lines (Newton render hook)."""
+        try:
+            import warp as wp
+        except ImportError:
+            return
+
+        viewer = self.simulator.viewer
+        if viewer is None:
+            return
+
+        # (slider_body, hip_attachment_body)
+        CABLE_PAIRS = [
+            ("slider1", "RH_dump"),
+            ("slider2", "RH_dump2"),
+            ("slider3", "LH_dump"),
+            ("slider4", "LH_dump2"),
+        ]
+        CABLE_COLOR = (0.0, 0.15, 0.75)  # dark blue
+
+        body_names = self.simulator._body_names
+        body_state = self.simulator.get_bodies_state()
+        body_pos = body_state.rigid_body_pos[0].cpu()  # [num_bodies, 3], env 0
+
+        starts_list = []
+        ends_list = []
+
+        for slider_name, attach_name in CABLE_PAIRS:
+            try:
+                p0 = body_pos[body_names.index(slider_name)]
+                p1 = body_pos[body_names.index(attach_name)]
+            except ValueError:
+                continue
+
+            starts_list.append(wp.vec3(p0[0].item(), p0[1].item(), p0[2].item()))
+            ends_list.append(wp.vec3(p1[0].item(), p1[1].item(), p1[2].item()))
+
+        if not starts_list:
+            viewer.log_lines("suit_cables", None, None, None)
+            return
+
+        starts_wp = wp.array(starts_list, dtype=wp.vec3)
+        ends_wp = wp.array(ends_list, dtype=wp.vec3)
+        viewer.log_lines("suit_cables", starts_wp, ends_wp, CABLE_COLOR)
 
     def run(self):
         """Main simulation loop"""
@@ -937,6 +1343,9 @@ def main():
     # Use the global args that were parsed early
     global args, AppLauncher
 
+    # MuJoCo is CPU-only
+    if args.simulator == "mujoco":
+        args.cpu_only = True
     device = torch.device("cuda:0") if not args.cpu_only else torch.device("cpu")
 
     # Extra simulator parameters for IsaacLab
@@ -963,6 +1372,7 @@ def main():
         metric=args.metric,
         use_data_vel=args.use_data_vel,
         window_sec=args.window_sec,
+        motion_idx=args.motion_idx,
     )
 
     try:

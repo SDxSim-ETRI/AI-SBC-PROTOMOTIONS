@@ -66,6 +66,68 @@ python protomotions/inference_agent.py \
     --simulator mujoco --num-envs 1
 ```
 
+### ETRI Skeleton/Suit Inference (Newton, 실제 사용 포맷)
+
+**중요 규칙**:
+- `--robot-name` 옵션 사용 금지 — 로봇 설정은 체크포인트의 `resolved_configs_inference.pt`에서 자동 로드
+- skeleton 체크포인트에는 skeleton 모션 파일(23 DOF), suit 체크포인트에는 suit 모션 파일(27 DOF) 사용
+- 시각화(mesh)와 학습(plain)은 별도 XML 사용
+
+```bash
+# skeleton — interactive play (20초 자동 전환, mesh 시각화)
+python protomotions/inference_agent.py \
+    --checkpoint results/mimic_phase12/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_motions_11.pt \
+    --simulator newton \
+    --num-envs 1 \
+    --cycle-seconds 20 \
+    --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_mesh.xml"
+
+# suit — interactive play (20초 자동 전환, mesh 시각화, hip ring 원통형 유지)
+python protomotions/inference_agent.py \
+    --checkpoint results/suit_phase12/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11.pt \
+    --simulator newton \
+    --num-envs 1 \
+    --cycle-seconds 20 \
+    --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_suit_mesh.xml"
+
+# skeleton — 학습 재시작 (resume, 같은 디렉토리)
+python protomotions/train_agent.py \
+    --robot-name skeleton_torque \
+    --simulator newton \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name mimic_phase12 \
+    --motion-file data/motion_for_trackers/skeleton_torque_motions_11.pt \
+    --num-envs 4096 \
+    --batch-size 16384
+
+# suit — 학습 재시작 (resume, 같은 디렉토리)
+python protomotions/train_agent.py \
+    --robot-name skeleton_torque_suit \
+    --simulator newton \
+    --experiment-path examples/experiments/mimic/mlp.py \
+    --experiment-name suit_phase12 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11.pt \
+    --num-envs 2048 \
+    --batch-size 8192
+```
+
+**XML 파일 역할**:
+- `mjcf/skeleton_torque.xml` — skeleton 학습용 (capsule/sphere/box, physics only)
+- `mjcf/skeleton_torque_mesh.xml` — skeleton 시각화용 (STL mesh 추가)
+- `mjcf/skeleton_torque_suit.xml` — suit 학습용 (hip ring: capsule, OOM 방지)
+- `mjcf/skeleton_torque_suit_mesh.xml` — suit 시각화용 (hip ring: cylinder 원통형 유지)
+- `mjcf/31dof/skeleton_torque.xml` — 31DOF skeleton 학습용
+- `mjcf/31dof/skeleton_torque_mesh.xml` — 31DOF skeleton 시각화용 (equality 블록 제거됨)
+- `mjcf/31dof/skeleton_torque_suit.xml` — 31DOF suit 학습용 (hip ring: capsule)
+- `mjcf/31dof/skeleton_torque_suit_mesh.xml` — 31DOF suit 시각화용 (hip ring: cylinder, 모든 suit geom contype=0, equality 블록 제거됨)
+
+**체크포인트 관리**:
+- 학습 중 자동 저장: `results/<experiment-name>/`
+- 목표 달성 후 영구 보관: `checkpoints/<version>/` (`scripts/promote_checkpoint.sh` 사용)
+- 의존 관계: v1_skeleton → v2_suit, v3_squat / v1_skeleton → v4_suit_v2
+
 ### Testing
 ```bash
 pytest protomotions/tests/

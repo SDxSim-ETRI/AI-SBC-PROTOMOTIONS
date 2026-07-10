@@ -267,6 +267,15 @@ def main():
         action="store_true",
         help="Pass --fix-base to the Isaac Lab converter (for fixed-base robots).",
     )
+    parser.add_argument(
+        "--isaac-python",
+        default=None,
+        help=(
+            "Path to Isaac Sim python.sh to use for the actual USD conversion. "
+            "Defaults to sys.executable. Use this when running the script with "
+            "a regular Python that does not initialize Isaac Sim Kit."
+        ),
+    )
     args = parser.parse_args()
 
     input_path = os.path.abspath(args.input)
@@ -321,8 +330,9 @@ def main():
     print(f"\nInput MJCF:  {converter_input}")
     print(f"Output USDA: {usda_path}\n")
 
+    isaac_python = args.isaac_python if args.isaac_python else sys.executable
     converter_cmd = [
-        sys.executable,
+        isaac_python,
         CONVERTER_SCRIPT,
         converter_input,
         usda_path,
@@ -335,7 +345,9 @@ def main():
         converter_cmd.append("--fix-base")
 
     print(f"Running converter: {' '.join(converter_cmd)}\n")
-    result = subprocess.run(converter_cmd)
+    # DISPLAY= prevents Kit from trying to connect to X in headless mode
+    headless_env = {**os.environ, "DISPLAY": ""}
+    result = subprocess.run(converter_cmd, env=headless_env)
 
     if result.returncode != 0:
         print(
@@ -352,7 +364,7 @@ def main():
     if os.path.isfile(base_usd_path) and os.path.isfile(PATCH_SCRIPT):
         print("\nPatching missing visual meshes...")
         patch_cmd = [
-            sys.executable,
+            isaac_python,
             PATCH_SCRIPT,
             "--mjcf",
             cleaned_path,
@@ -360,7 +372,7 @@ def main():
             base_usd_path,
             "--headless",
         ]
-        patch_result = subprocess.run(patch_cmd)
+        patch_result = subprocess.run(patch_cmd, env=headless_env)
         if patch_result.returncode != 0:
             print(
                 "WARNING: Visual mesh patching failed. Some meshes may be missing.",
