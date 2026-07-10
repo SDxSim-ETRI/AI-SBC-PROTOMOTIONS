@@ -17,12 +17,20 @@
 
 RL walking policy(ProtoMotions 체크포인트)로 시뮬레이터에서 보행을 실행하면서,
 학습된 ManiFlow lowdim 정책이 센서 상태만으로 hip torque를 receding-horizon
-방식으로 예측하고, 시뮬레이터가 실제로 가한 토크(dof_forces[:, 0:6])와
-비교합니다. IsaacLab에서 수집한 데이터로 학습한 추정기의 sim2sim(Newton) 전이
-성능을 확인하는 용도입니다.
+방식으로 예측하고, 시뮬레이터가 실제로 가한 토크와 비교합니다.
 
 관측 구성 (collect_walk_zarr.py와 동일, common ordering):
   obs(88) = dof_pos(27) + dof_vel(27) + root_pos(3) + root_vel(3) + contacts(28)
+
+action 채널 (--action-dofs, 기본 hips):
+  hips   = 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파생, 신규 계약)
+         = [hip_flexion_r, hip_adduction_r, hip_rotation_r,
+            hip_flexion_l, hip_adduction_l, hip_rotation_l]
+  first6 = 공통 DOF 0-5 (⚠️ 과거 잘못 수집·학습된 모델 전용:
+           [hip_flexion_r, hip_adduction_r, hip_rotation_r, knee_angle_r,
+           ankle_angle_r, hip_flexion_l] — 오른다리 전체 + 왼쪽 hip flexion.
+           수집 스크립트가 hips=0-5로 잘못 가정했던 시절의 산물)
+  ManiFlow 체크포인트가 어느 채널로 학습되었는지와 반드시 일치시켜야 합니다.
 
 정렬(alignment): 매 스텝 env.step 직후의 robot_state로 obs[t]와 gt_torque[t]를
 같은 시점에 기록 — 수집 스크립트와 동일. predict()가 반환하는 청크의 첫 스텝은
@@ -93,6 +101,11 @@ def _create_parser():
                    default="receding",
                    help="receding: n_action_steps 간격 청크 예측(오프라인 eval과 동일), "
                         "every_step: 매 스텝 예측 후 첫 액션만 사용")
+    p.add_argument("--action-dofs", choices=["hips", "first6"], default="hips",
+                   help="ManiFlow action 채널 매핑. hips=순수 hip 6 DOF(공통 "
+                        "[0,1,2,5,6,7], 신규 계약), first6=공통 DOF 0-5(과거 "
+                        "잘못 수집된 legacy 모델 전용). 체크포인트의 학습 채널과 "
+                        "일치시킬 것")
     p.add_argument("--control-mode", choices=["config", "proportional", "built_in_pd"],
                    default="config",
                    help="RL policy 액추에이션 모드 (config = 체크포인트 설정 그대로, "
@@ -147,12 +160,16 @@ from protomotions.maniflow import (  # noqa: E402
     ManiFlowTorqueEstimator,
     discover_best_checkpoint,
     load_maniflow_policy,
+    resolve_action_dofs,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
-HIP_DOF_SLICE = slice(0, 6)
+# ManiFlow action 채널 (공통 DOF 인덱스/이름). main()에서 --action-dofs와
+# robot config로부터 실제 값이 채워집니다 (하드코딩 금지 — 기본 hips =
+# 공통 [0,1,2,5,6,7], legacy first6 = 공통 0-5(오른다리 전체+왼 hip flexion)).
+ACTION_DOF_INDICES = list(range(6))
 HIP_JOINT_NAMES = [
     "hip_flexion_r", "hip_adduction_r", "hip_rotation_r",
     "hip_flexion_l", "hip_adduction_l", "hip_rotation_l",
@@ -271,6 +288,9 @@ def run_rollout(agent, env, estimator: ManiFlowTorqueEstimator, T: int,
     gt_trace = np.zeros((N, T, Da), dtype=np.float32)
     obs_trace = np.zeros((N, T, estimator.obs_dim), dtype=np.float32)
     env_failed = np.zeros(N, dtype=bool)
+    # 라이브 플롯에 띄울 채널 (좌/우 hip flexion) — 채널 레이아웃에서 파생
+    live_channels = [j for j, nm in enumerate(HIP_JOINT_NAMES)
+                     if nm.startswith("hip_flexion")]
 
     obs, _ = env.reset()
     estimator.reset()
@@ -303,7 +323,7 @@ def run_rollout(agent, env, estimator: ManiFlowTorqueEstimator, T: int,
 
         obs_now = estimator.observe(robot_state)
         obs_trace[:, t] = obs_now.cpu().numpy()
-        gt_trace[:, t] = robot_state.dof_forces[:, HIP_DOF_SLICE].cpu().numpy()
+        gt_trace[:, t] = robot_state.dof_forces[:, ACTION_DOF_INDICES].cpu().numpy()
 
         if predict_mode == "receding":
             if t % Ta == 0:
@@ -315,7 +335,8 @@ def run_rollout(agent, env, estimator: ManiFlowTorqueEstimator, T: int,
             pred_trace[:, t] = pred[:, 0]
 
         if live_plot:
-            for j, nm in ((0, "hip_flexion_r"), (3, "hip_flexion_l")):
+            for j in live_channels:  # hip_flexion_r / hip_flexion_l
+                nm = HIP_JOINT_NAMES[j]
                 viewer.log_scalar(f"torque/{nm}/applied", float(gt_trace[0, t, j]))
                 viewer.log_scalar(f"torque/{nm}/maniflow", float(pred_trace[0, t, j]))
         if viewer is not None:
@@ -501,6 +522,16 @@ def main():
 
     agent, env = setup_agent_and_env(args, fabric, app_launcher)
 
+    # 채널 인덱스/이름을 --action-dofs와 robot config에서 파생 (하드코딩 금지)
+    dof_names = list(env.robot_config.kinematic_info.dof_names)
+    ACTION_DOF_INDICES[:] = resolve_action_dofs(args.action_dofs, dof_names)
+    HIP_JOINT_NAMES[:] = [dof_names[i] for i in ACTION_DOF_INDICES]
+    log.info(f"Estimator channels ({args.action_dofs}, COMMON DOF "
+             f"{ACTION_DOF_INDICES}): {HIP_JOINT_NAMES}")
+    if args.action_dofs == "first6":
+        log.warning("first6은 과거 잘못 수집된 legacy 모델 전용입니다 — "
+                    "채널에 knee/ankle이 포함됩니다.")
+
     # ManiFlow 추정기 로드 (RL agent 이후: 시뮬레이터 초기화와 분리)
     maniflow_ckpt = args.maniflow_ckpt or discover_best_checkpoint(args.maniflow_run_dir)
     policy, mf_cfg, mf_info = load_maniflow_policy(
@@ -547,6 +578,8 @@ def main():
         "episode_steps": int(T),
         "ok_envs": ok_envs.tolist(),
         "env_failed": env_failed.tolist(),
+        "action_dofs": args.action_dofs,
+        "action_dof_indices": list(ACTION_DOF_INDICES),
         "joint_names": HIP_JOINT_NAMES,
     }
 
