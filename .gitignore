@@ -23,3 +23,5 @@ data/amass/*.pkl
 
 # ManiFlow inference results
 tasks/*/maniflow_infer_results/
+tasks/*/maniflow_control_results/
+tasks/mimic_suit_active_cable_walk_23dof/zarr_data/
