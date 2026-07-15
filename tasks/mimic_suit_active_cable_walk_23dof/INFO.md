@@ -93,6 +93,7 @@ tasks/mimic_suit_active_cable_walk_23dof/
 ├── compare_maniflow_control_newton.{py,sh}←   ManiFlow 토크를 실제 제어에 사용하는 A/B 비교
 │                                              (Agent A=순수 RL 고스트, Agent B=ManiFlow+RL 메시)
 ├── MANIFLOW_INFERENCE.md                  ←   두 스크립트 실행법·주의사항 문서 (GUI/녹화 포함)
+├── MANIFLOW_CONTROL_ANALYSIS.md           ←   예측 완벽↔제어 낙상 괴리 분석 메모 (2026-07-10)
 ├── maniflow_infer_results/                ←   passive inference 결과 (gitignore)
 └── maniflow_control_results/              ←   A/B 비교 결과 (gitignore)
 ```

@@ -13,7 +13,7 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
 
 | 파일 | 역할 |
 |------|------|
-| `channels.py` | action 채널 계약의 단일 소스 — `HIP_DOF_NAMES`, `hip_dof_indices()`(이름 기반 공통 인덱스 파생), `resolve_action_dofs()`(`hips`/`first6` 해석). 수집·학습·inference가 모두 이걸 사용 |
+| `channels.py` | action 채널 계약의 단일 소스 — `HIP_DOF_NAMES`, `hip_dof_indices()`(이름 기반 공통 인덱스 파생). 수집·학습·inference가 모두 이걸 사용 |
 | `loader.py` | `maniflow` 패키지 위치 해석 + 학습 workspace 체크포인트를 inference 전용 정책으로 로드 (workspace/dataset/wandb 등 학습 의존성 우회) |
 | `torque_estimator.py` | `ManiFlowTorqueEstimator` — `RobotState`(common ordering) → 관측 벡터 구성, obs history 관리, receding-horizon 토크 예측 |
 | `hybrid_control.py` | `JointTorqueOverride` — Newton BUILT_IN_PD 위에서 특정 env의 특정 DOF만 직접 토크 구동 (per-world PD 게인 zero-out + `control.joint_f`→`qfrc_applied` 주입). ManiFlow 예측 토크를 실제 제어에 사용할 때 씀 |
@@ -42,11 +42,12 @@ action(6) = 순수 hip 6개 DOF 적용 토크 (공통 DOF [0,1,2,5,6,7])
 체인 → …)라서 앞 6개를 자르면(`[:6]`) knee_angle_r(3)/ankle_angle_r(4)가
 섞입니다.
 
-⚠️ **Legacy 모델 주의 (2026-07-09 이전 수집·학습)**: 초기 수집 스크립트가
+⚠️ **Legacy 이력 (2026-07-09 이전 수집·학습)**: 초기 수집 스크립트가
 hips=0-5로 잘못 가정해, 그때 학습된 모델(`walking_flat-...-run01_seed42`)은
-공통 DOF 0-5 = **오른다리 전체 + 왼쪽 hip flexion**을 예측합니다. 그런 모델과
-비교할 때만 task 스크립트의 `--action-dofs first6`을 사용하세요. 신규
-수집본은 zarr attrs의 `action_dof_names`/`action_dof_indices`로 채널 계약을
+공통 DOF 0-5 = **오른다리 전체 + 왼쪽 hip flexion**을 예측했습니다. 해당
+모델은 2026-07-14 삭제되었고 task 스크립트의 `--action-dofs first6` 옵션도
+함께 제거되었습니다. 신규 수집본은 zarr attrs의
+`action_dof_names`/`action_dof_indices`로 채널 계약을
 자기술(self-describe)합니다.
 
 - `root_pos`/`root_vel` = pelvis(body 0) 월드 위치/선속도
