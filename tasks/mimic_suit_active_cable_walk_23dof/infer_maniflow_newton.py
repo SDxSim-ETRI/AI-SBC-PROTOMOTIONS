@@ -22,15 +22,12 @@ RL walking policy(ProtoMotions 체크포인트)로 시뮬레이터에서 보행�
 관측 구성 (collect_walk_zarr.py와 동일, common ordering):
   obs(88) = dof_pos(27) + dof_vel(27) + root_pos(3) + root_vel(3) + contacts(28)
 
-action 채널 (--action-dofs, 기본 hips):
-  hips   = 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파생, 신규 계약)
-         = [hip_flexion_r, hip_adduction_r, hip_rotation_r,
-            hip_flexion_l, hip_adduction_l, hip_rotation_l]
-  first6 = 공통 DOF 0-5 (⚠️ 과거 잘못 수집·학습된 모델 전용:
-           [hip_flexion_r, hip_adduction_r, hip_rotation_r, knee_angle_r,
-           ankle_angle_r, hip_flexion_l] — 오른다리 전체 + 왼쪽 hip flexion.
-           수집 스크립트가 hips=0-5로 잘못 가정했던 시절의 산물)
-  ManiFlow 체크포인트가 어느 채널로 학습되었는지와 반드시 일치시켜야 합니다.
+action 채널: 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파생)
+  = [hip_flexion_r, hip_adduction_r, hip_rotation_r,
+     hip_flexion_l, hip_adduction_l, hip_rotation_l]
+  과거 first6(공통 0-5 = 오른다리 전체+왼 hip flexion, 수집 버그) 채널로
+  학습된 legacy run01 모델은 2026-07-14 삭제되어 관련 옵션(--action-dofs)도
+  제거되었습니다.
 
 정렬(alignment): 매 스텝 env.step 직후의 robot_state로 obs[t]와 gt_torque[t]를
 같은 시점에 기록 — 수집 스크립트와 동일. predict()가 반환하는 청크의 첫 스텝은
@@ -72,7 +69,7 @@ DEFAULT_RL_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
 DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
     str(Path.home()),
     "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    "walking_flat-maniflow_lowdim_policy_walking-run01_seed42",
+    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42",
 )
 
 
@@ -101,11 +98,12 @@ def _create_parser():
                    default="receding",
                    help="receding: n_action_steps 간격 청크 예측(오프라인 eval과 동일), "
                         "every_step: 매 스텝 예측 후 첫 액션만 사용")
-    p.add_argument("--action-dofs", choices=["hips", "first6"], default="hips",
-                   help="ManiFlow action 채널 매핑. hips=순수 hip 6 DOF(공통 "
-                        "[0,1,2,5,6,7], 신규 계약), first6=공통 DOF 0-5(과거 "
-                        "잘못 수집된 legacy 모델 전용). 체크포인트의 학습 채널과 "
-                        "일치시킬 것")
+    p.add_argument("--denoise-steps", type=int, default=3,
+                   help="추론 ODE(Euler) 스텝 수. 기본 3 — 2026-07-15 검증: "
+                        "consistency 학습(임의 dt 점프, target_t 조건) 덕분에 "
+                        "재학습 없이 축소 가능하고, N=3이 체크포인트 설정(10)보다 "
+                        "정확하며 3배 빠름(MAE 0.32 vs 1.40 N·m, 5.8 vs 18.9 ms). "
+                        "이전 동작 재현은 --denoise-steps 10")
     p.add_argument("--control-mode", choices=["config", "proportional", "built_in_pd"],
                    default="config",
                    help="RL policy 액추에이션 모드 (config = 체크포인트 설정 그대로, "
@@ -159,16 +157,15 @@ from protomotions.utils.fabric_config import FabricConfig  # noqa: E402
 from protomotions.maniflow import (  # noqa: E402
     ManiFlowTorqueEstimator,
     discover_best_checkpoint,
+    hip_dof_indices,
     load_maniflow_policy,
-    resolve_action_dofs,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
-# ManiFlow action 채널 (공통 DOF 인덱스/이름). main()에서 --action-dofs와
-# robot config로부터 실제 값이 채워집니다 (하드코딩 금지 — 기본 hips =
-# 공통 [0,1,2,5,6,7], legacy first6 = 공통 0-5(오른다리 전체+왼 hip flexion)).
+# ManiFlow action 채널 (공통 DOF 인덱스/이름). main()에서 robot config로부터
+# 이름 기반으로 채워집니다 (하드코딩 금지 — 순수 hip 6 DOF = 공통 [0,1,2,5,6,7]).
 ACTION_DOF_INDICES = list(range(6))
 HIP_JOINT_NAMES = [
     "hip_flexion_r", "hip_adduction_r", "hip_rotation_r",
@@ -522,15 +519,12 @@ def main():
 
     agent, env = setup_agent_and_env(args, fabric, app_launcher)
 
-    # 채널 인덱스/이름을 --action-dofs와 robot config에서 파생 (하드코딩 금지)
+    # 채널 인덱스/이름을 robot config에서 이름 기반으로 파생 (하드코딩 금지)
     dof_names = list(env.robot_config.kinematic_info.dof_names)
-    ACTION_DOF_INDICES[:] = resolve_action_dofs(args.action_dofs, dof_names)
+    ACTION_DOF_INDICES[:] = hip_dof_indices(dof_names)
     HIP_JOINT_NAMES[:] = [dof_names[i] for i in ACTION_DOF_INDICES]
-    log.info(f"Estimator channels ({args.action_dofs}, COMMON DOF "
+    log.info(f"Estimator channels (hips, COMMON DOF "
              f"{ACTION_DOF_INDICES}): {HIP_JOINT_NAMES}")
-    if args.action_dofs == "first6":
-        log.warning("first6은 과거 잘못 수집된 legacy 모델 전용입니다 — "
-                    "채널에 knee/ankle이 포함됩니다.")
 
     # ManiFlow 추정기 로드 (RL agent 이후: 시뮬레이터 초기화와 분리)
     maniflow_ckpt = args.maniflow_ckpt or discover_best_checkpoint(args.maniflow_run_dir)
@@ -539,9 +533,15 @@ def main():
     )
     estimator = ManiFlowTorqueEstimator(policy, num_envs=env.num_envs,
                                         device=fabric.device)
+    assert args.denoise_steps >= 1
+    if args.denoise_steps != policy.num_inference_steps:
+        log.info(f"denoise(ODE) steps: {policy.num_inference_steps}(ckpt 설정) -> "
+                 f"{args.denoise_steps}")
+        policy.num_inference_steps = args.denoise_steps
     log.info(f"ManiFlow ckpt: {maniflow_ckpt} (epoch={mf_info['epoch']}, "
              f"n_obs_steps={estimator.n_obs_steps}, "
-             f"n_action_steps={estimator.n_action_steps})")
+             f"n_action_steps={estimator.n_action_steps}, "
+             f"denoise_steps={policy.num_inference_steps})")
 
     viewer = getattr(env.simulator, "viewer", None)
     if args.viewer and viewer is not None:
@@ -574,11 +574,12 @@ def main():
         "maniflow_ckpt": str(maniflow_ckpt),
         "maniflow_epoch": mf_info["epoch"],
         "predict_mode": args.predict_mode,
+        "denoise_steps": int(policy.num_inference_steps),
         "num_envs": int(env.num_envs),
         "episode_steps": int(T),
         "ok_envs": ok_envs.tolist(),
         "env_failed": env_failed.tolist(),
-        "action_dofs": args.action_dofs,
+        "action_dofs": "hips",
         "action_dof_indices": list(ACTION_DOF_INDICES),
         "joint_names": HIP_JOINT_NAMES,
     }
@@ -603,7 +604,9 @@ def main():
         with open(out_dir / "metrics.txt", "w") as f:
             f.write(f"simulator: {args.simulator}\n"
                     f"rl ckpt:   {args.rl_checkpoint}\n"
-                    f"mf  ckpt:  {maniflow_ckpt} (epoch {mf_info['epoch']})\n\n"
+                    f"mf  ckpt:  {maniflow_ckpt} (epoch {mf_info['epoch']})\n"
+                    f"predict:   {args.predict_mode} "
+                    f"(denoise_steps={policy.num_inference_steps})\n\n"
                     + table + "\n")
 
         save_trace_plots(out_dir, pred_trace, gt_trace,

@@ -39,7 +39,6 @@ Modules:
 from protomotions.maniflow.channels import (  # noqa: F401
     HIP_DOF_NAMES,
     hip_dof_indices,
-    resolve_action_dofs,
 )
 from protomotions.maniflow.loader import (  # noqa: F401
     discover_best_checkpoint,

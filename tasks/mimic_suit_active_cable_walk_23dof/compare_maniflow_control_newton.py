@@ -25,12 +25,10 @@ Newton은 env마다 독립된 world를 만들므로 두 agent는 물리적으로
 완전히 겹쳐 시뮬레이션됩니다. 뷰어에서는 Agent A를 반투명 라인 스켈레톤
 (고스트)으로, Agent B를 일반 메시로 그립니다.
 
-estimator 채널 (--action-dofs, 기본 hips):
-  hips   = 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파생, 신규 계약)
-  first6 = 공통 DOF 0-5 (⚠️ 과거 잘못 수집·학습된 legacy 모델 전용:
-           오른다리 전체 + 왼쪽 hip flexion — knee/ankle 포함)
-  ManiFlow 체크포인트의 학습 채널과 반드시 일치시켜야 하며, 채널 이름은
-  런타임에 robot config에서 파생합니다.
+estimator 채널: 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파생).
+  채널 이름은 런타임에 robot config에서 파생합니다. 과거 first6(공통 0-5,
+  수집 버그) 채널로 학습된 legacy run01 모델은 2026-07-14 삭제되어 관련
+  옵션(--action-dofs)도 제거되었습니다.
 
 동기화: 두 env는 항상 같은 모션(id 0), 같은 시작 시각(t=0), 같은 스폰 위치를
 사용하고, 어느 한쪽이 done이 되면 둘 다 함께 리셋합니다(에피소드 단위 비교).
@@ -47,6 +45,24 @@ inference용 resolved config에는 termination 컴포넌트가 없는 경우가 
 전이 (t+k-1→t+k)용 토크이고, 다음 스텝 제어에는 chunk[1]부터 사용해야
 합니다(기본 --chunk-offset 1). chunk[0]은 이미 지나간 전이의 사후 추정치라
 Agent A의 수동(passive) 예측-실측 비교용으로만 기록합니다.
+
+워밍업 핸드오버(--handover-steps K, 기본 0=비활성): 에피소드 시작 후 K스텝
+동안은 B도 순수 RL+PD로 보행하고(override 해제) estimator에는 실제 관측
+히스토리만 쌓다가, K스텝째에 estimator 채널 게인을 다시 0으로 만들고
+ManiFlow 토크 제어로 전환합니다. 리셋 직후 상태 s0는 수집 데이터에 존재하지
+않아(수집기는 물리 1스텝 후의 s1부터 기록 — contacts 미갱신·기구학 리셋
+속도) 첫 chunk가 크게 어긋나는데, 핸드오버는 이를 우회해 on-distribution
+보행 상태에서 피드포워드 제어의 순수한 생존 시간을 측정합니다. 워밍업 구간의
+tau_b_cmd/pred_a_passive는 NaN으로 기록되고 지표에서 제외됩니다.
+
+잔여 PD 결합(--residual-pd-scale α, 기본 0=순수 토크 치환): estimator 채널의
+built-in PD 게인을 0 대신 α·(ke,kd)로 남기고 ManiFlow 토크를 (1-α)배로
+주입합니다 — hip 토크 = α·PD(substep 피드백) + (1-α)·ManiFlow. 정상 보행
+매니폴드에서는 ManiFlow ≈ PD 적용 토크이므로 총토크가 A와 같아지는 convex
+블렌드입니다(명목 보행 보존, 과구동 없음); 상태가 이탈하면 α 비율의
+임피던스가 매 substep 교정합니다. α 스윕으로 "생존에 필요한 최소 피드백
+몫"을 정량화합니다. α>0이면 B의 qfrc_actuator 잔여(tau_b_qfrc)는 0이 아닌
+PD 몫을 보고하며, B의 총 hip 토크 = tau_b_cmd + tau_b_qfrc 입니다.
 
 출력 (--output, 기본 tasks/.../maniflow_control_results/<timestamp>/):
   metrics.json / metrics.txt : 에피소드 통계(생존 스텝, 종료 원인), 트래킹
@@ -82,7 +98,7 @@ DEFAULT_RL_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
 DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
     str(Path.home()),
     "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    "walking_flat-maniflow_lowdim_policy_walking-run01_seed42",
+    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42",
 )
 
 GHOST_ENV = 0  # Agent A: pure RL (반투명 고스트)
@@ -112,17 +128,27 @@ def _create_parser():
                    default="receding",
                    help="receding: n_action_steps 청크 단위 예측(학습 배포 방식), "
                         "every_step: 매 스텝 재예측 후 다음 액션만 사용")
+    p.add_argument("--denoise-steps", type=int, default=3,
+                   help="추론 ODE(Euler) 스텝 수. 기본 3 — 2026-07-15 검증: "
+                        "consistency 학습이 임의 dt 점프를 커버해 재학습 없이 "
+                        "축소 가능하고, N=3이 체크포인트 설정(10)보다 정확하며 "
+                        "3배 빠름. 이전 동작 재현은 --denoise-steps 10")
     p.add_argument("--chunk-offset", type=int, default=1, choices=[0, 1],
                    help="청크에서 제어에 사용할 시작 인덱스. 1=다음 전이용 토크"
                         "(권장, 수집 정렬과 일치), 0=한 스텝 지연된 사후 추정치")
-    p.add_argument("--action-dofs", choices=["hips", "first6"], default="hips",
-                   help="ManiFlow action 채널 매핑. hips=순수 hip 6 DOF(공통 "
-                        "[0,1,2,5,6,7], 신규 계약), first6=공통 DOF 0-5(과거 "
-                        "잘못 수집된 legacy 모델 전용). 체크포인트의 학습 채널과 "
-                        "일치시킬 것")
     p.add_argument("--torque-scale", type=float, default=1.0,
                    help="Agent B에 인가할 ManiFlow 토크 배율 (0 = 해당 채널 무동력 "
                         "sanity check)")
+    p.add_argument("--residual-pd-scale", type=float, default=0.0,
+                   help="estimator 채널에 남길 built-in PD 게인 비율 α∈[0,1). "
+                        "0=순수 토크 치환(기존 동작). α>0이면 hip 토크 = α·PD + "
+                        "(1-α)·ManiFlow convex 블렌드 — PD가 substep 안정화를, "
+                        "ManiFlow가 보행 토크 본체를 분담")
+    p.add_argument("--handover-steps", type=int, default=0,
+                   help="에피소드 시작 후 이 스텝 수 동안 B도 순수 RL+PD로 "
+                        "보행(워밍업)한 뒤 ManiFlow 토크 제어로 전환. 리셋 직후 "
+                        "관측(s0)이 학습 분포 밖이라 첫 chunk가 어긋나는 문제를 "
+                        "우회 (0 = 리셋 직후부터 ManiFlow 제어)")
     p.add_argument("--fall-z", type=float, default=0.5,
                    help="root 높이가 이 값[m] 아래로 --fall-hold 스텝 연속 유지되면 "
                         "넘어짐으로 판정해 두 env를 함께 리셋 (<=0 비활성)")
@@ -183,15 +209,15 @@ from protomotions.maniflow import (  # noqa: E402
     JointTorqueOverride,
     ManiFlowTorqueEstimator,
     discover_best_checkpoint,
+    hip_dof_indices,
     load_maniflow_policy,
-    resolve_action_dofs,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
-# ManiFlow action 채널 (공통 DOF 인덱스). main()에서 --action-dofs와 robot
-# config로부터 채워짐 — 기본 hips = 공통 [0,1,2,5,6,7], legacy first6 = 0-5.
+# ManiFlow action 채널 (공통 DOF 인덱스). main()에서 robot config로부터
+# 이름 기반으로 채워짐 — 순수 hip 6 DOF = 공통 [0,1,2,5,6,7].
 ESTIMATOR_DOF_INDICES = list(range(6))
 
 
@@ -393,6 +419,8 @@ def run_rollout(agent, env, estimator, override, args):
     n_dofs = env.robot_config.number_of_actions
     offset = args.chunk_offset
     assert offset < Ta, f"chunk-offset({offset}) must be < n_action_steps({Ta})"
+    alpha = args.residual_pd_scale
+    blend = 1.0 - alpha  # ManiFlow 몫 — α·PD + (1-α)·MF ≈ 명목 총토크 유지
 
     steps_per_sec = round(1.0 / env.simulator.dt) if env.simulator.dt > 0 else 20
     min_episode_steps = max(1, round(args.min_episode_seconds * steps_per_sec))
@@ -420,8 +448,13 @@ def run_rollout(agent, env, estimator, override, args):
     ep_start = 0
     fall_count = np.zeros(N, dtype=int)  # 연속 저고도 스텝 수 (자체 넘어짐 감지)
 
+    handover = max(0, args.handover_steps)
     obs = synced_reset(env, estimator, override)
-    chunk = estimator.predict()  # (N, Ta, Da)
+    if handover > 0:
+        override.restore()  # 워밍업: B도 순수 PD 보행, chunk는 핸드오버 시점에 생성
+        chunk = None
+    else:
+        chunk = estimator.predict()  # (N, Ta, Da)
     chunk_pos = offset
 
     gain_check_done = False
@@ -439,12 +472,26 @@ def run_rollout(agent, env, estimator, override, args):
         model_out = agent.model(obs_td)
         action = model_out.get("mean_action", model_out["action"])
 
-        cur = chunk[:, chunk_pos]  # (N, Da) — 이번 전이(t→t+1)용 토크
-        tau_b = override.set_torques(
-            cur[MANIFLOW_ENV : MANIFLOW_ENV + 1] * args.torque_scale
-        )
-        tr["tau_b_cmd"][t] = tau_b[0].cpu().numpy()
-        tr["pred_a_passive"][t] = cur[GHOST_ENV].cpu().numpy()
+        ep_rel = t - ep_start
+        if chunk is None and ep_rel >= handover:
+            # 워밍업 종료: 실제 히스토리(2프레임)로 첫 chunk를 만들고 제어 전환
+            override.engage(alpha)
+            chunk = estimator.predict()
+            chunk_pos = offset
+            log.info(f"  handover @ step {t} (ep {len(episodes) + 1}): "
+                     f"B를 ManiFlow 토크 제어로 전환 (α={alpha:g})")
+
+        if chunk is not None:
+            cur = chunk[:, chunk_pos]  # (N, Da) — 이번 전이(t→t+1)용 토크
+            tau_b = override.set_torques(
+                cur[MANIFLOW_ENV : MANIFLOW_ENV + 1] * (args.torque_scale * blend)
+            )
+            tr["tau_b_cmd"][t] = tau_b[0].cpu().numpy()
+            tr["pred_a_passive"][t] = cur[GHOST_ENV].cpu().numpy()
+        else:
+            # 워밍업 구간: B는 PD 보행 중 — ManiFlow 미사용 (지표에서 제외)
+            tr["tau_b_cmd"][t] = np.nan
+            tr["pred_a_passive"][t] = np.nan
 
         obs, rewards, dones, _terminated, _extras = env.step(action)
         robot_state = env.simulator.get_robot_state()
@@ -460,9 +507,12 @@ def run_rollout(agent, env, estimator, override, args):
         ref_state = env.motion_lib.get_motion_state(mm.motion_ids, mm.motion_times)
         tr["ref_dof_pos"][t] = ref_state.dof_pos[0].cpu().numpy()
 
-        if not gain_check_done and t == 2:
+        if not gain_check_done and chunk is not None and ep_rel == handover + 2:
             leak = float(np.abs(tr["tau_b_qfrc"][t]).max())
-            if leak > 1.0:
+            if alpha > 0:
+                log.info(f"잔여 PD 활성 (α={alpha:g}): B qfrc PD 몫 |max| "
+                         f"{leak:.2f} N·m (0이 아닌 것이 정상)")
+            elif leak > 1.0:
                 log.warning(
                     f"Agent B의 override 채널에서 PD 잔여 토크 감지({leak:.2f} N·m) "
                     "— gain zero-out이 적용되지 않았을 수 있습니다."
@@ -471,18 +521,24 @@ def run_rollout(agent, env, estimator, override, args):
                 log.info(f"gain zero-out 검증 OK (B qfrc 잔여 {leak:.3f} N·m)")
             gain_check_done = True
 
-        chunk_pos += 1
-        need_new_chunk = (
-            args.predict_mode == "every_step" or chunk_pos >= Ta
-        )
-        if need_new_chunk:
-            chunk = estimator.predict()
-            chunk_pos = offset
+        if chunk is not None:
+            chunk_pos += 1
+            need_new_chunk = (
+                args.predict_mode == "every_step" or chunk_pos >= Ta
+            )
+            if need_new_chunk:
+                chunk = estimator.predict()
+                chunk_pos = offset
 
         if live_plot:
             for j in live_channels:  # hip_flexion_r / hip_flexion_l
-                viewer.log_scalar(f"torque/{ch_names[j]}/B_maniflow",
-                                  float(tr["tau_b_cmd"][t, j]))
+                if np.isfinite(tr["tau_b_cmd"][t, j]):
+                    viewer.log_scalar(f"torque/{ch_names[j]}/B_maniflow",
+                                      float(tr["tau_b_cmd"][t, j]))
+                    if alpha > 0:  # 총토크 = MF 주입분 + 잔여 PD 몫
+                        viewer.log_scalar(
+                            f"torque/{ch_names[j]}/B_total",
+                            float(tr["tau_b_cmd"][t, j] + tr["tau_b_qfrc"][t, j]))
                 viewer.log_scalar(f"torque/{ch_names[j]}/A_applied",
                                   float(tr["tau_a_applied"][t, j]))
             err = np.abs(tr["dof_pos"][t][:, ESTIMATOR_DOF_INDICES]
@@ -490,8 +546,10 @@ def run_rollout(agent, env, estimator, override, args):
             viewer.log_scalar("tracking/dof_err6/A_pureRL", float(err[GHOST_ENV].mean()))
             viewer.log_scalar("tracking/dof_err6/B_maniflow", float(err[MANIFLOW_ENV].mean()))
         if viewer is not None and t % 20 == 0:
+            b_mode = (f"{alpha:g}·PD+{blend:g}·ManiFlow" if alpha > 0
+                      else "ManiFlow torque")
             env.simulator.set_window_title(
-                f"A: RL+PD (ghost)  |  B: ManiFlow torque on {Da}ch (solid)  "
+                f"A: RL+PD (ghost)  |  B: {b_mode} on {Da}ch (solid)  "
                 f"|  ep {len(episodes) + 1}  step {t}/{T}")
 
         # ── 에피소드 종료 판정: env done + 자체 넘어짐/발산 감지 ──────────
@@ -532,7 +590,11 @@ def run_rollout(agent, env, estimator, override, args):
             log.info(f"  episode {len(episodes)}: steps {ep_start}-{t + 1} "
                      f"({t + 1 - ep_start} steps, {cause}) — 두 env 함께 리셋")
             obs = synced_reset(env, estimator, override)
-            chunk = estimator.predict()
+            if handover > 0:
+                override.restore()  # 다음 에피소드도 워밍업(PD 보행)부터
+                chunk = None
+            else:
+                chunk = estimator.predict()
             chunk_pos = offset
             ep_start = t + 1
             fall_count[:] = 0
@@ -552,10 +614,19 @@ def run_rollout(agent, env, estimator, override, args):
 
 
 # ---------------------------------------------------------------------------
-def compute_metrics(tr, episodes, ch_names):
+def compute_metrics(tr, episodes, ch_names, fall_z: float = 0.5):
     dof_err = np.abs(tr["dof_pos"] - tr["ref_dof_pos"][:, None, :])  # (T, N, D)
     err6 = dof_err[:, :, ESTIMATOR_DOF_INDICES].mean(axis=-1)   # (T, N)
     err_all = dof_err.mean(axis=-1)
+
+    # ManiFlow가 실제 제어한 구간 (워밍업 핸드오버 스텝은 NaN으로 기록됨)
+    valid = np.isfinite(tr["tau_b_cmd"]).all(axis=-1)  # (T,)
+
+    # 에피소드별 B의 최초 저고도 진입 시점 (에피소드-상대 스텝)
+    for e in episodes:
+        bz = tr["root_pos"][e["start"]:e["end"], MANIFLOW_ENV, 2]
+        below = np.where(bz < fall_z)[0] if fall_z > 0 else np.array([], int)
+        e["b_fall_rel"] = int(below[0]) if len(below) else None
 
     ep_lengths = [e["end"] - e["start"] for e in episodes]
     causes = [e["cause"] for e in episodes]
@@ -589,29 +660,43 @@ def compute_metrics(tr, episodes, ch_names):
                 axis=-1,
             ).mean()
         ),
-        "b_qfrc_residual_absmax": float(np.abs(tr["tau_b_qfrc"]).max()),
+        "maniflow_active_steps": int(valid.sum()),
+        "b_qfrc_residual_absmax": (
+            float(np.abs(tr["tau_b_qfrc"][valid]).max()) if valid.any() else 0.0
+        ),
         "channels": {},
     }
-    for j, name in enumerate(ch_names):
-        a, b = tr["tau_a_applied"][:, j], tr["tau_b_cmd"][:, j]
+    def _corr(x, y):
         with np.errstate(invalid="ignore"):
-            corr = float(np.corrcoef(a, b)[0, 1]) if a.std() > 0 and b.std() > 0 else float("nan")
+            if len(x) > 1 and x.std() > 0 and y.std() > 0:
+                return float(np.corrcoef(x, y)[0, 1])
+        return float("nan")
+
+    for j, name in enumerate(ch_names):
+        a, b = tr["tau_a_applied"][valid, j], tr["tau_b_cmd"][valid, j]
+        b_tot = b + tr["tau_b_qfrc"][valid, j]  # 총토크 = MF 주입 + 잔여 PD
         m["channels"][name] = {
-            "A_applied_std": float(a.std()),
-            "B_cmd_std": float(b.std()),
-            "B_cmd_absmean": float(np.abs(b).mean()),
-            "corr_A_B": corr,
+            "A_applied_std": float(a.std()) if len(a) else float("nan"),
+            "B_cmd_std": float(b.std()) if len(b) else float("nan"),
+            "B_cmd_absmean": float(np.abs(b).mean()) if len(b) else float("nan"),
+            "corr_A_B": _corr(a, b),
+            "B_total_std": float(b_tot.std()) if len(b_tot) else float("nan"),
+            "corr_A_Btotal": _corr(a, b_tot),
         }
     return m
 
 
-def format_metrics_text(m, ch_names) -> str:
+def format_metrics_text(m, ch_names, residual_pd_scale: float = 0.0) -> str:
     lines = []
     lines.append(f"episodes: {m['num_episodes']}  "
                  f"(mean length {m['mean_episode_length']:.1f} steps @ 20Hz)")
     lines.append("end causes: " + ", ".join(
         f"{c}×{n} (mean {m['mean_length_by_cause'][c]:.0f} steps)"
         for c, n in m["cause_counts"].items()))
+    fall_rel = [e.get("b_fall_rel") for e in m["episodes"]]
+    if any(v is not None for v in fall_rel):
+        lines.append("B fall step (ep-relative, root z<fall_z): "
+                     + ", ".join("-" if v is None else str(v) for v in fall_rel))
     lines.append("")
     lines.append(f"{'':24s} {'A (pure RL)':>14s} {'B (ManiFlow)':>14s}")
     lines.append(f"{'dof err (6ch, rad)':24s} "
@@ -625,15 +710,22 @@ def format_metrics_text(m, ch_names) -> str:
                  f"{m['reward_mean']['B_maniflow']:14.4f}")
     lines.append("")
     lines.append(f"root XY divergence (A↔B) mean: {m['root_xy_divergence_mean']:.3f} m")
-    lines.append(f"B qfrc residual |max| (≈0 expected): {m['b_qfrc_residual_absmax']:.3f} N·m")
+    if residual_pd_scale > 0:
+        lines.append(f"B qfrc PD share |max| (α={residual_pd_scale:g}): "
+                     f"{m['b_qfrc_residual_absmax']:.3f} N·m")
+    else:
+        lines.append("B qfrc residual |max| (≈0 expected): "
+                     f"{m['b_qfrc_residual_absmax']:.3f} N·m")
     lines.append("")
-    hdr = f"{'channel':>18s} | {'A std':>8s} | {'B std':>8s} | {'B |mean|':>8s} | {'corr':>6s}"
+    hdr = (f"{'channel':>18s} | {'A std':>8s} | {'B std':>8s} | {'B |mean|':>8s} "
+           f"| {'corr':>6s} | {'Btot std':>8s} | {'corrT':>6s}")
     lines.append(hdr)
     lines.append("-" * len(hdr))
     for name in ch_names:
         c = m["channels"][name]
         lines.append(f"{name:>18s} | {c['A_applied_std']:8.2f} | {c['B_cmd_std']:8.2f} "
-                     f"| {c['B_cmd_absmean']:8.2f} | {c['corr_A_B']:6.3f}")
+                     f"| {c['B_cmd_absmean']:8.2f} | {c['corr_A_B']:6.3f} "
+                     f"| {c['B_total_std']:8.2f} | {c['corr_A_Btotal']:6.3f}")
     return "\n".join(lines)
 
 
@@ -644,7 +736,8 @@ def _add_episode_lines(ax, episodes, t_end):
             ax.axvline(e["start"], color="gray", lw=0.8, ls=":", alpha=0.7)
 
 
-def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int):
+def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
+               residual_pd_scale: float = 0.0):
     T = tr["tau_b_cmd"].shape[0]
     for tag, t_end in [("full", T), ("zoom", min(zoom_steps, T))]:
         # 1) 채널별 토크: B 인가 vs A 적용 (+A 수동 예측 점선)
@@ -655,6 +748,11 @@ def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int):
                     label="A: applied (RL+PD)")
             ax.plot(t_axis, tr["tau_b_cmd"][:t_end, j], color="tab:red", lw=1.0,
                     alpha=0.85, label="B: ManiFlow cmd (applied)")
+            if residual_pd_scale > 0:
+                ax.plot(t_axis,
+                        tr["tau_b_cmd"][:t_end, j] + tr["tau_b_qfrc"][:t_end, j],
+                        color="tab:green", lw=0.9, alpha=0.8,
+                        label=f"B: total (MF+{residual_pd_scale:g}·PD)")
             ax.plot(t_axis, tr["pred_a_passive"][:t_end, j], color="tab:orange",
                     lw=0.8, ls="--", alpha=0.6, label="A: ManiFlow passive pred")
             _add_episode_lines(ax, episodes, t_end)
@@ -793,23 +891,28 @@ def main():
     )
     estimator = ManiFlowTorqueEstimator(policy, num_envs=env.num_envs,
                                         device=fabric.device)
+    assert args.denoise_steps >= 1
+    if args.denoise_steps != policy.num_inference_steps:
+        log.info(f"denoise(ODE) steps: {policy.num_inference_steps}(ckpt 설정) -> "
+                 f"{args.denoise_steps}")
+        policy.num_inference_steps = args.denoise_steps
 
-    # Agent B: estimator 채널을 ManiFlow 토크로 구동 (--action-dofs에서 파생)
+    # Agent B: estimator 채널(순수 hip 6 DOF)을 ManiFlow 토크로 구동
     dof_names = list(env.robot_config.kinematic_info.dof_names)
-    ESTIMATOR_DOF_INDICES[:] = resolve_action_dofs(args.action_dofs, dof_names)
-    if args.action_dofs == "first6":
-        log.warning("first6은 과거 잘못 수집된 legacy 모델 전용입니다 — "
-                    "채널에 knee/ankle이 포함됩니다.")
+    ESTIMATOR_DOF_INDICES[:] = hip_dof_indices(dof_names)
     override = JointTorqueOverride(
         sim,
         env_ids=[MANIFLOW_ENV],
         common_dof_indices=ESTIMATOR_DOF_INDICES,
     )
-    override.engage()
+    override.engage(args.residual_pd_scale)
+    if args.residual_pd_scale > 0:
+        log.info(f"잔여 PD 결합: hip 토크 = {args.residual_pd_scale:g}·PD + "
+                 f"{1.0 - args.residual_pd_scale:g}·ManiFlow (convex 블렌드)")
     log.info(f"ManiFlow ckpt: {maniflow_ckpt} (epoch={mf_info['epoch']}, "
              f"n_obs_steps={estimator.n_obs_steps}, "
              f"n_action_steps={estimator.n_action_steps})")
-    log.info(f"Override channels ({args.action_dofs}, COMMON DOF "
+    log.info(f"Override channels (hips, COMMON DOF "
              f"{ESTIMATOR_DOF_INDICES}): {override.dof_names}")
     log.info(f"Torque limits: {override.torque_limits.cpu().numpy()}")
 
@@ -830,7 +933,8 @@ def main():
 
     print(f"\nA/B rollout 시작: {args.episode_steps} steps | "
           f"predict_mode={args.predict_mode} | chunk_offset={args.chunk_offset} | "
-          f"torque_scale={args.torque_scale}"
+          f"torque_scale={args.torque_scale} | "
+          f"residual_pd_scale={args.residual_pd_scale}"
           + (" | recording" if args.record else ""))
     tr, episodes = run_rollout(agent, env, estimator, override, args)
 
@@ -840,9 +944,13 @@ def main():
 
     # ── 저장 ────────────────────────────────────────────────────────────
     ch_names = override.dof_names
-    m = compute_metrics(tr, episodes, ch_names)
-    text = format_metrics_text(m, ch_names)
-    print("\n=== A (pure RL+PD, ghost) vs B (RL+PD + ManiFlow torque, solid) ===")
+    m = compute_metrics(tr, episodes, ch_names, fall_z=args.fall_z)
+    text = format_metrics_text(m, ch_names,
+                               residual_pd_scale=args.residual_pd_scale)
+    b_desc = (f"RL+{args.residual_pd_scale:g}·PD + "
+              f"{1.0 - args.residual_pd_scale:g}·ManiFlow"
+              if args.residual_pd_scale > 0 else "RL+PD + ManiFlow torque")
+    print(f"\n=== A (pure RL+PD, ghost) vs B ({b_desc}, solid) ===")
     print(text + "\n")
 
     np.savez_compressed(out_dir / "traces.npz", **tr,
@@ -854,12 +962,15 @@ def main():
         "maniflow_ckpt": str(maniflow_ckpt),
         "maniflow_epoch": mf_info["epoch"],
         "predict_mode": args.predict_mode,
+        "denoise_steps": int(policy.num_inference_steps),
         "chunk_offset": args.chunk_offset,
         "torque_scale": args.torque_scale,
+        "residual_pd_scale": args.residual_pd_scale,
+        "handover_steps": args.handover_steps,
         "episode_steps": int(tr["tau_b_cmd"].shape[0]),
         "ghost_env": GHOST_ENV,
         "maniflow_env": MANIFLOW_ENV,
-        "action_dofs": args.action_dofs,
+        "action_dofs": "hips",
         "action_dof_indices": list(ESTIMATOR_DOF_INDICES),
         "override_channels": ch_names,
         "spawn_xy": [float(fixed_xy[0]), float(fixed_xy[1])],
@@ -870,11 +981,16 @@ def main():
     with open(out_dir / "metrics.txt", "w") as f:
         f.write(f"rl ckpt:  {args.rl_checkpoint}\n"
                 f"mf ckpt:  {maniflow_ckpt} (epoch {mf_info['epoch']})\n"
-                f"predict:  {args.predict_mode} (chunk_offset={args.chunk_offset}, "
-                f"torque_scale={args.torque_scale})\n"
+                f"predict:  {args.predict_mode} (denoise_steps="
+                f"{policy.num_inference_steps}, "
+                f"chunk_offset={args.chunk_offset}, "
+                f"torque_scale={args.torque_scale}, "
+                f"residual_pd_scale={args.residual_pd_scale}, "
+                f"handover_steps={args.handover_steps})\n"
                 f"channels: {ch_names}\n\n" + text + "\n")
 
-    save_plots(out_dir, tr, episodes, ch_names, args.zoom_steps)
+    save_plots(out_dir, tr, episodes, ch_names, args.zoom_steps,
+               residual_pd_scale=args.residual_pd_scale)
 
     # ── 녹화 영상 + 토크 패널 합성 ──────────────────────────────────────
     if args.record:

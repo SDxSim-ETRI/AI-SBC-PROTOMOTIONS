@@ -20,10 +20,15 @@ Lets selected envs drive selected DOFs with externally computed torques
 built-in (implicit) PD — the exact actuation the RL policy was trained with.
 
 Mechanism (Newton + SolverMuJoCo only):
-  1. ``engage()`` zeroes ``joint_target_ke/kd`` for the overridden (env, DOF)
-     pairs and calls ``notify_model_changed(JOINT_DOF_PROPERTIES)``. MuJoCo
-     Warp stores actuator gains per world (``actuator_gainprm/biasprm`` are
-     world-expanded), so this disables the implicit PD only where requested.
+  1. ``engage(gain_scale)`` scales ``joint_target_ke/kd`` by ``gain_scale``
+     (default 0 = fully off) for the overridden (env, DOF) pairs and calls
+     ``notify_model_changed(JOINT_DOF_PROPERTIES)``. MuJoCo Warp stores
+     actuator gains per world (``actuator_gainprm/biasprm`` are
+     world-expanded), so this attenuates the implicit PD only where
+     requested. ``gain_scale > 0`` keeps a residual substep-feedback
+     impedance (α·kp, α·kd) on the overridden channels — blend the injected
+     torque with ``(1 - gain_scale)`` so the nominal-trajectory total stays
+     unchanged (residual-PD hybrid).
   2. ``set_torques()`` writes the desired torques into ``control.joint_f``
      via ``ArticulationView.set_dof_forces``. SolverMuJoCo copies
      ``joint_f`` into ``qfrc_applied`` every substep — an applied
@@ -35,9 +40,11 @@ Notes:
   - Torques are held constant across the decimated substeps of one control
     step, i.e. standard torque control with decimation.
   - ``qfrc_actuator`` readback (``robot_state.dof_forces`` under
-    BUILT_IN_PD) reports ~0 for overridden DOFs: applied force goes through
-    ``qfrc_applied``, which MuJoCo does not include in ``qfrc_actuator``.
-    The commanded torque itself is the ground truth for those DOFs.
+    BUILT_IN_PD) reports ~0 for overridden DOFs when ``gain_scale == 0``:
+    applied force goes through ``qfrc_applied``, which MuJoCo does not
+    include in ``qfrc_actuator``. With ``gain_scale > 0`` it reports the
+    residual PD share; the total joint torque is then
+    ``qfrc_actuator + commanded``.
 """
 
 from typing import List, Optional, Sequence
@@ -108,11 +115,26 @@ class JointTorqueOverride:
 
         self._engaged = False
         self._saved_gains: Optional[tuple] = None
+        self.gain_scale: float = 1.0  # 1.0 = PD untouched (not engaged)
 
-    def engage(self) -> None:
-        """Disable built-in PD on the overridden (env, DOF) pairs."""
+    def engage(self, gain_scale: float = 0.0) -> None:
+        """Disable or attenuate built-in PD on the overridden (env, DOF) pairs.
+
+        Args:
+            gain_scale: Fraction α of the original ke/kd left active on the
+                overridden channels. 0 (default) = pure torque control.
+                0 < α < 1 keeps a residual implicit-PD impedance evaluated
+                every physics substep; the caller should then blend the
+                injected torque as ``(1 - α)·τ`` so the on-manifold total
+                (α·PD + (1-α)·τ_ff ≈ τ_nominal) matches the unmodified
+                controller and only the torque *source* is split.
+                α = 1 leaves the PD gains untouched and merely enables
+                ``set_torques`` — pure *additive* injection on top of the
+                full built-in PD (e.g. torque-disturbance collection).
+        """
         if self._engaged:
             return
+        assert 0.0 <= gain_scale <= 1.0, f"gain_scale must be in [0, 1]: {gain_scale}"
         import warp as wp
         from newton.solvers import SolverNotifyFlags
 
@@ -125,11 +147,16 @@ class JointTorqueOverride:
             ke[self.env_ids[:, None], self.sim_dof_indices[None, :]].clone(),
             kd[self.env_ids[:, None], self.sim_dof_indices[None, :]].clone(),
         )
-        ke[self.env_ids[:, None], self.sim_dof_indices[None, :]] = 0.0
-        kd[self.env_ids[:, None], self.sim_dof_indices[None, :]] = 0.0
+        ke[self.env_ids[:, None], self.sim_dof_indices[None, :]] = (
+            self._saved_gains[0] * gain_scale
+        )
+        kd[self.env_ids[:, None], self.sim_dof_indices[None, :]] = (
+            self._saved_gains[1] * gain_scale
+        )
         sim.robot_view.set_attribute("joint_target_ke", sim.model, ke_wp)
         sim.robot_view.set_attribute("joint_target_kd", sim.model, kd_wp)
         sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+        self.gain_scale = gain_scale
         self._engaged = True
 
     def restore(self) -> None:
@@ -151,6 +178,7 @@ class JointTorqueOverride:
         sim.robot_view.set_attribute("joint_target_kd", sim.model, kd_wp)
         sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
         self.zero()
+        self.gain_scale = 1.0
         self._engaged = False
 
     def set_torques(self, torques: torch.Tensor) -> torch.Tensor:

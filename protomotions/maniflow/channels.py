@@ -57,19 +57,3 @@ def hip_dof_indices(dof_names: Sequence[str]) -> List[int]:
             f"hip DOFs not found in dof_names: {missing} (got {names[:12]}...)"
         )
     return [names.index(n) for n in HIP_DOF_NAMES]
-
-
-def resolve_action_dofs(mode: str, dof_names: Sequence[str]) -> List[int]:
-    """스크립트 공용 ``--action-dofs`` 해석기.
-
-    Args:
-        mode: ``"hips"`` — 순수 hip 6채널(신규 계약, 기본값).
-              ``"first6"`` — 공통 DOF 0-5 (과거 잘못 수집된 모델과의 비교 전용:
-              오른다리 전체 + 왼쪽 hip flexion).
-        dof_names: COMMON ordering DOF 이름 목록.
-    """
-    if mode == "hips":
-        return hip_dof_indices(dof_names)
-    if mode == "first6":
-        return list(range(6))
-    raise ValueError(f"unknown action-dofs mode: {mode!r} (hips | first6)")
