@@ -276,6 +276,59 @@ predict **1회의 지연은 두 모드가 동일**(같은 모델 호출)하고, 
   2.4 s / 60 s)뿐. N=10 시절 every_step의 부담(38.6%)이 N=3에서 11.8%로
   내려가 SBC 이식 마진이 확보됨.
 
+## 라벨 v2: substep 평균 토크 (2026-07-15 착수 — run04)
+
+### 왜 라벨을 바꾸나 (receding 문턱 인하의 다음 수단)
+
+기존 라벨(원본 수집기·run02·run03 공통)은 `hip_torque` = **한 control
+step(50 ms = substep 6개)의 마지막 substep 순간의 qfrc_actuator 점 샘플**이다.
+그런데 배포에서 ManiFlow 토크는 50 ms 동안 상수(ZOH)로 재생되므로, 물리적으로
+일관된 피드포워드 라벨은 점 샘플이 아니라 **스텝 내 6개 substep의 평균 토크**
+(= 50 ms 동안 상수로 재생했을 때 임펄스/충격량이 실제와 같아지는 값)다.
+
+### 실측: 점 샘플은 스텝 임펄스를 계통적으로 과소평가한다 (스모크, 200스텝)
+
+같은 궤적에서 두 readback을 동시 기록한 비교 (외란 0.3σ 포함):
+
+| 채널 | last(점) std | **mean std** | corr | \|차이\| 평균 / 최대 |
+|---|---|---|---|---|
+| hip_flexion_r | 72.2 | **84.2** | 0.968 | 18.1 / 71.7 N·m |
+| hip_adduction_r | 50.6 | 55.8 | 0.957 | 12.8 / 53.9 |
+| hip_rotation_r | 17.6 | 20.5 | 0.869 | 8.1 / 44.0 |
+| hip_flexion_l | 58.2 | 68.1 | 0.946 | 17.5 / 61.6 |
+| hip_adduction_l | 52.5 | 58.9 | 0.963 | 13.2 / 46.5 |
+| hip_rotation_l | 17.8 | 20.0 | 0.899 | 7.3 / 24.4 |
+
+예상과 방향이 반대였다 — 평균이 점 샘플보다 **크다**. 메커니즘: RL이 20 Hz로
+PD 목표각을 점프시키면 implicit PD 토크는 **스텝 초반 substep에서 스파이크
+후 정착**하는 프로파일을 그리는데, 마지막 substep은 "정착된 꼬리"라 그 스텝이
+실제 전달한 임펄스보다 작다. 즉 **기존 라벨로 배운 모델은 ZOH 재생 시 매
+스텝 임펄스가 계통적으로 부족**했다(채널 std 기준 ~15-17%) — 잔여 PD 없이
+재생하면 root z가 단조 하강하며 주저앉던 관찰(관찰 3)과 부합하는 결손이고,
+DART 교정 응답(고주파)에서는 점 샘플의 왜곡이 더 크다(corr 0.87-0.97).
+
+### 구현
+
+- `NewtonSimulator`: `accumulate_qfrc_kernel`(warp)로 `_simulate()`의
+  decimation 루프에서 substep마다 qfrc를 누적(CUDA graph 캡처에 포함),
+  `get_substep_mean_dof_forces()`가 평균을 COMMON ordering으로 반환.
+- `collect_walk_zarr_dagger.py`: `--label-mode {mean,last}` (**기본 mean**,
+  last=기존 재현용), zarr attrs `label_source` 기록. `--denoise-steps`(기본 3,
+  블렌드 모드 estimator를 배포 표준과 일치). α=1·외란 0·mean 조합(순수 보행
+  재수집)도 허용 — 원본 2000 eps를 mean 라벨로 재수집하는 용도.
+
+### v2 데이터셋·학습 (run04)
+
+라벨 정의가 다른 데이터를 섞지 않기 위해 **전량 mean 라벨로 재수집** (2026-07-15):
+purev2 2000(순수 보행) + dart030v2 384 + dart060v2 128 + blend050av2 192
+(run03 estimator, N=3, 외란 0.15σ) + blend050bv2 128 → 총 2832 eps →
+`walking-flat-newton-hips-dagger-v2.zarr` → 학습 tag
+`newton-hips-dagger-v2-run04` (200 epochs ≈ 16.5 h).
+
+평가 계획(완료 후): receding α∈{0.375, 0.25} h40 + α=0.5 h0 + every_step
+α=0.25 — 가설: 임펄스 결손 제거로 (a) receding 문턱 인하 여부, (b) 저α에서
+B 토크 std 과대(과교정) 완화 여부.
+
 ## 결과물 경로
 
 | 내용 | 경로 |
