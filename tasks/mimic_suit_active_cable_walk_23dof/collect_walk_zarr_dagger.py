@@ -34,11 +34,19 @@
    흡수되는 과도 구간 포함)를 데이터에 넣는 DAgger 본체.
 
 라벨 규약 (hip_torque 필드):
-  label = qfrc_actuator readback / α   (α=1이면 readback 그대로 = 기존 수집기와
-  동일), effort limit으로 클램프. readback은 α·(implicit PD 응답)이고 주입
-  토크(qfrc_applied)는 포함되지 않으므로, 나누기 α는 "이 상태에서 full-gain
+  label = qfrc_actuator readback / α   (α=1이면 readback 그대로), effort
+  limit으로 클램프. readback은 α·(implicit PD 응답)이고 주입 토크
+  (qfrc_applied)는 포함되지 않으므로, 나누기 α는 "이 상태에서 full-gain
   PD(전문가)가 냈을 토크"의 근사 질의(DAgger expert query)입니다. 외란/MF
   주입분은 상태를 만든 원인일 뿐 라벨에 들어가지 않습니다.
+
+라벨 소스 (--label-mode, 기본 mean — 2026-07-15 v2):
+  mean = control step(50 ms) 내 6개 substep의 **평균** qfrc — 토크를 20 Hz
+         ZOH(상수 유지)로 재생할 때 임펄스(충격량)가 실제와 같아지는,
+         물리적으로 일관된 피드포워드 값. 교란 하 PD 교정 응답은
+         고주파라 점 샘플이 스텝 대표값보다 극단적인데(run03에서 B 토크
+         std 과대·과교정의 원인 후보), 평균 라벨은 이를 제거한다.
+  last = 마지막 substep의 점 샘플 (기존 수집기/run03과 동일 — 재현용).
 
 정렬은 기존 수집기와 동일: env.step() 직후의 robot_state에서 obs[t]와
 hip_torque[t]를 같은 시점에 기록 (에피소드 첫 프레임 = s₁). 필드 레이아웃도
@@ -105,6 +113,10 @@ def _create_parser():
                         "(DART 모드 — --perturb-scale 필요). α<1이면 ManiFlow "
                         "estimator가 (1-α)배 토크를 주입하는 배포 동일 블렌드로 "
                         "수집(DAgger on-policy). 라벨은 항상 readback/α")
+    p.add_argument("--label-mode", choices=["mean", "last"], default="mean",
+                   help="hip_torque 라벨 소스. mean=substep 평균 qfrc(20Hz ZOH "
+                        "재생과 임펄스 일관 — v2 기본), last=마지막 substep 점 "
+                        "샘플(기존 수집본/run03 재현용)")
     p.add_argument("--perturb-scale", type=float, default=0.0,
                    help="hip ZOH 토크 외란의 채널별 σ 배율 (σ = 이 값 × 기준 "
                         "std). 0 = 외란 없음")
@@ -121,6 +133,9 @@ def _create_parser():
     p.add_argument("--maniflow-root", default=None)
     p.add_argument("--chunk-offset", type=int, default=1, choices=[0, 1],
                    help="receding chunk에서 제어에 쓸 시작 인덱스 (배포 기본 1)")
+    p.add_argument("--denoise-steps", type=int, default=3,
+                   help="블렌드 모드 estimator의 추론 ODE 스텝 수 (배포 기본과 "
+                        "동일하게 3)")
     # ── 낙상 필터 (collect_walk_zarr.py와 동일) ──────────────────────────
     p.add_argument("--fall-z",    type=float, default=0.5)
     p.add_argument("--fall-hold", type=int, default=10)
@@ -131,10 +146,12 @@ def _create_parser():
 _parser = _create_parser()
 _args, _ = _parser.parse_known_args()
 
-if _args.residual_pd_scale >= 1.0 and _args.perturb_scale <= 0.0:
-    _parser.error("α=1(full PD)이고 외란도 없으면 기존 collect_walk_zarr.py와 "
-                  "동일한 데이터입니다 — --perturb-scale 또는 "
-                  "--residual-pd-scale을 지정하세요.")
+if (_args.residual_pd_scale >= 1.0 and _args.perturb_scale <= 0.0
+        and _args.label_mode == "last"):
+    _parser.error("α=1(full PD)·외란 없음·last 라벨이면 기존 "
+                  "collect_walk_zarr.py와 동일한 데이터입니다 — "
+                  "--perturb-scale / --residual-pd-scale / --label-mode mean "
+                  "중 하나를 지정하세요.")
 if not (0.0 < _args.residual_pd_scale <= 1.0):
     _parser.error(f"--residual-pd-scale은 (0, 1] 범위여야 합니다 "
                   f"(라벨 = readback/α): {_args.residual_pd_scale}")
@@ -300,6 +317,10 @@ def init_zarr(output_path: str, target: int, T: int, args,
                                           else "dart")
     store.attrs["residual_pd_scale"]   = args.residual_pd_scale
     store.attrs["label_rule"]          = "qfrc_actuator_readback/alpha (clamped)"
+    store.attrs["label_source"]        = ("qfrc_substep_mean"
+                                          if args.label_mode == "mean"
+                                          else "qfrc_last_substep")
+    store.attrs["denoise_steps"]       = args.denoise_steps
     store.attrs["perturb_scale"]       = args.perturb_scale
     store.attrs["perturb_hold_steps"]  = args.perturb_hold
     store.attrs["perturb_clamp_sigma"] = args.perturb_clamp
@@ -335,7 +356,8 @@ def collect_episodes(agent, env, store: zarr.Group, target: int, T: int,
     mode = "blend" if alpha < 1.0 else "dart"
     print(f"\nDAgger 수집 시작 [{mode}]: target={target} eps | {N} envs | T={T} "
           f"| α={alpha:g} | perturb σ×{args.perturb_scale:g} "
-          f"hold={args.perturb_hold} | fall filter z<{args.fall_z}×{args.fall_hold}")
+          f"hold={args.perturb_hold} | label={args.label_mode} "
+          f"| fall filter z<{args.fall_z}×{args.fall_hold}")
     t_start = time.time()
 
     zeros6 = torch.zeros(N, 6, device=device)
@@ -388,8 +410,14 @@ def collect_episodes(agent, env, store: zarr.Group, target: int, T: int,
             active_np = ~env_failed
             if active_np.any():
                 active_th = torch.from_numpy(active_np).to(device)
-                # 전문가(full-gain PD) 질의: readback = α·PD_implicit
-                label = robot_state.dof_forces[:, action_idx_th] / alpha
+                # 전문가(full-gain PD) 질의: readback = α·PD_implicit.
+                # mean 모드는 substep 평균(20Hz ZOH 임펄스 일관 라벨),
+                # last 모드는 마지막 substep 점 샘플(기존 관례).
+                if args.label_mode == "mean":
+                    forces = env.simulator.get_substep_mean_dof_forces()
+                else:
+                    forces = robot_state.dof_forces
+                label = forces[:, action_idx_th] / alpha
                 label = torch.clamp(label, -torque_limits, torque_limits)
                 bufs["hip_torque"][active_np, t] = label[active_th].cpu().numpy()
                 bufs["dof_pos"][active_np, t] = (
@@ -499,8 +527,11 @@ def main():
         )
         estimator = ManiFlowTorqueEstimator(policy, num_envs=env.num_envs,
                                             device=fabric.device)
+        assert args.denoise_steps >= 1
+        policy.num_inference_steps = args.denoise_steps
         log.info(f"ManiFlow ckpt: {maniflow_ckpt} (epoch={mf_info['epoch']}, "
-                 f"n_action_steps={estimator.n_action_steps})")
+                 f"n_action_steps={estimator.n_action_steps}, "
+                 f"denoise_steps={policy.num_inference_steps})")
 
     store = init_zarr(output_path, args.target_episodes, args.episode_steps,
                       args, dof_names=dof_names,
