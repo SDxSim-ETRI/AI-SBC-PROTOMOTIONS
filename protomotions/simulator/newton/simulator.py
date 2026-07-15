@@ -102,6 +102,22 @@ def apply_torques_kernel(
     joint_f[qd_idx] = torques[tid]
 
 
+@wp.kernel
+def accumulate_qfrc_kernel(
+    qfrc: wp.array(dtype=wp.float32),
+    accum: wp.array(dtype=wp.float32),
+    qd_stride: int,
+    qd_dof_start: int,
+    num_dofs: int,
+):
+    """Accumulate per-substep qfrc_actuator readback (CUDA graph compatible)."""
+    tid = wp.tid()
+    env_id = tid // num_dofs
+    dof_id = tid % num_dofs
+
+    accum[tid] = accum[tid] + qfrc[env_id * qd_stride + qd_dof_start + dof_id]
+
+
 class NewtonSimulator(Simulator):
     """Newton physics engine wrapper for our simulation framework."""
 
@@ -718,6 +734,21 @@ class NewtonSimulator(Simulator):
         self.state_1 = self.model.state()
         self.control = self.model.control()
 
+        # Substep 평균 qfrc_actuator 누적 버퍼 (BUILT_IN_PD 전용).
+        # 기본 dof_forces readback은 마지막 substep의 점 샘플이라, 토크를
+        # 20Hz ZOH로 재생하는 용도(ManiFlow 라벨)에는 한 control step의
+        # 평균(임펄스 등가값)이 물리적으로 일관됨. _simulate()가 CUDA graph로
+        # 캡처되므로 누적은 warp 커널로 수행 (get_substep_mean_dof_forces 참고).
+        self._qfrc_accum_wp = None
+        if self.control_type == ControlType.BUILT_IN_PD:
+            self._qfrc_accum_wp = wp.zeros(
+                self.num_envs * self._pd_num_dofs,
+                dtype=wp.float32,
+                device=str(self.device)
+                if not isinstance(self.device, str)
+                else self.device,
+            )
+
         newton.eval_fk(
             self.model, self.model.joint_q, self.model.joint_qd, self.state_0
         )
@@ -975,6 +1006,9 @@ class NewtonSimulator(Simulator):
 
     def _simulate(self) -> None:
         """Run physics simulation for one frame (decimation substeps)."""
+        accumulate_qfrc = self._qfrc_accum_wp is not None
+        if accumulate_qfrc:
+            self._qfrc_accum_wp.zero_()
         for _ in range(self.decimation):
             self.state_0.clear_forces()
             if self.control_type == ControlType.PROPORTIONAL:
@@ -987,6 +1021,19 @@ class NewtonSimulator(Simulator):
                 self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
             )
             self.state_0, self.state_1 = self.state_1, self.state_0
+            if accumulate_qfrc:
+                # swap 직후 state_0 = 이번 substep 결과 상태 (qfrc 포함)
+                wp.launch(
+                    kernel=accumulate_qfrc_kernel,
+                    dim=self.num_envs * self._pd_num_dofs,
+                    inputs=[
+                        self.state_0.mujoco.qfrc_actuator,
+                        self._qfrc_accum_wp,
+                        self._pd_qd_stride,
+                        self._pd_qd_dof_start,
+                        self._pd_num_dofs,
+                    ],
+                )
 
         if self.decimation % 2 != 0:
             self.state_0.assign(self.state_1)
@@ -1247,6 +1294,25 @@ class NewtonSimulator(Simulator):
         return RobotState(
             dof_forces=dof_forces, state_conversion=StateConversion.SIMULATOR
         )
+
+    def get_substep_mean_dof_forces(self) -> torch.Tensor:
+        """직전 control step의 substep 평균 적용 토크 (COMMON DOF ordering).
+
+        기본 ``dof_forces``(qfrc_actuator readback)는 마지막 substep의 점
+        샘플이다. 이 함수는 decimation 구간 전체의 평균 — 토크를 20 Hz
+        ZOH(상수 유지)로 재생할 때 임펄스가 실제와 같아지는 값 — 을
+        반환한다 (ManiFlow substep-mean 라벨 수집용). BUILT_IN_PD 전용.
+
+        Returns:
+            (num_envs, num_dofs) torch.Tensor, COMMON ordering.
+        """
+        assert self._qfrc_accum_wp is not None, (
+            "substep-mean readback은 BUILT_IN_PD에서만 사용 가능"
+        )
+        mean_sim = wp.to_torch(self._qfrc_accum_wp).view(
+            self.num_envs, self._pd_num_dofs
+        ) / float(self.decimation)
+        return mean_sim[:, self.data_conversion.dof_convert_to_common]
 
     def _get_simulator_dof_state(
         self, env_ids: Optional[torch.Tensor] = None
