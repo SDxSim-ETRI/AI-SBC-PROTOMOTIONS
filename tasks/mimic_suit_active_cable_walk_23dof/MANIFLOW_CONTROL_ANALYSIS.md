@@ -146,6 +146,10 @@ PD로 보행(estimator에는 실제 관측 히스토리 축적)한 뒤 ManiFlow 
 | 0.5 | 40 | **60 s 완주** | — | 0.129→**0.130** | **0.91–0.95** |
 | 0.5 | **0** | **60 s 완주** | — | 0.128→0.131 | 0.94–0.95 |
 | 0.5 + **MF 끔** | 40 | 60 s 완주 | — | 0.128→**0.157** | 0.47–0.63 |
+| **0.375 + MF 끔** † | 40 | **6/6 낙상** | **38–40스텝 (~2.0 s)** | 0.136→0.308 | ≈0 (−0.18~0.16) |
+
+† 2026-07-16 녹화런(run04 로드, 600스텝)에서 측정 — MF 기여가 0이라 모델
+무관, 순수 0.375·PD 단독 조건.
 
 읽는 법:
 
@@ -162,6 +166,13 @@ PD로 보행(estimator에는 실제 관측 히스토리 축적)한 뒤 ManiFlow 
   corr(A,B총) 0.47–0.63으로 걸음이 A에서 이탈하는 것을, MF 피드포워드가
   A 수준(+1%, 0.95)으로 되돌린다. "PD가 안정화를, ManiFlow가 보행 토크
   본체를" 분담이 실증됨.
+- **α=0.375에서는 MF가 생존 필수 (2026-07-16 확인)**: 같은 MF 끔 조건을
+  α=0.375로 내리면 **매 에피소드 보조 차단 ~2 s 뒤 낙상**(6/6, 재현성 극도로
+  높음 — 38–40스텝), corrT ≈0으로 보행 와해. 즉 **PD 단독 생존 문턱은
+  α ∈ (0.375, 0.5]** — α=0.375 착용자(잔존 근력 37.5%)에게 슈트 보조는
+  품질 복원이 아니라 **낙상 방지 그 자체**다. 반면 MF 켜면 같은 α로 30 s
+  완주(err6 +7.6%, corrT 0.82–0.88, root 발산 1.6 cm). α=0.5 ablation과
+  합치면: 보조 몫 50%는 품질 개선, 62.5%는 생존 조건.
 - **응용 관점 (2026-07-14 추가)**: 실제 적용 대상은 완전한 하반신 마비자가
   아니라 **보조력(assist) 제공**이 목표이므로, α<0.375에서 낙상하는 것이
   치명적 한계는 아니다. 시뮬레이션의 잔여 PD 항은 실사용에서 **착용자의 잔존
@@ -184,6 +195,26 @@ A=반투명 고스트(순수 RL), B=메시(0.5·PD + 0.5·ManiFlow). `--record`�
 mp4와 토크 패널 합성 `sim_with_torque.mp4`를 결과 디렉토리에 저장한다.
 2026-07-14부터 `--maniflow-run-dir` 기본값이 run02라 생략해도 되지만, 재현
 기록을 위해 명시를 권장.
+
+**보조 ON/OFF 대비 영상 (α=0.375, 2026-07-16 제작)** — "보조 없으면 낙상,
+보조하면 보행" 시연용 페어. `--record`는 뷰어를 자동 활성화하므로 headless
+셸에서도 그대로 실행 가능(DISPLAY 필요):
+
+```bash
+# 보조 OFF: 착용자 잔존 근력 37.5%만 — 차단 ~2 s 뒤 매번 낙상
+bash tasks/mimic_suit_active_cable_walk_23dof/compare_maniflow_control_newton.sh --record \
+    --maniflow-run-dir <run04> --residual-pd-scale 0.375 --torque-scale 0 \
+    --handover-steps 40 --episode-steps 600
+
+# 보조 ON: 같은 조건 + ManiFlow 62.5% 보조 — 30 s 완주
+bash tasks/mimic_suit_active_cable_walk_23dof/compare_maniflow_control_newton.sh --record \
+    --maniflow-run-dir <run04> --residual-pd-scale 0.375 \
+    --handover-steps 40 --episode-steps 600
+```
+
+두 영상 모두 매 에피소드 첫 2 s(40스텝)는 full-PD 워밍업이라 정상 보행으로
+시작하고, 전환 시점부터 조건이 갈린다 — OFF 영상은 "정상 → 차단 → 2 s 낙상"
+이 6회 반복되는 구조.
 
 ## DAgger 재학습 결과 (run03, 2026-07-15) — 문턱 α≤0.25 달성 (every_step 조건)
 
@@ -325,9 +356,33 @@ purev2 2000(순수 보행) + dart030v2 384 + dart060v2 128 + blend050av2 192
 `walking-flat-newton-hips-dagger-v2.zarr` → 학습 tag
 `newton-hips-dagger-v2-run04` (200 epochs ≈ 16.5 h).
 
-평가 계획(완료 후): receding α∈{0.375, 0.25} h40 + α=0.5 h0 + every_step
-α=0.25 — 가설: 임펄스 결손 제거로 (a) receding 문턱 인하 여부, (b) 저α에서
-B 토크 std 과대(과교정) 완화 여부.
+### v2 결과 (2026-07-16, run04 best=epoch180 val 0.01560) — receding 문턱 못 넘음
+
+학습 중 segfault 5회(8-worker fork+CUDA 산발 네이티브 크래시, run02/03은 운
+좋게 무사고) → latest.ckpt 자동 재개 루프로 완주. epoch 180 이후 val 플래토
+확인 후 210에서 정지.
+
+| 평가 (run04, 1200스텝, N=3) | 결과 | dof err6 (A→B) |
+|---|---|---|
+| α=0.5, h0, receding | 완주 (run03과 동일, +2%) | 0.128→0.131 |
+| α=0.375, h40, receding | 완주 | 0.128→0.139 |
+| **α=0.25, h40, receding** | **여전히 낙상 105–275스텝** (run02 114–218 / run03 82–220 — 꼬리만 소폭 연장) | 0.134→0.214 |
+| α=0.25, h40, every_step | 1124스텝(56 s) 낙상 1회 — run03과 동급(경계 편차 범위) | 0.129→0.194 |
+| α=0.1, h40, every_step | 낙상 75–113 (run03 64–117과 동일) | 0.136→0.323 |
+| passive (vs 점 샘플 GT) | MAE 12.6 N·m / corr 0.94 — **모델 열화 아님**: 점 샘플 GT와 mean 라벨의 정의 차(스모크 실측 \|mean−last\| 13–18 N·m, corr 0.87–0.97)가 그대로 지표에 나타난 것 | — |
+
+**판정**: 임펄스 결손 보정(라벨 v2)은 방향은 맞지만 **receding 문턱
+(0.25, 0.375]을 넘기기엔 불충분** — corr은 소폭 개선(0.21→0.31-0.44)됐으나
+낙상 자체는 유지, 저α 과교정(B std 과대, 특히 rotation)도 잔존. 즉 **문턱을
+고정하는 지배 요인은 라벨 품질이 아니라 피드백 신선도(stale ZOH 교정)**임이
+v1(run03)·v2(run04) 두 번의 재학습으로 확정됨.
+
+**실용 결론**: 배포 작동점은 (a) **receding α≥0.375**(연산 최소, 착용자
+기여 37.5%↑) 또는 (b) **every_step α=0.25**(N=3, 예산 11.8%, 착용자 기여
+25%) — 두 모델(run03/run04) 모두 이 작동점에서 동등하게 동작. 그 아래
+α는 50 ms ZOH 교정의 대역폭 한계로 어느 라벨/데이터로도 불가(α=0 es 재확인).
+남은 아이디어(우선순위 낮음): chunk 내 시간 감쇠 블렌딩, DART 강도 완화,
+제어 주기 상향(50→100 Hz 재수집·재학습 — 시스템 전반 변경 필요).
 
 ## 결과물 경로
 
@@ -345,6 +400,11 @@ B 토크 std 과대(과교정) 완화 여부.
 | run03 평가: passive / α=0.5 h0 / α=0.375 h40 / α=0.25 h40 / **α=0.25 h40 every_step(완주)** | `maniflow_infer_results/2026-07-15_run03_passive`, `maniflow_control_results/2026-07-15_run03_{a050_h0,a0375_h40,a025_h40,a025_h40es}` |
 | run03 중간(epoch100) 프로브 | `maniflow_control_results/2026-07-15_probe_run03e100_a025{,_h40}` |
 | denoise 스텝 축소 폐루프 (N=3/1, seed 42/43) | `maniflow_control_results/2026-07-15_run03_{a025_h40es_n3,a050_h0_n3,a025_h40es_n1,a025_h40es_n3_s43,a025_h40es_n10_s43}` |
+| v2 수집 원본 (mean 라벨, 2832 eps 5종) | `zarr_data/flat/flat-newton-dagger-{purev2,dart030v2,dart060v2,blend050av2,blend050bv2}-20260715.zarr` |
+| run04(v2) 평가: passive / receding α=0.5·0.375·0.25 / es α=0.25·0.1 | `maniflow_infer_results/2026-07-16_run04_passive`, `maniflow_control_results/2026-07-16_run04_{a050_h0,a0375_h40,a025_h40,a025_h40es,a010_h40es}` |
+| run04 중간(epoch100) receding 프로브 | `maniflow_control_results/2026-07-15_probe_run04e100_a025_h40` |
+| **α=0.375 보조 OFF 녹화** (torque_scale 0, 6/6 낙상 — `sim_with_torque.mp4` 포함) | `maniflow_control_results/2026-07-16_run04_a0375_h40_mf0_video` |
+| **α=0.375 보조 ON 녹화** (30 s 완주 — `sim_with_torque.mp4` 포함) | `maniflow_control_results/2026-07-16_run04_a0375_h40_on_video` |
 
 영상 읽는 법(handover 녹화): 매 에피소드 첫 2초는 워밍업(빨간 선 없음, B가
 A와 겹쳐 보행) → 전환 직후 빨간 선이 검정과 겹치며 시작 → ~1.3 s 뒤 B만
