@@ -55,6 +55,29 @@ ManiFlow 토크 제어로 전환합니다. 리셋 직후 상태 s0는 수집 데
 보행 상태에서 피드포워드 제어의 순수한 생존 시간을 측정합니다. 워밍업 구간의
 tau_b_cmd/pred_a_passive는 NaN으로 기록되고 지표에서 제외됩니다.
 
+보조 지연 투입(--assist-start-steps K, 기본 0=비활성, handover와 배타):
+에피소드 시작부터 B의 hip PD를 α로 줄인 채(잔여 근력만) ManiFlow 보조 없이
+보행하다가, K스텝째부터 (1-α)·MF 보조 토크를 투입합니다 — "보조 꺼짐 →
+켜짐" 시연용. 투입 전 구간도 tau_b_cmd는 NaN으로 기록됩니다.
+가산 보조 모드(--assist-beta)와 함께 쓰면 투입 전 구간이 "보조 없는 온전한
+에이전트"(A와 동일)가 되고, 투입 후 τ_agent가 줄어드는 과정을 한 에피소드
+안에서 볼 수 있습니다.
+
+가산 보조(--assist-beta β, 기본 0=비활성, --residual-pd-scale와 배타):
+hip PD 게인을 **감쇠하지 않고**(engage(1.0), 순수 가산 주입) ManiFlow 토크를
+β배로 더합니다 — hip 총토크 = τ_agent(full PD) + β·τ_exo. α 블렌드가 게인을
+강제로 깎아 에이전트 토크를 줄이는 것과 달리, 여기서는 보조 토크가 트래킹
+오차를 줄여 PD 오차항이 작아지는 **능동적(수동적이지 않은) 토크 감소**가
+일어나는지를 측정합니다. 보행 자체는 보조 전/후 모두 정상이므로 보조 효과는
+영상 대신 다음 지표로 드러납니다:
+  - τ_agent RMS 감소율 (B vs A=보조 없는 동일 정책) 및 offload 효율 감소율/β
+  - τ_agent·ω 관절 파워(근육 일률 대리 지표) 감소율
+  - 총토크 보존 오차 rms(τ_agent^B + β·τ_exo − τ_agent^A) — 과구동 여부
+  - 레퍼런스 트래킹 오차(err6)·보상이 유지/개선되는지
+이 모드에서는 B의 qfrc_actuator 리드백이 곧 τ_agent이며, run04 라벨 정의
+(substep 평균)과 단위를 맞추기 위해 τ_agent는 substep 평균 리드백
+(get_substep_mean_dof_forces)으로 기록합니다(tau_{a,b}_mean).
+
 잔여 PD 결합(--residual-pd-scale α, 기본 0=순수 토크 치환): estimator 채널의
 built-in PD 게인을 0 대신 α·(ke,kd)로 남기고 ManiFlow 토크를 (1-α)배로
 주입합니다 — hip 토크 = α·PD(substep 피드백) + (1-α)·ManiFlow. 정상 보행
@@ -70,8 +93,10 @@ PD 몫을 보고하며, B의 총 hip 토크 = tau_b_cmd + tau_b_qfrc 입니다.
   traces.npz                 : 토크/관절/루트/보상 전체 trace + 에피소드 경계
   torque_channels_*.png      : 채널별 B 인가 토크 vs A 적용 토크 (+A 수동 예측)
   tracking_*.png             : 레퍼런스 대비 관절 오차·루트 높이 A vs B
-  sim-*/sim-*.mp4            : (--record) 시뮬 녹화 (고스트 A + 실체 B)
-  sim_with_torque.mp4        : (--record) 영상 + 토크 패널 합성 비디오
+  sim-*/sim-*.mp4            : (--record) 정면 시뮬 녹화 (고스트 A + 실체 B)
+  sim_side.mp4               : (--record, 기본) 정측면 뷰 녹화
+  sim_with_torque.mp4        : (--record) 영상(정면 위 + 측면 아래) + 토크 패널
+                               합성 비디오
 
 실행:
   bash tasks/mimic_suit_active_cable_walk_23dof/compare_maniflow_control_newton.sh
@@ -98,7 +123,9 @@ DEFAULT_RL_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
 DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
     str(Path.home()),
     "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42",
+    # 2026-08-06: 기본값 run02 → run04(v2 substep 평균 라벨 DAgger 재학습).
+    # best topk = epoch=0180-val_loss=0.015600.ckpt (discover_best_checkpoint 자동)
+    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-dagger-v2-run04_seed42",
 )
 
 GHOST_ENV = 0  # Agent A: pure RL (반투명 고스트)
@@ -144,11 +171,23 @@ def _create_parser():
                         "0=순수 토크 치환(기존 동작). α>0이면 hip 토크 = α·PD + "
                         "(1-α)·ManiFlow convex 블렌드 — PD가 substep 안정화를, "
                         "ManiFlow가 보행 토크 본체를 분담")
+    p.add_argument("--assist-beta", type=float, default=0.0,
+                   help="가산 보조 계수 β>0: hip PD 게인을 그대로 두고(감쇠 없음) "
+                        "hip 총토크 = τ_agent(full PD) + β·ManiFlow. 보조로 "
+                        "트래킹 오차가 줄어 PD(=agent) 토크가 능동적으로 "
+                        "감소하는지를 측정 — --residual-pd-scale와 배타 "
+                        "(0 = 비활성)")
     p.add_argument("--handover-steps", type=int, default=0,
                    help="에피소드 시작 후 이 스텝 수 동안 B도 순수 RL+PD로 "
                         "보행(워밍업)한 뒤 ManiFlow 토크 제어로 전환. 리셋 직후 "
                         "관측(s0)이 학습 분포 밖이라 첫 chunk가 어긋나는 문제를 "
                         "우회 (0 = 리셋 직후부터 ManiFlow 제어)")
+    p.add_argument("--assist-start-steps", type=int, default=0,
+                   help="에피소드 시작 후 이 스텝 수 동안 B는 보조 없이(α 블렌드 "
+                        "모드=α·PD 단독 잔여 근력만, --assist-beta 모드=full PD "
+                        "온전한 에이전트) 보행하다가 이후 ManiFlow 보조를 투입 — "
+                        "'보조 off→on' 시연용. --handover-steps와 동시 사용 불가 "
+                        "(0 = 비활성)")
     p.add_argument("--fall-z", type=float, default=0.5,
                    help="root 높이가 이 값[m] 아래로 --fall-hold 스텝 연속 유지되면 "
                         "넘어짐으로 판정해 두 env를 함께 리셋 (<=0 비활성)")
@@ -167,6 +206,14 @@ def _create_parser():
     p.add_argument("--record", action="store_true", default=False,
                    help="시뮬 mp4 + 토크 패널 합성 sim_with_torque.mp4 저장 "
                         "(뷰어 자동 활성화)")
+    p.add_argument("--record-side", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="녹화 시 정측면 뷰도 함께 캡처(sim_side.mp4) 후 합성 "
+                        "영상에 정면 위 / 측면 아래로 배치. --no-record-side로 "
+                        "정면만 녹화")
+    p.add_argument("--side-azimuth", type=float, default=90.0,
+                   help="정측면 카메라의 정면 대비 방위각[deg] (90 = 왼쪽 측면, "
+                        "270 = 오른쪽 측면)")
     p.add_argument("--no-mesh", action="store_true", default=False,
                    help="뷰어/녹화 시 skeleton mesh 에셋 대신 기본(캡슐) 에셋 사용")
     p.add_argument("--ghost-alpha", type=float, default=0.5,
@@ -408,9 +455,110 @@ class GhostSkeletonRenderer:
         )
 
 
+class SideViewRecorder:
+    """정측면 뷰를 같은 뷰어 창 안의 패널로 띄우고(선택) mp4로도 저장.
+
+    기본 녹화(RecordingMixin)는 `simulator.step()` 끝의 `render()`마다 현재
+    카메라(정면) 뷰를 PNG로 캡처한다. 이 클래스는 스텝마다 카메라 방위각만
+    `delta_deg` 돌려 **한 번 더** 렌더하고 그 프레임을 직접 받는다.
+
+    화면 깜빡임 방지: 추가 렌더는 백버퍼에만 그리고 **버퍼 스왑(present)을
+    막아** 창에 보이는 화면은 정면 뷰 그대로 유지한다. `get_frame()`은 화면이
+    아니라 오프스크린 FBO(`renderer._frame_fbo`)에서 읽으므로 스왑을 막아도
+    측면 프레임은 정상적으로 얻어진다. 얻은 프레임은 `viewer.log_image()`로
+    같은 창의 도킹 패널에 표시한다 — 창 하나에서 정면 + 정측면 두 시점.
+
+    또 추가 렌더 동안 `_user_is_recording`을 잠시 꺼서 정면 녹화 시퀀스(PNG
+    프레임 번호 연속성 — 끊기면 ffmpeg가 중간에 멈춘다)를 건드리지 않는다.
+
+    `config.camera_offset`이 설정된 경우 방위각이 무시되므로(고정 오프셋) 그
+    오프셋 벡터를 z축 기준으로 회전시키는 방식으로 측면을 만든다.
+
+    Args:
+        out_path: mp4 저장 경로. None이면 뷰어 표시만 하고 파일은 쓰지 않음.
+        panel_name: 뷰어 패널 이름. None이면 표시하지 않음(녹화 전용).
+    """
+
+    def __init__(self, simulator, out_path=None, fps: int = 20,
+                 delta_deg: float = 90.0, panel_name="side view (sagittal)"):
+        self.sim = simulator
+        self.delta = delta_deg
+        self.path = out_path
+        self.panel = panel_name if hasattr(simulator.viewer, "log_image") else None
+        self.writer = None
+        if out_path is not None:
+            import imageio.v2 as imageio
+            self.writer = imageio.get_writer(
+                str(out_path), fps=fps, codec="libx264", pixelformat="yuv420p",
+                macro_block_size=2)
+        self.frames = 0
+        self.size = None  # (H, W) — 인코더는 고정 크기를 요구
+
+    def _rotate_camera(self):
+        """카메라를 측면으로 돌리고, 원복 함수를 반환."""
+        sim = self.sim
+        offset = getattr(sim.config, "camera_offset", None)
+        if offset is not None:
+            saved = list(offset)
+            rad = np.deg2rad(self.delta)
+            c, s = np.cos(rad), np.sin(rad)
+            x, y, z = saved[0], saved[1], saved[2]
+            sim.config.camera_offset = [x * c - y * s, x * s + y * c, z]
+
+            def _restore():
+                sim.config.camera_offset = saved
+        else:
+            saved_az = sim._camera_azimuth
+            sim._camera_azimuth = (saved_az + self.delta) % 360.0
+
+            def _restore():
+                sim._camera_azimuth = saved_az
+        return _restore
+
+    def capture(self) -> bool:
+        """측면 프레임 1장 캡처. 녹화 상태 전환 프레임이면 건너뜀."""
+        sim = self.sim
+        if getattr(sim, "_user_recording_state_change", False):
+            return False  # 전환 처리(시작/종료)는 정면 렌더에 맡긴다
+        restore = self._rotate_camera()
+        was_recording = sim._user_is_recording
+        sim._user_is_recording = False  # 이 렌더는 정면 시퀀스에 넣지 않음
+        renderer = getattr(sim.viewer, "renderer", None)
+        saved_present = getattr(renderer, "present", None)
+        if saved_present is not None:
+            # 백버퍼에만 그리고 스왑하지 않음 → 창에는 정면 뷰가 그대로 남는다
+            renderer.present = lambda: None
+        try:
+            sim.render()
+            frame_wp = sim.viewer.get_frame()  # 오프스크린 FBO에서 읽음
+            if self.panel is not None:
+                sim.viewer.log_image(self.panel, frame_wp)  # 같은 창의 패널
+            frame = frame_wp.numpy() if self.writer is not None else None
+        finally:
+            if saved_present is not None:
+                renderer.present = saved_present
+            sim._user_is_recording = was_recording
+            restore()
+        if frame is not None:
+            if self.size is None:
+                self.size = frame.shape[:2]
+            elif frame.shape[:2] != self.size:
+                from PIL import Image
+                frame = np.asarray(Image.fromarray(frame).resize(
+                    (self.size[1], self.size[0])))
+            self.writer.append_data(frame)
+        self.frames += 1
+        return True
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.close()
+            print(f"정측면 영상 저장: {self.path} ({self.frames} 프레임)")
+
+
 # ---------------------------------------------------------------------------
 @torch.no_grad()
-def run_rollout(agent, env, estimator, override, args):
+def run_rollout(agent, env, estimator, override, args, side_recorder=None):
     """A(순수 RL)와 B(RL+ManiFlow 토크)를 같은 씬에서 굴리며 trace를 수집."""
     N = env.num_envs
     T = args.episode_steps
@@ -421,6 +569,10 @@ def run_rollout(agent, env, estimator, override, args):
     assert offset < Ta, f"chunk-offset({offset}) must be < n_action_steps({Ta})"
     alpha = args.residual_pd_scale
     blend = 1.0 - alpha  # ManiFlow 몫 — α·PD + (1-α)·MF ≈ 명목 총토크 유지
+    beta = args.assist_beta
+    additive = beta > 0.0  # 가산 보조: τ_agent(full PD) + β·τ_exo
+    # 주입 배율: 가산 모드는 β, 블렌드 모드는 (1-α)
+    inject_scale = args.torque_scale * (beta if additive else blend)
 
     steps_per_sec = round(1.0 / env.simulator.dt) if env.simulator.dt > 0 else 20
     min_episode_steps = max(1, round(args.min_episode_seconds * steps_per_sec))
@@ -438,8 +590,13 @@ def run_rollout(agent, env, estimator, override, args):
         "tau_b_cmd": np.zeros((T, Da), np.float32),     # B에 실제 인가(클램프 후)
         "tau_a_applied": np.zeros((T, Da), np.float32),  # A의 PD 적용 토크(qfrc)
         "tau_b_qfrc": np.zeros((T, Da), np.float32),     # B의 qfrc 잔여(≈0 검증용)
+        # substep 평균 qfrc = ZOH 임펄스 일관 토크(run04 라벨 정의와 동일 단위).
+        # 가산 보조 모드에서 A/B의 "에이전트(PD) 토크"를 비교하는 기준 지표.
+        "tau_a_mean": np.zeros((T, Da), np.float32),
+        "tau_b_mean": np.zeros((T, Da), np.float32),
         "pred_a_passive": np.zeros((T, Da), np.float32),  # A 수동 예측(chunk 동일 원소)
         "dof_pos": np.zeros((T, N, n_dofs), np.float32),
+        "dof_vel": np.zeros((T, N, n_dofs), np.float32),
         "ref_dof_pos": np.zeros((T, n_dofs), np.float32),
         "root_pos": np.zeros((T, N, 3), np.float32),
         "rew": np.zeros((T, N), np.float32),
@@ -449,10 +606,16 @@ def run_rollout(agent, env, estimator, override, args):
     fall_count = np.zeros(N, dtype=int)  # 연속 저고도 스텝 수 (자체 넘어짐 감지)
 
     handover = max(0, args.handover_steps)
+    assist_start = max(0, args.assist_start_steps)
+    assert not (handover > 0 and assist_start > 0), (
+        "--handover-steps와 --assist-start-steps는 동시 사용 불가")
+    warmup = handover if handover > 0 else assist_start
     obs = synced_reset(env, estimator, override)
     if handover > 0:
         override.restore()  # 워밍업: B도 순수 PD 보행, chunk는 핸드오버 시점에 생성
         chunk = None
+    elif assist_start > 0:
+        chunk = None  # α·PD 단독(보조 꺼짐) — engage(α)는 유지, MF 투입만 지연
     else:
         chunk = estimator.predict()  # (N, Ta, Da)
     chunk_pos = offset
@@ -473,18 +636,27 @@ def run_rollout(agent, env, estimator, override, args):
         action = model_out.get("mean_action", model_out["action"])
 
         ep_rel = t - ep_start
-        if chunk is None and ep_rel >= handover:
+        if chunk is None and ep_rel >= warmup:
             # 워밍업 종료: 실제 히스토리(2프레임)로 첫 chunk를 만들고 제어 전환
-            override.engage(alpha)
+            if handover > 0:
+                # 가산 모드는 게인 무감쇠(1.0), 블렌드 모드는 α로 재결합
+                override.engage(1.0 if additive else alpha)
+                log.info(f"  handover @ step {t} (ep {len(episodes) + 1}): "
+                         + (f"B에 +{beta:g}·ManiFlow 가산 보조 투입" if additive
+                            else f"B를 ManiFlow 토크 제어로 전환 (α={alpha:g})"))
+            elif additive:
+                log.info(f"  assist ON @ step {t} (ep {len(episodes) + 1}): "
+                         f"에이전트 단독(full PD) → +{beta:g}·ManiFlow 보조 투입")
+            else:
+                log.info(f"  assist ON @ step {t} (ep {len(episodes) + 1}): "
+                         f"α·PD 단독 → (1-α)·ManiFlow 보조 투입 (α={alpha:g})")
             chunk = estimator.predict()
             chunk_pos = offset
-            log.info(f"  handover @ step {t} (ep {len(episodes) + 1}): "
-                     f"B를 ManiFlow 토크 제어로 전환 (α={alpha:g})")
 
         if chunk is not None:
             cur = chunk[:, chunk_pos]  # (N, Da) — 이번 전이(t→t+1)용 토크
             tau_b = override.set_torques(
-                cur[MANIFLOW_ENV : MANIFLOW_ENV + 1] * (args.torque_scale * blend)
+                cur[MANIFLOW_ENV : MANIFLOW_ENV + 1] * inject_scale
             )
             tr["tau_b_cmd"][t] = tau_b[0].cpu().numpy()
             tr["pred_a_passive"][t] = cur[GHOST_ENV].cpu().numpy()
@@ -494,22 +666,34 @@ def run_rollout(agent, env, estimator, override, args):
             tr["pred_a_passive"][t] = np.nan
 
         obs, rewards, dones, _terminated, _extras = env.step(action)
+        if side_recorder is not None:
+            side_recorder.capture()  # 같은 상태를 측면에서 한 장 더
         robot_state = env.simulator.get_robot_state()
         estimator.observe(robot_state)
 
         dof_forces = robot_state.dof_forces[:, ESTIMATOR_DOF_INDICES].cpu().numpy()
         tr["tau_a_applied"][t] = dof_forces[GHOST_ENV]
         tr["tau_b_qfrc"][t] = dof_forces[MANIFLOW_ENV]
+        mean_forces = (env.simulator.get_substep_mean_dof_forces()
+                       [:, ESTIMATOR_DOF_INDICES].cpu().numpy())
+        tr["tau_a_mean"][t] = mean_forces[GHOST_ENV]
+        tr["tau_b_mean"][t] = mean_forces[MANIFLOW_ENV]
         tr["dof_pos"][t] = robot_state.dof_pos.cpu().numpy()
+        tr["dof_vel"][t] = robot_state.dof_vel.cpu().numpy()
         tr["root_pos"][t] = robot_state.rigid_body_pos[:, 0].cpu().numpy()
         tr["rew"][t] = rewards.cpu().numpy()
         mm = env.motion_manager
         ref_state = env.motion_lib.get_motion_state(mm.motion_ids, mm.motion_times)
         tr["ref_dof_pos"][t] = ref_state.dof_pos[0].cpu().numpy()
 
-        if not gain_check_done and chunk is not None and ep_rel == handover + 2:
+        if not gain_check_done and chunk is not None and ep_rel == warmup + 2:
             leak = float(np.abs(tr["tau_b_qfrc"][t]).max())
-            if alpha > 0:
+            if additive:
+                a_max = float(np.abs(tr["tau_a_applied"][t]).max())
+                log.info(f"가산 보조 (β={beta:g}): B qfrc = 에이전트 full PD 토크 "
+                         f"|max| {leak:.2f} N·m (A {a_max:.2f} N·m — 게인 무감쇠 "
+                         "확인)")
+            elif alpha > 0:
                 log.info(f"잔여 PD 활성 (α={alpha:g}): B qfrc PD 몫 |max| "
                          f"{leak:.2f} N·m (0이 아닌 것이 정상)")
             elif leak > 1.0:
@@ -535,10 +719,15 @@ def run_rollout(agent, env, estimator, override, args):
                 if np.isfinite(tr["tau_b_cmd"][t, j]):
                     viewer.log_scalar(f"torque/{ch_names[j]}/B_maniflow",
                                       float(tr["tau_b_cmd"][t, j]))
-                    if alpha > 0:  # 총토크 = MF 주입분 + 잔여 PD 몫
+                    if alpha > 0 or additive:  # 총토크 = MF 주입분 + PD 몫
                         viewer.log_scalar(
                             f"torque/{ch_names[j]}/B_total",
                             float(tr["tau_b_cmd"][t, j] + tr["tau_b_qfrc"][t, j]))
+                if additive:  # 능동적 토크 감소를 라이브로 확인 (같은 substep 평균 정의)
+                    viewer.log_scalar(f"torque/{ch_names[j]}/A_agent_PD",
+                                      float(tr["tau_a_mean"][t, j]))
+                    viewer.log_scalar(f"torque/{ch_names[j]}/B_agent_PD",
+                                      float(tr["tau_b_mean"][t, j]))
                 viewer.log_scalar(f"torque/{ch_names[j]}/A_applied",
                                   float(tr["tau_a_applied"][t, j]))
             err = np.abs(tr["dof_pos"][t][:, ESTIMATOR_DOF_INDICES]
@@ -548,6 +737,14 @@ def run_rollout(agent, env, estimator, override, args):
         if viewer is not None and t % 20 == 0:
             b_mode = (f"{alpha:g}·PD+{blend:g}·ManiFlow" if alpha > 0
                       else "ManiFlow torque")
+            if additive:
+                b_mode = f"agent PD + {beta:g}·ManiFlow (additive)"
+            if assist_start > 0:
+                off_mode = f"{alpha:g}·PD" if not additive else "agent PD only"
+                on_mode = (f"agent PD+{beta:g}·MF" if additive
+                           else f"{alpha:g}·PD+{blend:g}·MF")
+                b_mode = (f"{off_mode} — assist OFF" if chunk is None
+                          else f"{on_mode} — assist ON")
             env.simulator.set_window_title(
                 f"A: RL+PD (ghost)  |  B: {b_mode} on {Da}ch (solid)  "
                 f"|  ep {len(episodes) + 1}  step {t}/{T}")
@@ -593,6 +790,8 @@ def run_rollout(agent, env, estimator, override, args):
             if handover > 0:
                 override.restore()  # 다음 에피소드도 워밍업(PD 보행)부터
                 chunk = None
+            elif assist_start > 0:
+                chunk = None  # 다음 에피소드도 α·PD 단독(보조 꺼짐)부터
             else:
                 chunk = estimator.predict()
             chunk_pos = offset
@@ -614,7 +813,129 @@ def run_rollout(agent, env, estimator, override, args):
 
 
 # ---------------------------------------------------------------------------
-def compute_metrics(tr, episodes, ch_names, fall_z: float = 0.5):
+def _rms(x) -> float:
+    x = np.asarray(x)
+    return float(np.sqrt(np.mean(np.square(x)))) if x.size else float("nan")
+
+
+def _corr(x, y) -> float:
+    with np.errstate(invalid="ignore"):
+        if len(x) > 1 and x.std() > 0 and y.std() > 0:
+            return float(np.corrcoef(x, y)[0, 1])
+    return float("nan")
+
+
+def compute_assist_metrics(tr, ch_names, beta: float, assist_start_steps: int = 0):
+    """가산 보조(τ_total = τ_agent + β·τ_exo)의 에이전트 토크 감소 분석.
+
+    A(보조 없음)와 B(보조)는 같은 정책·같은 레퍼런스 모션·같은 시각을 공유하는
+    두 world이므로 시간 정렬 비교가 성립한다. 모든 에이전트 토크는 substep 평균
+    qfrc(=20Hz ZOH 임펄스 일관, run04 라벨과 동일 정의)를 사용해 주입 토크
+    β·τ_exo와 단위를 맞춘다.
+
+    핵심 지표:
+      agent_rms_reduction_pct  A 대비 B의 에이전트(PD) 토크 RMS 감소율 [%]
+      offload_efficiency       감소율/β — 1.0이면 보조한 만큼 정확히 대체
+      agent_power_reduction_pct  |τ_agent·ω| 평균 감소율 [%] (근육 일률 대리)
+      conservation_rmse        rms(τ_agent^B + β·τ_exo − τ_agent^A) — 총토크
+                               보존 오차(과구동/부족구동 여부)
+
+    보조 토크 정합 지표 — **감소율을 좌우하는 양**:
+      corr_exo_agentA      ρ = corr(β·τ_exo, τ_agent^A)
+      exo_tracking_nrmse   rms(τ_exo − τ_agent^A)/rms(τ_agent^A) — 보조 토크가
+                           "필요 토크"를 못 맞추는 정도(β 배율 제외한 원 예측)
+      predicted_reduction_pct  해석 모델 100·(1 − √(1 − 2ρr + r²)),
+                           r = rms(β·τ_exo)/rms(τ_agent^A). 상태가 명목에
+                           머무르면 τ_agent^B ≈ τ_agent^A − β·τ_exo이므로 성립
+      superposition_opt_reduction_pct  같은 ρ에서 β를 최적화한 중첩모델
+                           값 100·(1 − √(1 − ρ²)) (r = ρ에서 달성)
+      beta_superposition_opt  그 값을 주는 β* = ρ·rms(τ_agent^A)/rms(τ_exo)
+    ρ가 낮을수록 줄일 수 있는 착용자 토크가 줄어든다. 단 이 중첩모델은
+    "B의 필요 토크 = A의 필요 토크"를 가정하므로 β가 커져 B의 보행·목표각
+    자체가 변하면 어긋난다(실측이 모델값을 넘을 수 있음) — 상한이 아니라
+    경향 설명용 기준선으로만 쓸 것.
+    """
+    on = np.isfinite(tr["tau_b_cmd"]).all(axis=-1)  # 보조 투입 구간
+    idx6 = ESTIMATOR_DOF_INDICES
+    exo = np.nan_to_num(tr["tau_b_cmd"], nan=0.0)  # 이미 β배·클램프된 주입 토크
+    a_ag, b_ag = tr["tau_a_mean"], tr["tau_b_mean"]
+    b_tot = b_ag + exo
+    pw_a = a_ag * tr["dof_vel"][:, GHOST_ENV][:, idx6]
+    pw_b = b_ag * tr["dof_vel"][:, MANIFLOW_ENV][:, idx6]
+    err6 = np.abs(
+        tr["dof_pos"][:, :, idx6] - tr["ref_dof_pos"][:, None, idx6]
+    ).mean(axis=-1)  # (T, N)
+
+    def _block(mask):
+        if not mask.any():
+            return None
+        r_a, r_b = _rms(a_ag[mask]), _rms(b_ag[mask])
+        p_a = float(np.abs(pw_a[mask]).mean())
+        p_b = float(np.abs(pw_b[mask]).mean())
+        red = (1.0 - r_b / r_a) if r_a > 0 else float("nan")
+        # 보조 토크 정합 ρ, r → 중첩모델 감소율(경향 기준선)
+        r_exo = _rms(exo[mask])
+        nan = float("nan")
+        rho = pred = sup_opt = beta_star = exo_nrmse = nan
+        if r_exo > 0 and r_a > 0 and beta > 0:
+            rho = _corr(exo[mask].ravel(), a_ag[mask].ravel())
+            ratio = r_exo / r_a
+            exo_full = exo[mask] / beta  # β 배율 제외한 원 예측
+            exo_nrmse = _rms(exo_full - a_ag[mask]) / r_a
+            if np.isfinite(rho):
+                pred = 100.0 * (1.0 - np.sqrt(
+                    max(0.0, 1.0 - 2.0 * rho * ratio + ratio ** 2)))
+                sup_opt = 100.0 * (1.0 - np.sqrt(max(0.0, 1.0 - rho ** 2)))
+                beta_star = rho * r_a / (r_exo / beta)
+        return {
+            "steps": int(mask.sum()),
+            "agent_rms": {"A_noassist": r_a, "B_assisted": r_b},
+            "agent_absmean": {"A_noassist": float(np.abs(a_ag[mask]).mean()),
+                              "B_assisted": float(np.abs(b_ag[mask]).mean())},
+            "exo_rms": _rms(exo[mask]),
+            "B_total_rms": _rms(b_tot[mask]),
+            "agent_rms_reduction_pct": 100.0 * red,
+            "offload_efficiency": (red / beta) if beta > 0 else float("nan"),
+            "agent_power_absmean": {"A_noassist": p_a, "B_assisted": p_b},
+            "agent_power_reduction_pct": (100.0 * (1.0 - p_b / p_a)
+                                         if p_a > 0 else float("nan")),
+            "conservation_rmse": _rms(b_tot[mask] - a_ag[mask]),
+            "corr_exo_agentA": float(rho),
+            "exo_tracking_nrmse": float(exo_nrmse),
+            "predicted_reduction_pct": float(pred),
+            "superposition_opt_reduction_pct": float(sup_opt),
+            "beta_superposition_opt": float(beta_star),
+            "dof_err6_mean": {"A_noassist": float(err6[mask, GHOST_ENV].mean()),
+                              "B_assisted": float(err6[mask, MANIFLOW_ENV].mean())},
+            "reward_mean": {
+                "A_noassist": float(tr["rew"][mask, GHOST_ENV].mean()),
+                "B_assisted": float(tr["rew"][mask, MANIFLOW_ENV].mean()),
+            },
+        }
+
+    per_ch = {}
+    for j, name in enumerate(ch_names):
+        r_a, r_b = _rms(a_ag[on, j]), _rms(b_ag[on, j])
+        per_ch[name] = {
+            "A_agent_rms": r_a,
+            "B_agent_rms": r_b,
+            "exo_rms": _rms(exo[on, j]),
+            "B_total_rms": _rms(b_tot[on, j]),
+            "reduction_pct": (100.0 * (1.0 - r_b / r_a) if r_a > 0
+                              else float("nan")),
+            "corr_exo_A": _corr(exo[on, j], a_ag[on, j]),
+            "conservation_rmse": _rms(b_tot[on, j] - a_ag[on, j]),
+        }
+
+    out = {"beta": beta, "overall": _block(on), "per_channel": per_ch}
+    if assist_start_steps > 0 and bool((~on).any()):
+        out["phase_off"] = _block(~on)   # 보조 없음 (A와 동일해야 정상)
+        out["phase_on"] = out["overall"]
+    return out
+
+
+def compute_metrics(tr, episodes, ch_names, fall_z: float = 0.5,
+                    assist_beta: float = 0.0, assist_start_steps: int = 0):
     dof_err = np.abs(tr["dof_pos"] - tr["ref_dof_pos"][:, None, :])  # (T, N, D)
     err6 = dof_err[:, :, ESTIMATOR_DOF_INDICES].mean(axis=-1)   # (T, N)
     err_all = dof_err.mean(axis=-1)
@@ -666,11 +987,10 @@ def compute_metrics(tr, episodes, ch_names, fall_z: float = 0.5):
         ),
         "channels": {},
     }
-    def _corr(x, y):
-        with np.errstate(invalid="ignore"):
-            if len(x) > 1 and x.std() > 0 and y.std() > 0:
-                return float(np.corrcoef(x, y)[0, 1])
-        return float("nan")
+    if assist_beta > 0:
+        m["assist"] = compute_assist_metrics(
+            tr, ch_names, assist_beta, assist_start_steps=assist_start_steps
+        )
 
     for j, name in enumerate(ch_names):
         a, b = tr["tau_a_applied"][valid, j], tr["tau_b_cmd"][valid, j]
@@ -726,6 +1046,86 @@ def format_metrics_text(m, ch_names, residual_pd_scale: float = 0.0) -> str:
         lines.append(f"{name:>18s} | {c['A_applied_std']:8.2f} | {c['B_cmd_std']:8.2f} "
                      f"| {c['B_cmd_absmean']:8.2f} | {c['corr_A_B']:6.3f} "
                      f"| {c['B_total_std']:8.2f} | {c['corr_A_Btotal']:6.3f}")
+    if "assist" in m:
+        lines.append("")
+        lines.append(format_assist_text(m["assist"], ch_names))
+    return "\n".join(lines)
+
+
+def format_assist_text(asst, ch_names) -> str:
+    """가산 보조 분석 블록의 사람이 읽는 표현."""
+    beta = asst["beta"]
+    o = asst["overall"]
+    lines = [f"=== 가산 보조 분석 (β={beta:g}): hip 총토크 = τ_agent(full PD) "
+             f"+ {beta:g}·τ_exo ===",
+             "  (에이전트 토크는 substep 평균 qfrc — 주입 토크와 같은 정의)"]
+    if o is None:
+        lines.append("  보조 구간 없음")
+        return "\n".join(lines)
+    lines.append(f"{'':32s} {'A (no assist)':>14s} {'B (assisted)':>14s}")
+    lines.append(f"{'agent torque RMS [N·m]':32s} "
+                 f"{o['agent_rms']['A_noassist']:14.2f} "
+                 f"{o['agent_rms']['B_assisted']:14.2f}   "
+                 f"({-o['agent_rms_reduction_pct']:+.1f}%)")
+    lines.append(f"{'agent |torque| mean [N·m]':32s} "
+                 f"{o['agent_absmean']['A_noassist']:14.2f} "
+                 f"{o['agent_absmean']['B_assisted']:14.2f}")
+    lines.append(f"{'agent |power| mean [W]':32s} "
+                 f"{o['agent_power_absmean']['A_noassist']:14.2f} "
+                 f"{o['agent_power_absmean']['B_assisted']:14.2f}   "
+                 f"({-o['agent_power_reduction_pct']:+.1f}%)")
+    lines.append(f"{'dof err 6ch [rad]':32s} "
+                 f"{o['dof_err6_mean']['A_noassist']:14.4f} "
+                 f"{o['dof_err6_mean']['B_assisted']:14.4f}")
+    lines.append(f"{'mean reward':32s} "
+                 f"{o['reward_mean']['A_noassist']:14.4f} "
+                 f"{o['reward_mean']['B_assisted']:14.4f}")
+    lines.append("")
+    lines.append(f"exo torque RMS (β·τ_exo)      : {o['exo_rms']:8.2f} N·m")
+    lines.append(f"B total RMS (agent + exo)     : {o['B_total_rms']:8.2f} N·m "
+                 f"(A {o['agent_rms']['A_noassist']:.2f})")
+    lines.append(f"offload 효율 (RMS 감소율 / β) : {o['offload_efficiency']:8.3f} "
+                 "(1.0 = 보조한 만큼 정확히 대체)")
+    lines.append(f"총토크 보존 오차 rms(Btot-A)  : {o['conservation_rmse']:8.2f} N·m")
+    lines.append("")
+    lines.append("보조 토크 정합 (= 감소율을 좌우하는 양):")
+    lines.append(f"  ρ = corr(β·τ_exo, τ_agent^A) : {o['corr_exo_agentA']:8.3f}")
+    lines.append(f"  τ_exo 정규화 오차 rms/rms   : "
+                 f"{o['exo_tracking_nrmse']:8.3f}  (τ_agent−τ_exo tracking error)")
+    lines.append(f"  중첩모델 예측 감소율        : "
+                 f"{-o['predicted_reduction_pct']:+8.1f}%  (실측 "
+                 f"{-o['agent_rms_reduction_pct']:+.1f}%)")
+    lines.append(f"  중첩모델 β 최적화 시         : "
+                 f"{-o['superposition_opt_reduction_pct']:+8.1f}%  (β* ≈ "
+                 f"{o['beta_superposition_opt']:.2f}) — 상한 아님, 경향 기준선")
+    lines.append("")
+    hdr = (f"{'channel':>18s} | {'A rms':>8s} | {'B rms':>8s} | {'β·exo':>8s} "
+           f"| {'Btot rms':>8s} | {'Δagent%':>7s} | {'corr(exo,A)':>11s}")
+    lines.append(hdr)
+    lines.append("-" * len(hdr))
+    for name in ch_names:
+        c = asst["per_channel"][name]
+        lines.append(f"{name:>18s} | {c['A_agent_rms']:8.2f} "
+                     f"| {c['B_agent_rms']:8.2f} | {c['exo_rms']:8.2f} "
+                     f"| {c['B_total_rms']:8.2f} | {-c['reduction_pct']:7.1f} "
+                     f"| {c['corr_exo_A']:11.3f}")
+    if "phase_off" in asst:
+        lines.append("")
+        lines.append("보조 off→on 구간 비교 (같은 에이전트, 같은 에피소드):")
+        for tag, key in [("off", "phase_off"), ("on ", "phase_on")]:
+            p = asst[key]
+            if p is None:
+                continue
+            lines.append(
+                f"  {tag} ({p['steps']:4d} steps): agent RMS "
+                f"A {p['agent_rms']['A_noassist']:6.2f} / "
+                f"B {p['agent_rms']['B_assisted']:6.2f} "
+                f"({-p['agent_rms_reduction_pct']:+6.1f}%) | "
+                f"|power| A {p['agent_power_absmean']['A_noassist']:6.2f} / "
+                f"B {p['agent_power_absmean']['B_assisted']:6.2f} "
+                f"({-p['agent_power_reduction_pct']:+6.1f}%) | "
+                f"err6 A {p['dof_err6_mean']['A_noassist']:.4f} / "
+                f"B {p['dof_err6_mean']['B_assisted']:.4f}")
     return "\n".join(lines)
 
 
@@ -737,8 +1137,16 @@ def _add_episode_lines(ax, episodes, t_end):
 
 
 def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
-               residual_pd_scale: float = 0.0):
+               residual_pd_scale: float = 0.0, assist_steps=None):
     T = tr["tau_b_cmd"].shape[0]
+    # 보조 지연 투입 모드: 꺼짐 구간의 MF cmd(NaN)는 0으로 그려 "보조 없음"을 명시
+    b_cmd = np.nan_to_num(tr["tau_b_cmd"], nan=0.0) if assist_steps else tr["tau_b_cmd"]
+
+    def _add_assist_lines(ax, t_end, first_label=False):
+        for si, s in enumerate(assist_steps or []):
+            if s < t_end:
+                ax.axvline(s, color="blue", lw=1.5, alpha=0.9,
+                           label="assist ON" if (first_label and si == 0) else None)
     for tag, t_end in [("full", T), ("zoom", min(zoom_steps, T))]:
         # 1) 채널별 토크: B 인가 vs A 적용 (+A 수동 예측 점선)
         fig, axes = plt.subplots(3, 2, figsize=(16, 9), sharex=True)
@@ -746,16 +1154,17 @@ def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
         for j, ax in enumerate(axes.flat):
             ax.plot(t_axis, tr["tau_a_applied"][:t_end, j], color="black", lw=1.0,
                     label="A: applied (RL+PD)")
-            ax.plot(t_axis, tr["tau_b_cmd"][:t_end, j], color="tab:red", lw=1.0,
+            ax.plot(t_axis, b_cmd[:t_end, j], color="tab:red", lw=1.0,
                     alpha=0.85, label="B: ManiFlow cmd (applied)")
             if residual_pd_scale > 0:
                 ax.plot(t_axis,
-                        tr["tau_b_cmd"][:t_end, j] + tr["tau_b_qfrc"][:t_end, j],
+                        b_cmd[:t_end, j] + tr["tau_b_qfrc"][:t_end, j],
                         color="tab:green", lw=0.9, alpha=0.8,
                         label=f"B: total (MF+{residual_pd_scale:g}·PD)")
             ax.plot(t_axis, tr["pred_a_passive"][:t_end, j], color="tab:orange",
                     lw=0.8, ls="--", alpha=0.6, label="A: ManiFlow passive pred")
             _add_episode_lines(ax, episodes, t_end)
+            _add_assist_lines(ax, t_end, first_label=(j == 0))
             ax.set_title(ch_names[j], fontsize=10)
             if j == 0:
                 ax.legend(fontsize=8, loc="upper right")
@@ -792,6 +1201,7 @@ def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
         axes[2].set_ylabel("A↔B root XY dist [m]")
         for ax in axes:
             _add_episode_lines(ax, episodes, t_end)
+            _add_assist_lines(ax, t_end)
         fig.suptitle(f"Tracking vs reference & A/B divergence ({tag})")
         fig.supxlabel("policy step (20Hz)")
         fig.tight_layout()
@@ -799,44 +1209,202 @@ def save_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
         plt.close(fig)
 
 
-def compose_torque_video(sim_mp4, tr, out_path, ch_names, fps=20, window_s=8.0):
-    """녹화 영상 옆에 6채널 토크(B 인가 vs A 적용) 스크롤 플롯을 붙인 mp4."""
+def _rolling_stat(x, w: int, rms: bool = True):
+    """(T, D) → (T,) 폭 w 이동 RMS(또는 평균). 앞 구간은 가능한 만큼만 평균."""
+    v = np.square(x).mean(axis=-1) if rms else np.asarray(x, np.float64)
+    c = np.cumsum(np.insert(v, 0, 0.0))
+    T = len(v)
+    hi = np.arange(T) + 1
+    lo = np.maximum(hi - w, 0)
+    out = (c[hi] - c[lo]) / (hi - lo)
+    return np.sqrt(out) if rms else out
+
+
+def _rolling_rms_channels(x, w: int):
+    """(T, Da) → (T, Da) 채널별 폭 w 이동 RMS (진폭 포락선)."""
+    x = np.asarray(x)
+    return np.stack([_rolling_stat(x[:, j:j + 1], w) for j in range(x.shape[1])],
+                    axis=-1)
+
+
+def save_assist_plots(out_dir: Path, tr, episodes, ch_names, zoom_steps: int,
+                      beta: float, assist_steps=None, assist_metrics=None,
+                      fps: int = 20):
+    """가산 보조 모드 전용 플롯 — 에이전트 토크가 실제로 줄었는지 보여준다."""
+    T = tr["tau_a_mean"].shape[0]
+    exo = np.nan_to_num(tr["tau_b_cmd"], nan=0.0)  # β배·클램프된 주입 토크
+    a_ag, b_ag = tr["tau_a_mean"], tr["tau_b_mean"]
+    b_tot = b_ag + exo
+
+    def _lines(ax, t_end, first=False):
+        _add_episode_lines(ax, episodes, t_end)
+        for si, s in enumerate(assist_steps or []):
+            if s < t_end:
+                ax.axvline(s, color="blue", lw=1.5, alpha=0.9,
+                           label="assist ON" if (first and si == 0) else None)
+
+    # 1) 채널별: A 에이전트 토크 vs B 에이전트 토크 vs 보조 토크 vs 총합
+    for tag, t_end in [("full", T), ("zoom", min(zoom_steps, T))]:
+        fig, axes = plt.subplots(3, 2, figsize=(16, 9), sharex=True)
+        t_axis = np.arange(t_end)
+        for j, ax in enumerate(axes.flat):
+            ax.plot(t_axis, a_ag[:t_end, j], color="black", lw=1.0,
+                    label="A: agent torque (no assist)")
+            ax.plot(t_axis, b_ag[:t_end, j], color="tab:red", lw=1.0,
+                    label="B: agent torque (assisted)")
+            ax.plot(t_axis, exo[:t_end, j], color="tab:green", lw=1.0,
+                    alpha=0.85, label=f"B: exo assist ({beta:g}·ManiFlow)")
+            ax.plot(t_axis, b_tot[:t_end, j], color="0.55", lw=0.8, ls="--",
+                    alpha=0.9, label="B: total (agent + exo)")
+            _lines(ax, t_end, first=(j == 0))
+            ax.set_title(ch_names[j], fontsize=10)
+            if j == 0:
+                ax.legend(fontsize=8, loc="upper right")
+        fig.suptitle(f"Additive assist beta={beta:g} — agent torque offload "
+                     f"(substep-mean qfrc, {tag})")
+        fig.supxlabel("policy step (20Hz)")
+        fig.supylabel("torque [N·m]")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"assist_offload_{tag}.png", dpi=120)
+        plt.close(fig)
+
+    # 2) 이동 RMS 추이 — 보조 투입 후 에이전트 토크가 내려가는지 한눈에
+    w = max(2, int(round(2.0 * fps)))  # 2초 창
+    fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+    t_axis = np.arange(T)
+    axes[0].plot(t_axis, _rolling_stat(a_ag, w), color="black", lw=1.4,
+                 label="A: agent torque RMS (no assist)")
+    axes[0].plot(t_axis, _rolling_stat(b_ag, w), color="tab:red", lw=1.4,
+                 label="B: agent torque RMS (assisted)")
+    axes[0].plot(t_axis, _rolling_stat(exo, w), color="tab:green", lw=1.2,
+                 alpha=0.85, label=f"B: exo assist RMS ({beta:g}·MF)")
+    axes[0].plot(t_axis, _rolling_stat(b_tot, w), color="0.55", lw=1.0, ls="--",
+                 label="B: total RMS (agent + exo)")
+    axes[0].set_ylabel(f"6ch torque RMS [N·m] ({w / fps:g}s window)")
+    axes[0].legend(fontsize=8, loc="upper right")
+    err6 = np.abs(
+        tr["dof_pos"][:, :, ESTIMATOR_DOF_INDICES]
+        - tr["ref_dof_pos"][:, None, ESTIMATOR_DOF_INDICES]
+    ).mean(axis=-1)
+    axes[1].plot(t_axis, _rolling_stat(err6[:, GHOST_ENV], w, rms=False),
+                 color="black", lw=1.4, label="A: dof err6 (no assist)")
+    axes[1].plot(t_axis, _rolling_stat(err6[:, MANIFLOW_ENV], w, rms=False),
+                 color="tab:red", lw=1.4, label="B: dof err6 (assisted)")
+    axes[1].set_ylabel("mean |dof err| 6ch [rad]")
+    axes[1].legend(fontsize=8, loc="upper right")
+    for ax in axes:
+        _lines(ax, T)
+    fig.suptitle(f"Additive assist beta={beta:g} — agent torque & tracking error "
+                 "vs assist injection")
+    fig.supxlabel("policy step (20Hz)")
+    fig.tight_layout()
+    fig.savefig(out_dir / "assist_rms_trace.png", dpi=120)
+    plt.close(fig)
+
+    # 3) 채널별 RMS 막대 요약
+    if assist_metrics is not None:
+        per = assist_metrics["per_channel"]
+        x = np.arange(len(ch_names))
+        wid = 0.2
+        fig, ax = plt.subplots(figsize=(12, 5))
+        for k, (key, color, lbl) in enumerate([
+            ("A_agent_rms", "black", "A: agent (no assist)"),
+            ("B_agent_rms", "tab:red", "B: agent (assisted)"),
+            ("exo_rms", "tab:green", f"B: exo ({beta:g}·MF)"),
+            ("B_total_rms", "0.6", "B: total"),
+        ]):
+            ax.bar(x + (k - 1.5) * wid, [per[n][key] for n in ch_names],
+                   wid, color=color, label=lbl)
+        for i, n in enumerate(ch_names):
+            ax.text(i, max(per[n]["A_agent_rms"], per[n]["B_total_rms"]) * 1.02,
+                    f"{-per[n]['reduction_pct']:.0f}%", ha="center", fontsize=9,
+                    color="tab:red")
+        ax.set_xticks(x)
+        ax.set_xticklabels(ch_names, fontsize=9)
+        ax.set_ylabel("torque RMS [N·m]")
+        o = assist_metrics["overall"]
+        ax.set_title(f"Additive assist beta={beta:g} — per-channel torque RMS "
+                     f"(total -{o['agent_rms_reduction_pct']:.1f}%, "
+                     f"offload eff {o['offload_efficiency']:.2f}, "
+                     f"power -{o['agent_power_reduction_pct']:.1f}%)")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(out_dir / "assist_summary.png", dpi=120)
+        plt.close(fig)
+
+
+def compose_torque_video(sim_mp4, tr, out_path, ch_names, fps=20, window_s=8.0,
+                         event_times=None, fill_zero=False, curves=None,
+                         side_mp4=None):
+    """녹화 영상 옆에 6채널 토크 스크롤 플롯을 붙인 mp4.
+
+    event_times: 보조 투입 시점[s] 목록 — 파란 세로선으로 표시.
+    fill_zero: MF cmd의 NaN(보조 꺼짐 구간)을 0으로 그려 "보조 없음"을 명시.
+    curves: [(array(T, Da), color, label), ...] — 미지정 시 기본
+        (A 적용 토크, B ManiFlow 인가 토크). 가산 보조 모드에서는 호출자가
+        A/B 에이전트 토크와 보조 토크를 넘겨 "능동적 감소"를 보이게 한다.
+    side_mp4: 정측면 뷰 mp4 — 주어지면 정면 위 / 측면 아래로 세로 결합하고
+        토크 패널 폭도 그에 맞춰 키운다.
+    """
     import imageio.v2 as imageio
 
-    a, b = tr["tau_a_applied"], tr["tau_b_cmd"]
-    T = a.shape[0]
-    reader = imageio.get_reader(str(sim_mp4))
-    n_frames = reader.count_frames()
-    offset = max(0, n_frames - T)
-    if offset not in (0, 1):
-        log.warning(f"프레임 수({n_frames})와 스텝 수({T}) 불일치 — offset={offset}")
+    if curves is None:
+        b = tr["tau_b_cmd"]
+        if fill_zero:
+            b = np.nan_to_num(b, nan=0.0)
+        curves = [(tr["tau_a_applied"], "black", "A applied"),
+                  (b, "tab:red", "B ManiFlow")]
+    T = curves[0][0].shape[0]
+    # 뷰별 reader — 여러 개면 세로로 이어붙인다 (정면 위 / 정측면 아래).
+    paths = [sim_mp4] + [p for p in (side_mp4,) if p and Path(p).exists()]
+    readers = [imageio.get_reader(str(p)) for p in paths]
+    counts = [r.count_frames() for r in readers]
+    # 뷰마다 프레임 수가 1 정도 다를 수 있어(녹화 시작/종료 프레임) 개별 정렬
+    offsets = [max(0, c - T) for c in counts]
+    n_out = min(min(c - o for c, o in zip(counts, offsets)), T)
+    if any(o not in (0, 1) for o in offsets):
+        log.warning(f"프레임 수{counts}와 스텝 수({T}) 불일치 — offsets={offsets}")
 
-    first = reader.get_data(0)
-    H = first.shape[0]
+    def _stack(k):
+        frames = [r.get_data(k + o) for r, o in zip(readers, offsets)]
+        w = frames[0].shape[1]
+        for i, f in enumerate(frames[1:], start=1):
+            if f.shape[1] != w:  # 뷰 폭이 다르면 첫 뷰 폭으로 맞춤
+                from PIL import Image
+                h = round(f.shape[0] * w / f.shape[1])
+                frames[i] = np.asarray(Image.fromarray(f).resize((w, h)))
+        return np.vstack(frames) if len(frames) > 1 else frames[0]
+
+    H = _stack(0).shape[0]
     dpi = 100
-    plot_w = 720
+    plot_w = max(720, int(round(H * 2 / 3)))  # 뷰가 늘면 패널도 같이 키움
+    fs = plot_w / 720  # 폰트 스케일
     fig, axes = plt.subplots(3, 2, figsize=(plot_w / dpi, H / dpi), dpi=dpi,
                              sharex=True)
     tt = np.arange(T) / fps
     cursors = []
     for j, ax in enumerate(axes.flat):
-        ax.plot(tt, a[:, j], color="black", lw=1.0, label="A applied")
-        ax.plot(tt, b[:, j], color="tab:red", lw=1.0, alpha=0.85, label="B ManiFlow")
-        lo, hi = np.nanpercentile(np.concatenate([a[:, j], b[:, j]]), [1, 99])
+        for y, color, label in curves:
+            ax.plot(tt, y[:, j], color=color, lw=1.0 * fs, alpha=0.9, label=label)
+        for ei, et in enumerate(event_times or []):
+            ax.axvline(et, color="blue", lw=1.8 * fs, alpha=0.9,
+                       label="assist ON" if (j == 0 and ei == 0) else None)
+        lo, hi = np.nanpercentile(
+            np.concatenate([y[:, j] for y, _c, _l in curves]), [1, 99])
         pad = 0.15 * max(hi - lo, 1e-3)
         ax.set_ylim(lo - pad, hi + pad)
-        cursors.append(ax.axvline(0.0, color="tab:blue", lw=1.2))
-        ax.set_title(ch_names[j], fontsize=9)
-        ax.tick_params(labelsize=7)
+        cursors.append(ax.axvline(0.0, color="0.45", lw=1.0 * fs, ls="--"))
+        ax.set_title(ch_names[j], fontsize=9 * fs)
+        ax.tick_params(labelsize=7 * fs)
         if j == 0:
-            ax.legend(fontsize=7, loc="upper right")
-    fig.supxlabel("time [s]", fontsize=9)
-    fig.supylabel("torque [N·m]", fontsize=9)
+            ax.legend(fontsize=7 * fs, loc="upper right")
+    fig.supxlabel("time [s]", fontsize=9 * fs)
+    fig.supylabel("torque [N·m]", fontsize=9 * fs)
     fig.tight_layout()
 
     writer = imageio.get_writer(str(out_path), fps=fps, codec="libx264",
                                 pixelformat="yuv420p", macro_block_size=2)
-    for k in range(min(n_frames - offset, T)):
+    for k in range(n_out):
         t_now = k / fps
         for ax in axes.flat:
             ax.set_xlim(max(0.0, t_now - window_s), max(window_s, t_now + 0.5))
@@ -848,12 +1416,12 @@ def compose_torque_video(sim_mp4, tr, out_path, ch_names, fps=20, window_s=8.0):
             from PIL import Image
             plot_rgb = np.asarray(Image.fromarray(plot_rgb).resize(
                 (plot_rgb.shape[1], H)))
-        sim_frame = reader.get_data(k + offset)
-        writer.append_data(np.hstack([sim_frame, plot_rgb]))
+        writer.append_data(np.hstack([_stack(k), plot_rgb]))
         if (k + 1) % 200 == 0:
-            log.info(f"  합성 {k + 1}/{min(n_frames - offset, T)} 프레임")
+            log.info(f"  합성 {k + 1}/{n_out} 프레임")
     writer.close()
-    reader.close()
+    for r in readers:
+        r.close()
     plt.close(fig)
 
 
@@ -862,6 +1430,12 @@ def main():
     args = _args
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    assert args.assist_beta >= 0.0, "--assist-beta는 0 이상"
+    assert not (args.assist_beta > 0 and args.residual_pd_scale > 0), (
+        "--assist-beta(가산 보조: PD 무감쇠 + β·MF)와 --residual-pd-scale"
+        "(convex 블렌드: α·PD + (1-α)·MF)는 서로 다른 결합 방식이라 "
+        "동시 사용할 수 없습니다")
 
     if args.record and not args.viewer:
         log.info("--record: 프레임 캡처에 GL 컨텍스트가 필요해 뷰어를 자동 활성화합니다.")
@@ -905,10 +1479,16 @@ def main():
         env_ids=[MANIFLOW_ENV],
         common_dof_indices=ESTIMATOR_DOF_INDICES,
     )
-    override.engage(args.residual_pd_scale)
-    if args.residual_pd_scale > 0:
-        log.info(f"잔여 PD 결합: hip 토크 = {args.residual_pd_scale:g}·PD + "
-                 f"{1.0 - args.residual_pd_scale:g}·ManiFlow (convex 블렌드)")
+    if args.assist_beta > 0:
+        override.engage(1.0)  # PD 게인 무변경 — 순수 가산 주입
+        log.info(f"가산 보조 모드: hip 총토크 = τ_agent(full PD) + "
+                 f"{args.assist_beta:g}·ManiFlow — 보조로 트래킹 오차가 줄어 "
+                 "에이전트 PD 토크가 능동적으로 감소하는지 측정")
+    else:
+        override.engage(args.residual_pd_scale)
+        if args.residual_pd_scale > 0:
+            log.info(f"잔여 PD 결합: hip 토크 = {args.residual_pd_scale:g}·PD + "
+                     f"{1.0 - args.residual_pd_scale:g}·ManiFlow (convex 블렌드)")
     log.info(f"ManiFlow ckpt: {maniflow_ckpt} (epoch={mf_info['epoch']}, "
              f"n_obs_steps={estimator.n_obs_steps}, "
              f"n_action_steps={estimator.n_action_steps})")
@@ -927,29 +1507,52 @@ def main():
                               line_width=args.ghost_line_width)
         sim._camera_target = {"env": GHOST_ENV, "element": 0}
         log.info("Agent A = 반투명 고스트 스켈레톤(라인), Agent B = 메시로 표시합니다.")
+    policy_fps = round(1.0 / sim.dt) if getattr(sim, "dt", 0) > 0 else 20
+    side_recorder = None
+    side_mp4 = None
     if args.record:
         sim._user_recording_video_path = str(out_dir / "sim-%s")
         sim._toggle_video_record()
+    # 정측면 뷰: 녹화 시 mp4로도 저장, 뷰어만 켠 경우엔 창 안 패널로만 표시
+    if args.record_side and (args.record or args.viewer) and viewer is not None:
+        side_mp4 = (out_dir / "sim_side.mp4") if args.record else None
+        side_recorder = SideViewRecorder(sim, side_mp4, fps=policy_fps,
+                                        delta_deg=args.side_azimuth)
+        print(f"정측면 뷰 활성화 (정면 대비 {args.side_azimuth:g}°, 스텝마다 "
+              "렌더 1회 추가) — 뷰어 창에는 "
+              + ("'side view (sagittal)' 패널로 표시"
+                 if side_recorder.panel else "표시 불가(log_image 없음)")
+              + (f", 영상 {side_mp4.name} 저장" if side_mp4 else ""))
 
     print(f"\nA/B rollout 시작: {args.episode_steps} steps | "
           f"predict_mode={args.predict_mode} | chunk_offset={args.chunk_offset} | "
           f"torque_scale={args.torque_scale} | "
-          f"residual_pd_scale={args.residual_pd_scale}"
-          + (" | recording" if args.record else ""))
-    tr, episodes = run_rollout(agent, env, estimator, override, args)
+          + (f"assist_beta={args.assist_beta}" if args.assist_beta > 0
+             else f"residual_pd_scale={args.residual_pd_scale}")
+          + (" | recording" if args.record else "")
+          + (" (+side view)" if side_recorder is not None else ""))
+    tr, episodes = run_rollout(agent, env, estimator, override, args,
+                               side_recorder=side_recorder)
 
+    if side_recorder is not None:
+        side_recorder.close()
     if args.record:
         sim._toggle_video_record()
         sim.render()
 
     # ── 저장 ────────────────────────────────────────────────────────────
     ch_names = override.dof_names
-    m = compute_metrics(tr, episodes, ch_names, fall_z=args.fall_z)
+    m = compute_metrics(tr, episodes, ch_names, fall_z=args.fall_z,
+                        assist_beta=args.assist_beta,
+                        assist_start_steps=args.assist_start_steps)
     text = format_metrics_text(m, ch_names,
                                residual_pd_scale=args.residual_pd_scale)
-    b_desc = (f"RL+{args.residual_pd_scale:g}·PD + "
-              f"{1.0 - args.residual_pd_scale:g}·ManiFlow"
-              if args.residual_pd_scale > 0 else "RL+PD + ManiFlow torque")
+    if args.assist_beta > 0:
+        b_desc = f"RL+PD(full) + {args.assist_beta:g}·ManiFlow (가산 보조)"
+    else:
+        b_desc = (f"RL+{args.residual_pd_scale:g}·PD + "
+                  f"{1.0 - args.residual_pd_scale:g}·ManiFlow"
+                  if args.residual_pd_scale > 0 else "RL+PD + ManiFlow torque")
     print(f"\n=== A (pure RL+PD, ghost) vs B ({b_desc}, solid) ===")
     print(text + "\n")
 
@@ -966,7 +1569,9 @@ def main():
         "chunk_offset": args.chunk_offset,
         "torque_scale": args.torque_scale,
         "residual_pd_scale": args.residual_pd_scale,
+        "assist_beta": args.assist_beta,
         "handover_steps": args.handover_steps,
+        "assist_start_steps": args.assist_start_steps,
         "episode_steps": int(tr["tau_b_cmd"].shape[0]),
         "ghost_env": GHOST_ENV,
         "maniflow_env": MANIFLOW_ENV,
@@ -986,11 +1591,23 @@ def main():
                 f"chunk_offset={args.chunk_offset}, "
                 f"torque_scale={args.torque_scale}, "
                 f"residual_pd_scale={args.residual_pd_scale}, "
-                f"handover_steps={args.handover_steps})\n"
+                f"assist_beta={args.assist_beta}, "
+                f"handover_steps={args.handover_steps}, "
+                f"assist_start_steps={args.assist_start_steps})\n"
                 f"channels: {ch_names}\n\n" + text + "\n")
 
+    assist_steps = None
+    if args.assist_start_steps > 0:
+        T_tr = tr["tau_b_cmd"].shape[0]
+        assist_steps = [e["start"] + args.assist_start_steps for e in episodes
+                        if e["start"] + args.assist_start_steps < min(e["end"], T_tr)]
     save_plots(out_dir, tr, episodes, ch_names, args.zoom_steps,
-               residual_pd_scale=args.residual_pd_scale)
+               residual_pd_scale=args.residual_pd_scale,
+               assist_steps=assist_steps)
+    if args.assist_beta > 0:
+        save_assist_plots(out_dir, tr, episodes, ch_names, args.zoom_steps,
+                          args.assist_beta, assist_steps=assist_steps,
+                          assist_metrics=m.get("assist"), fps=policy_fps)
 
     # ── 녹화 영상 + 토크 패널 합성 ──────────────────────────────────────
     if args.record:
@@ -999,12 +1616,48 @@ def main():
         if sim_mp4 is None or not sim_mp4.exists():
             log.warning("녹화 mp4가 없어 합성 비디오를 건너뜁니다.")
         else:
-            policy_fps = (round(1.0 / sim.dt) if getattr(sim, "dt", 0) > 0 else 20)
             out_mp4 = out_dir / "sim_with_torque.mp4"
             log.info(f"토크 합성 비디오 생성 중... ({sim_mp4.name} + traces)")
-            compose_torque_video(sim_mp4, tr, out_mp4, ch_names, fps=policy_fps)
-            print(f"시뮬 영상:        {sim_mp4}")
+            # 가산 보조 모드: 영상 패널에 A/B 에이전트 토크와 보조 토크를 그려
+            # "보조가 들어오면 에이전트 토크가 줄어든다"를 직접 보이게 한다.
+            curves = None
+            if args.assist_beta > 0:
+                exo = np.nan_to_num(tr["tau_b_cmd"], nan=0.0)
+                curves = [
+                    (tr["tau_a_mean"], "black", "A agent (no assist)"),
+                    (tr["tau_b_mean"], "tab:red", "B agent (assisted)"),
+                    (exo, "tab:green", f"B exo ({args.assist_beta:g}·MF)"),
+                ]
+            event_times = ([s / policy_fps for s in assist_steps]
+                           if assist_steps else None)
+            compose_torque_video(
+                sim_mp4, tr, out_mp4, ch_names, fps=policy_fps,
+                event_times=event_times,
+                fill_zero=args.assist_start_steps > 0, curves=curves,
+                side_mp4=side_mp4)
+            print(f"시뮬 영상(정면):  {sim_mp4}")
+            if side_mp4 is not None and Path(side_mp4).exists():
+                print(f"시뮬 영상(측면):  {side_mp4}")
             print(f"토크 합성 비디오: {out_mp4}")
+            if args.assist_beta > 0:
+                # 원파형은 20Hz 진동이 커 진폭 감소가 잘 안 보인다 — 채널별
+                # 2초 이동 RMS 포락선 버전을 추가로 합성 (감소가 한눈에 보임).
+                w = max(2, int(round(2.0 * policy_fps)))
+                rms_mp4 = out_dir / "sim_with_torque_rms.mp4"
+                log.info(f"이동 RMS 포락선 비디오 생성 중... (창 {w / policy_fps:g}s)")
+                compose_torque_video(
+                    sim_mp4, tr, rms_mp4, ch_names, fps=policy_fps,
+                    event_times=event_times, side_mp4=side_mp4,
+                    curves=[
+                        (_rolling_rms_channels(tr["tau_a_mean"], w), "black",
+                         "A agent RMS (no assist)"),
+                        (_rolling_rms_channels(tr["tau_b_mean"], w), "tab:red",
+                         "B agent RMS (assisted)"),
+                        (_rolling_rms_channels(
+                            np.nan_to_num(tr["tau_b_cmd"], nan=0.0), w),
+                         "tab:green", f"B exo RMS ({args.assist_beta:g}·MF)"),
+                    ])
+                print(f"RMS 포락선 비디오: {rms_mp4}")
 
     print(f"결과 저장: {out_dir}")
 
