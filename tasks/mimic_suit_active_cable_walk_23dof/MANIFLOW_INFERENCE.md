@@ -100,7 +100,7 @@ bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--rl-checkpoint` | `output_newton_flat/score_based.ckpt` | 보행 RL policy (로봇을 실제로 걷게 하는 주체) |
-| `--maniflow-ckpt` | newton-hips-run02_seed42에서 best topk 자동 | ManiFlow 추정기 체크포인트 |
+| `--maniflow-ckpt` | **newton-hips-dagger-v2-run04_seed42**에서 best topk 자동 (2026-08-06부터 기본값 run02→run04) | ManiFlow 추정기 체크포인트 |
 | `--simulator` | `newton` | `isaaclab`도 가능 (학습 도메인 교차검증용) |
 | `--num-envs` / `--episode-steps` | 2 / 1200 | 1200 steps = 60 s @ 20 Hz |
 | `--viewer` | off | 실시간 GUI (skeleton mesh 기본) |
@@ -167,7 +167,7 @@ bash tasks/.../compare_maniflow_control_newton.sh \
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--rl-checkpoint` | `output_newton_flat/score_based.ckpt` | 두 agent 모두가 쓰는 보행 RL policy |
-| `--maniflow-ckpt` / `--maniflow-run-dir` | newton-hips-run02_seed42 best topk 자동 | ManiFlow 체크포인트 |
+| `--maniflow-ckpt` / `--maniflow-run-dir` | **newton-hips-dagger-v2-run04_seed42** best topk 자동(= `epoch=0180-val_loss=0.015600.ckpt`, 2026-08-06부터 기본값 run02→run04) | ManiFlow 체크포인트 |
 | `--maniflow-root` | `$MANIFLOW_ROOT` 또는 관례 경로 | maniflow 패키지 위치 |
 | `--episode-steps` | 1200 | 총 rollout 스텝 (에피소드 끝나면 이어서 진행) |
 | `--predict-mode` | `receding` | 4스텝 청크 예측 / `every_step`(매 스텝 재예측) |
@@ -176,10 +176,14 @@ bash tasks/.../compare_maniflow_control_newton.sh \
 | `--torque-scale` | 1.0 | Agent B 인가 토크 배율. 0 = 해당 채널 무동력 sanity check |
 | `--residual-pd-scale` | 0.0 | estimator 채널에 남길 PD 게인 비율 α — hip 토크 = α·PD + (1-α)·ManiFlow ("잔여 PD 결합" — MANIFLOW_CONTROL_ANALYSIS.md 참고) |
 | `--handover-steps` | 0 | 에피소드 첫 K스텝은 B도 순수 PD로 보행(워밍업) 후 ManiFlow 제어로 전환. 리셋 직후 관측(s₀)이 학습 분포 밖이라 첫 chunk가 어긋나는 문제를 우회 |
+| `--assist-beta` | 0.0 | **가산 보조** β — hip PD 게인을 감쇠하지 않고(`engage(1.0)`) 총토크 = τ_agent(full PD) + β·ManiFlow. 보조로 트래킹 오차가 줄어 에이전트 토크가 **능동적으로** 감소하는지 측정 (`--residual-pd-scale`와 배타 — MANIFLOW_CONTROL_ANALYSIS.md "가산 보조" 참고) |
+| `--assist-start-steps` | 0 | 에피소드 첫 K스텝은 B가 보조 없이(블렌드 모드=α·PD 단독, 가산 모드=full PD 온전한 에이전트) 보행하다가 이후 ManiFlow 보조 투입 — "보조 off→on" 시연용. `--handover-steps`와 배타 |
 | `--fall-z` / `--fall-hold` | 0.5 / 10 | 넘어짐 판정: root 높이[m] × 연속 유지 스텝 수 |
 | `--divergence-reset` | 5.0 | A↔B root XY 거리[m] 초과 시 에피소드 종료 (<=0 비활성) |
 | `--min-episode-seconds` | 5.0 | 넘어짐/발산 감지돼도 이 시간까진 리셋 안 함(그대로 시뮬 지속) — grace period |
 | `--viewer` / `--record` | off / off | 실시간 GUI / mp4+토크 합성 영상 저장 (record는 viewer 자동 활성화) |
+| `--record-side` / `--no-record-side` | **on** | 정측면 뷰 활성화. 스텝마다 카메라를 `--side-azimuth`만큼 돌려 렌더 1회를 추가하되 **버퍼 스왑을 막아** 창에 보이는 화면은 정면 그대로 유지하고(깜빡임 없음), 측면 프레임은 `viewer.log_image()`로 **같은 창의 도킹 패널**(`side view (sagittal)`)에 띄운다. `--record`면 `sim_side.mp4`로도 저장하고 합성 영상에 정면 위 / 측면 아래로 배치. `--viewer`만 켜면 패널 표시만 하고 파일은 쓰지 않는다 |
+| `--side-azimuth` | 90.0 | 정측면 카메라의 정면 대비 방위각[deg] (90 = 왼쪽, 270 = 오른쪽) |
 | `--no-mesh` | off | 캡슐 에셋(기본은 skeleton mesh) |
 | `--ghost-alpha` / `--ghost-line-width` | 0.5 / 3.5 | Agent A 고스트 라인 투명도 / 두께[px] |
 | `--seed` | 42 | RNG seed |
@@ -218,11 +222,25 @@ bash tasks/.../compare_maniflow_control_newton.sh \
   밖 → 첫 chunk가 크게 어긋남(실측 +160 N·m vs 예측 -86 N·m 수준). 핸드오버는
   이를 우회해 on-distribution 상태에서 피드포워드 제어의 순수 생존 시간을
   측정.
+- **가산 보조(`--assist-beta β`)**: 위 하이브리드와 달리 게인을 **감쇠하지
+  않고**(`engage(1.0)`) β·ManiFlow만 더한다 — hip 총토크 = τ_agent(full PD) +
+  β·τ_exo. 보조로 트래킹 오차가 줄어 PD 오차항이 스스로 작아지는(=에이전트
+  토크가 능동적으로 감소하는) 효과를 측정하는 모드. B의 qfrc_actuator 리드백이
+  곧 τ_agent이고, 주입 토크(run04 라벨=substep 평균)와 단위를 맞추려
+  `get_substep_mean_dof_forces()`로 τ_agent를 기록한다(`tau_{a,b}_mean`).
+  `--residual-pd-scale`와 배타. `--assist-start-steps`와 병용하면 한
+  에피소드에서 무보조→보조 전/후 자체 비교가 나온다.
 
 출력(`maniflow_control_results/<timestamp>/`): `metrics.{json,txt}`(에피소드
 통계·종료 원인·트래킹 오차 A vs B·채널별 토크 통계), `traces.npz`,
 `torque_channels_{full,zoom}.png`, `tracking_{full,zoom}.png`,
-(`--record`) `sim-<ts>.mp4` + `sim_with_torque.mp4`.
+(`--record`) `sim-<ts>/sim-<ts>.mp4`(정면) + `sim_side.mp4`(정측면) +
+`sim_with_torque.mp4`(정면 위 / 측면 아래 + 토크 패널).
+가산 보조 모드는 추가로 `assist_{offload_full,offload_zoom,rms_trace,summary}.png`
+와 (`--record`) `sim_with_torque_rms.mp4`(이동 RMS 포락선 — 진폭 감소가 뚜렷),
+그리고 metrics의 `assist` 블록(에이전트 토크·파워 감소율, offload 효율,
+보조 정합 ρ, 보조 off/on 구간 비교)을 생성한다. 여러 β 실행을 모아
+표·그림으로 요약: `summarize_assist_beta.py --dirs <run dirs> --output <dir>`.
 
 첫 실행 결과 (legacy epoch30 ckpt, first6 채널, Newton, 기본 설정): **Agent B는 낙상 자체는 매
 에피소드 약 1초 내에 감지**되지만(fall-hold 0.5s 포함), min-episode-seconds
@@ -368,7 +386,8 @@ Agent A를 **반투명 라인 스켈레톤**으로 그림:
 | `protomotions/maniflow/hybrid_control.py` | 신규, uncommitted | `JointTorqueOverride` — per-env/per-DOF 토크 오버라이드 (잔여 PD: `engage(gain_scale)`) |
 | `protomotions/maniflow/{README,__init__,torque_estimator}.py` | 수정, uncommitted | channels 등록 + hip 채널 계약으로 문서/주석 정정 |
 | `tasks/.../infer_maniflow_newton.py` | 수정, uncommitted | 수동(passive) 비교 — hip 채널 고정 (legacy `--action-dofs` 제거) |
-| `tasks/.../compare_maniflow_control_newton.{py,sh}` | 신규, uncommitted | 폐루프 제어 A/B 비교 — `--residual-pd-scale` 포함 |
+| `tasks/.../compare_maniflow_control_newton.{py,sh}` | 신규, uncommitted | 폐루프 제어 A/B 비교 — `--residual-pd-scale`(convex 블렌드) / `--assist-beta`(가산 보조) / `--handover-steps` / `--assist-start-steps` |
+| `tasks/.../summarize_assist_beta.py` | 신규, uncommitted | 가산 보조 β 스윕 집계 — 마크다운 표 + 3패널 요약 그림 |
 | `tasks/.../collect_walk_zarr.{py,sh}` | 수정, uncommitted | 수집기 — hip 6채널([0,1,2,5,6,7]) 기록, `--simulator newton` 기본, 자체 낙상 필터, zarr v2 포맷 고정, attrs 자기술 |
 | `tasks/.../collect_walk_zarr_dagger.{py,sh}` | 신규, uncommitted | DAgger/DART 수집기 — hip 외란 주입(DART) + 잔여 PD 블렌드 on-policy 수집, 라벨 = full-PD 전문가 질의(readback/α). run03 재학습용 |
 | `tasks/.../MANIFLOW_INFERENCE.md` | 수정, uncommitted | 이 문서 |
