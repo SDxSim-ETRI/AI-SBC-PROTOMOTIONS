@@ -69,7 +69,9 @@ DEFAULT_RL_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
 DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
     str(Path.home()),
     "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42",
+    # 2026-08-06: 기본값 run02 → run04(v2 substep 평균 라벨 DAgger 재학습).
+    # best topk = epoch=0180-val_loss=0.015600.ckpt (discover_best_checkpoint 자동)
+    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-dagger-v2-run04_seed42",
 )
 
 
