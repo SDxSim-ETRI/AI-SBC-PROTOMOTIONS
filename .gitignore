@@ -12,6 +12,8 @@ exps/*
 .DS_Store
 **/.DS_Store
 wandb/*
+data/seed/*
+data/pretrained_models/*
 newton_source/*
 data/amass/*.pkl
 .claude/*
