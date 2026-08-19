@@ -1,0 +1,59 @@
+<mujoco model="hip_pendulum">
+  <!-- 2-DOF hip pendulum: 고정 골반 + 좌/우 대퇴(hinge).
+       AI-SBC LLP(assist torque RL) 1단계 학습용 간소화 기구 모델.
+
+       * root(pelvis)의 freejoint는 pose_lib.extract_kinematic_info 요구사항.
+         Newton에서는 robot config의 fix_base_link=True가 이를 FIXED로 대체하여
+         골반이 월드에 고정된다.
+       * joint에 stiffness/damping을 넣지 않음 — 사람 PD 게인은 robot config의
+         override_control_info에서 정의 (BUILT_IN_PD implicit 게인으로 사용됨).
+       * 대퇴: 길이 0.42 m 캡슐, 밀도 1850 -> 약 7 kg (성인 대퇴부 근사).
+       * 시각 전용 geom(척추/머리/장골/무릎 구)은 density를 낮춰(<=20) 물리
+         영향을 무시 수준으로 유지. 모든 geom contype=0 (충돌 없음). -->
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="pelvis" pos="0 0 1.0">
+      <freejoint/>
+      <!-- 골반 본체 -->
+      <geom name="pelvis_geom" type="box" size="0.09 0.13 0.045" density="1200"
+            contype="0" conaffinity="0" rgba="0.92 0.89 0.80 1"/>
+      <!-- 장골능 (시각) -->
+      <geom name="iliac_r" type="sphere" pos="0 -0.115 0.05" size="0.045" density="10"
+            contype="0" conaffinity="0" rgba="0.92 0.89 0.80 1"/>
+      <geom name="iliac_l" type="sphere" pos="0 0.115 0.05" size="0.045" density="10"
+            contype="0" conaffinity="0" rgba="0.92 0.89 0.80 1"/>
+      <!-- 척추 기둥 + 어깨/머리 (시각: 스케일·방향 기준) -->
+      <geom name="spine" type="capsule" fromto="0 0 0.04 0 0 0.42" size="0.035" density="20"
+            contype="0" conaffinity="0" rgba="0.88 0.85 0.76 1"/>
+      <geom name="shoulders" type="capsule" fromto="0 -0.16 0.40 0 0.16 0.40" size="0.04" density="20"
+            contype="0" conaffinity="0" rgba="0.88 0.85 0.76 1"/>
+      <geom name="head" type="sphere" pos="0 0 0.53" size="0.085" density="20"
+            contype="0" conaffinity="0" rgba="0.92 0.89 0.80 1"/>
+
+      <body name="right_thigh" pos="0 -0.09 0">
+        <joint name="right_hip_pitch" type="hinge" axis="0 1 0" range="-1.6 1.6"
+               armature="0.01" frictionloss="0.1"/>
+        <!-- 고관절 구 (시각) -->
+        <geom name="right_hip_ball" type="sphere" pos="0 0 0" size="0.055" density="10"
+              contype="0" conaffinity="0" rgba="0.85 0.42 0.30 1"/>
+        <geom name="right_thigh_geom" type="capsule" fromto="0 0 0 0 0 -0.42"
+              size="0.048" density="1850" contype="0" conaffinity="0"
+              rgba="0.80 0.50 0.40 1"/>
+        <!-- 무릎 구 (시각) -->
+        <geom name="right_knee" type="sphere" pos="0 0 -0.42" size="0.052" density="10"
+              contype="0" conaffinity="0" rgba="0.85 0.42 0.30 1"/>
+      </body>
+      <body name="left_thigh" pos="0 0.09 0">
+        <joint name="left_hip_pitch" type="hinge" axis="0 1 0" range="-1.6 1.6"
+               armature="0.01" frictionloss="0.1"/>
+        <geom name="left_hip_ball" type="sphere" pos="0 0 0" size="0.055" density="10"
+              contype="0" conaffinity="0" rgba="0.30 0.48 0.72 1"/>
+        <geom name="left_thigh_geom" type="capsule" fromto="0 0 0 0 0 -0.42"
+              size="0.048" density="1850" contype="0" conaffinity="0"
+              rgba="0.40 0.56 0.78 1"/>
+        <geom name="left_knee" type="sphere" pos="0 0 -0.42" size="0.052" density="10"
+              contype="0" conaffinity="0" rgba="0.30 0.48 0.72 1"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

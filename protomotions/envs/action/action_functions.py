@@ -453,3 +453,52 @@ def make_passthrough_pd_action_config(robot_config) -> Dict[str, Any]:
         "stiffness": stiffness,
         "damping": damping,
     }
+
+
+def normalized_torque_action(
+    action: Tensor,
+    torque_scale: float,
+    action_transform: ActionTransform = "tanh",
+    clamp_value: float = 1.0,
+) -> Dict[str, Tensor]:
+    """Transform normalized action to joint torques.
+
+    Used when the policy output is a direct torque command (e.g. additive
+    assist torque injected on top of a built-in PD controller).
+
+    Args:
+        action: Raw action tensor from policy [num_envs, num_actions]
+        torque_scale: Max torque magnitude in N·m (scalar).
+        action_transform: How to bound actions - "tanh", "clamp", or None.
+        clamp_value: Max absolute action value for clamp mode. Default 1.0.
+
+    Returns:
+        Dict with:
+            - processed_action: Joint torques in N·m [num_envs, num_actions]
+    """
+    if action_transform == "tanh":
+        action = torch.tanh(action)
+    elif action_transform == "clamp":
+        action = torch.clamp(action, -clamp_value, clamp_value)
+
+    return {"processed_action": (action * torque_scale).clone()}
+
+
+def make_torque_action_config(
+    torque_scale: float,
+    action_transform: ActionTransform = "tanh",
+) -> Dict[str, Any]:
+    """Create action config dict for direct torque output.
+
+    Args:
+        torque_scale: Max torque magnitude in N·m.
+        action_transform: How to bound actions - "tanh", "clamp", or None.
+
+    Returns:
+        Action config dict: {"fn": normalized_torque_action, ...}
+    """
+    return {
+        "fn": normalized_torque_action,
+        "torque_scale": torque_scale,
+        "action_transform": action_transform,
+    }

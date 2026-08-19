@@ -89,6 +89,10 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.etrisuit_active_cable import EtriSuitActiveCableRobotConfig
 
         config = EtriSuitActiveCableRobotConfig()
+    elif robot_name == "hip_pendulum":
+        from protomotions.robot_configs.hip_pendulum import HipPendulumRobotConfig
+
+        config = HipPendulumRobotConfig()
     else:
         raise ValueError(f"Invalid robot name: {robot_name}")
 

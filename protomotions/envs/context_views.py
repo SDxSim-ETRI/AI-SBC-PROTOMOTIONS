@@ -476,6 +476,55 @@ class PathContext:
         self.head_body_id = head_body_id
 
 
+class AssistContext:
+    """View for assistive-torque control context (AI-SBC LLP).
+
+    사람(내부 PD)이 의도 궤적 θ_g를 추종하는 동안 RL policy가 additive assist
+    torque를 내는 태스크의 컨텍스트. HLP(상위 정책)가 저주파로 내리는 예측
+    chunk를 interpolation한 목표(theta_d*)와, 시뮬레이터에서 계측한 사람 토크
+    (tau_agent, privileged)를 노출한다.
+
+    All fields are FieldPath descriptors for dual class/instance access.
+    """
+
+    theta_d: Tensor = FieldPath()
+    theta_d_future: Tensor = FieldPath()
+    chunk_age: Tensor = FieldPath()
+    theta_g: Tensor = FieldPath()
+    tau_agent: Tensor = FieldPath()
+    tau_assist: Tensor = FieldPath()
+    gain_scale: Tensor = FieldPath()
+
+    def __init__(
+        self,
+        theta_d: Tensor,
+        theta_d_future: Tensor,
+        chunk_age: Tensor,
+        theta_g: Tensor,
+        tau_agent: Tensor,
+        tau_assist: Tensor,
+        gain_scale: Tensor,
+    ):
+        """Initialize AssistContext.
+
+        Args:
+            theta_d: 현재 시점의 interpolation된 (노이즈 있는) HLP 목표 [num_envs, num_dofs].
+            theta_d_future: 미래 목표 창 (chunk interpolation) [num_envs, future_samples, num_dofs].
+            chunk_age: 마지막 chunk 갱신 후 경과 시간 (s) [num_envs, 1].
+            theta_g: 사람 의도 궤적 (노이즈 없음, privileged) [num_envs, num_dofs].
+            tau_agent: 사람 PD 토크 계측값 (substep 평균, privileged) [num_envs, num_dofs].
+            tau_assist: 실제 인가된 assist 토크 (privileged) [num_envs, num_dofs].
+            gain_scale: env별 사람 게인 배율 (privileged) [num_envs, num_dofs].
+        """
+        self.theta_d = theta_d
+        self.theta_d_future = theta_d_future
+        self.chunk_age = chunk_age
+        self.theta_g = theta_g
+        self.tau_agent = tau_agent
+        self.tau_assist = tau_assist
+        self.gain_scale = gain_scale
+
+
 # =============================================================================
 # Main Context Class
 # =============================================================================
@@ -536,6 +585,7 @@ class EnvContext:
     masked_mimic: Optional[MaskedMimicContext] = NestedField(MaskedMimicContext)
     steering: Optional[SteeringContext] = NestedField(SteeringContext)
     path: Optional[PathContext] = NestedField(PathContext)
+    assist: Optional[AssistContext] = NestedField(AssistContext)
 
     def __init__(
         self,
