@@ -74,59 +74,63 @@ python protomotions/inference_agent.py \
 - 시각화(mesh)와 학습(plain)은 별도 XML 사용
 
 ```bash
-# skeleton — interactive play (20초 자동 전환, mesh 시각화)
-python protomotions/inference_agent.py \
-    --checkpoint results/mimic_phase12/last.ckpt \
-    --motion-file data/motion_for_trackers/skeleton_torque_motions_11.pt \
-    --simulator newton \
-    --num-envs 1 \
-    --cycle-seconds 20 \
-    --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_mesh.xml"
-
 # suit — interactive play (20초 자동 전환, mesh 시각화, hip ring 원통형 유지)
 python protomotions/inference_agent.py \
-    --checkpoint results/suit_phase12/last.ckpt \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11.pt \
+    --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
     --simulator newton \
     --num-envs 1 \
     --cycle-seconds 20 \
     --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_suit_mesh.xml"
 
-# skeleton — 학습 재시작 (resume, 같은 디렉토리)
+# suit — v18_2에서 warm start 재학습
 python protomotions/train_agent.py \
-    --robot-name skeleton_torque \
+    --robot-name skeleton_torque_suit_passive_cable \
     --simulator newton \
     --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name mimic_phase12 \
-    --motion-file data/motion_for_trackers/skeleton_torque_motions_11.pt \
-    --num-envs 4096 \
-    --batch-size 16384
-
-# suit — 학습 재시작 (resume, 같은 디렉토리)
-python protomotions/train_agent.py \
-    --robot-name skeleton_torque_suit \
-    --simulator newton \
-    --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name suit_phase12 \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11.pt \
+    --experiment-name <new_experiment> \
+    --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
     --num-envs 2048 \
     --batch-size 8192
 ```
 
-**XML 파일 역할**:
-- `mjcf/skeleton_torque.xml` — skeleton 학습용 (capsule/sphere/box, physics only)
-- `mjcf/skeleton_torque_mesh.xml` — skeleton 시각화용 (STL mesh 추가)
+⚠️ 비suit(plain) skeleton은 현재 이 레포에 체크포인트·모션 파일·XML 에셋이
+모두 없음 (`skeleton_torque_motions_11.pt`, `results/mimic_phase12` 등은
+과거 로컬 산출물 — 2026-08-20 확인). skeleton 관련 작업은 suit 로봇 기준으로 진행.
+
+**XML 파일 역할** (`protomotions/data/assets/mjcf/`):
 - `mjcf/skeleton_torque_suit.xml` — suit 학습용 (hip ring: capsule, OOM 방지)
 - `mjcf/skeleton_torque_suit_mesh.xml` — suit 시각화용 (hip ring: cylinder 원통형 유지)
-- `mjcf/31dof/skeleton_torque.xml` — 31DOF skeleton 학습용
-- `mjcf/31dof/skeleton_torque_mesh.xml` — 31DOF skeleton 시각화용 (equality 블록 제거됨)
 - `mjcf/31dof/skeleton_torque_suit.xml` — 31DOF suit 학습용 (hip ring: capsule)
 - `mjcf/31dof/skeleton_torque_suit_mesh.xml` — 31DOF suit 시각화용 (hip ring: cylinder, 모든 suit geom contype=0, equality 블록 제거됨)
+- ⚠️ 비suit XML(`mjcf/skeleton_torque.xml`, `mjcf/skeleton_torque_mesh.xml`,
+  `mjcf/31dof/skeleton_torque{,_mesh}.xml`)은 레포에 없음 —
+  `skeleton.py`/`skeleton_torque.py` 로봇 설정이 참조하지만 에셋 부재
 
 **체크포인트 관리**:
-- 학습 중 자동 저장: `results/<experiment-name>/`
-- 목표 달성 후 영구 보관: `checkpoints/<version>/` (`scripts/promote_checkpoint.sh` 사용)
-- 의존 관계: v1_skeleton → v2_suit, v3_squat / v1_skeleton → v4_suit_v2
+- 학습 중 자동 저장: `results/<experiment-name>/` (로컬 전용, .gitignore)
+- 목표 달성 후 영구 보관: `checkpoints/<version>/` + `INFO.md`(소스 run·epoch·메모 기록) — git 추적됨
+- 현존 보관본: `v18_newton_suit_passive_cable`, `v18_2_newton_suit_passive_cable` (15모션=11+koo_4, 성공률 100%)
+
+### AI-SBC 고관절 보조 프레임워크 (HLP + LLP)
+
+전체 구조·용어·파일 지도·실험 이력·로드맵의 단일 참조점: **`docs/AI_SBC_FRAMEWORK.md`**
+
+- HLP = ManiFlow flexion 각도 예측 (ManiFlow_Policy sibling repo에서 학습, 오프라인 검증 완료)
+- LLP = assist torque RL (`examples/experiments/assist_pendulum/`, AssistEnv/AssistTargetControl)
+- ManiFlow 통합 레이어: `protomotions/maniflow/` — 시뮬 코드는 maniflow 패키지를 직접 import하지 말고 반드시 이 레이어 경유 (README 참조)
+
+```bash
+# LLP 학습 (sbc env, Newton, 물리 400Hz/policy 100Hz)
+python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \
+    --experiment-path examples/experiments/assist_pendulum/mlp.py \
+    --experiment-name assist_pendulum --motion-file none --num-envs 4096 --batch-size 16384
+
+# LLP 평가 (baseline은 --overrides "env.assist_torque_limit=0")
+python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/last.ckpt \
+    --simulator newton --num-envs 16 --headless --full-eval
+```
 
 ### Testing
 ```bash
