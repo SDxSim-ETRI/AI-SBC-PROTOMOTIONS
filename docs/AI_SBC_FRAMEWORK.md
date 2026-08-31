@@ -284,10 +284,12 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
 
 ## 7. 레포 위생 현황
 
-- **git에 zarr 18.9 GB / 88,318파일 추적 중** (`tasks/mimic_suit_active_cable_
-  walk_23dof/zarr_data/` — .gitignore 추가 이전에 커밋됨). `.git`이 22 GB인
-  원인. untrack 커밋은 **협업자 pull 시 로컬 zarr을 삭제**하므로 반드시 사전
-  공지 후 진행. 히스토리 재작성(filter-repo)은 전원 재클론 필요 — 별도 협의.
+- **zarr 18.9 GB / 88,318파일 untrack 완료** (2026-08-31, 커밋 `77ec55edb`,
+  업로더인 협업 연구원님 승인). 로컬 사본(22 GB)도 삭제 — 데이터는 git
+  히스토리에서 복구 가능. ⚠️ 이 커밋을 pull하면 협업자 로컬의
+  `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/`가 삭제됨.
+  `.git`은 여전히 22 GB(히스토리 보존) — 완전한 용량 회수는
+  히스토리 재작성(filter-repo, 전원 재클론 필요)로만 가능, 별도 협의.
 - 대용량 데이터는 향후 HF(또는 사내 스토리지)로: repo에는 다운로드
   스크립트/경로만 커밋.
 - `data/seed/` 260 GB(BVH 원본+변환본), `tasks/` 24 GB — 로컬 전용(.gitignore).
