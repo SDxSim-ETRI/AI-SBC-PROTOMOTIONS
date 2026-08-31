@@ -31,6 +31,11 @@ Modules:
     torque_estimator — closed-loop wrapper turning ProtoMotions
                        ``RobotState`` into ManiFlow observations and hip
                        torque predictions.
+    angle_estimator  — AI-SBC HLP: online receding-horizon wrapper for the
+                       hip-flexion angle prediction model (4ch angle obs →
+                       2ch flexion chunk, with zero-offset calibration).
+                       Equivalence check: ``python -m
+                       protomotions.maniflow.verify_angle_estimator``.
     hybrid_control   — per-env/per-DOF torque override on top of Newton
                        BUILT_IN_PD, for applying ManiFlow torques to a
                        subset of joints while the rest stay PD-driven.
@@ -46,4 +51,9 @@ from protomotions.maniflow.loader import (  # noqa: F401
     load_maniflow_policy,
 )
 from protomotions.maniflow.torque_estimator import ManiFlowTorqueEstimator  # noqa: F401
+from protomotions.maniflow.angle_estimator import (  # noqa: F401
+    FLEXION_ACTION_CHANNELS,
+    FLEXION_OBS_CHANNELS,
+    ManiFlowAngleEstimator,
+)
 from protomotions.maniflow.hybrid_control import JointTorqueOverride  # noqa: F401

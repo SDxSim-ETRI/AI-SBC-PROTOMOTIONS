@@ -208,7 +208,8 @@ skeleton 단계는 suit 로봇(어차피 착용 상태가 물리적으로 맞음
 | `torque_estimator.py` | 레거시 torque 모델용 온라인 래퍼 (88차원 obs 전용) | 히스토리/priming 패턴만 재사용 |
 | `hybrid_control.py` | `JointTorqueOverride` — per-env/DOF qfrc 주입 | **현역** (LLP가 사용) |
 | `channels.py` | hip DOF 채널 계약 (`hip_dof_indices()`) | skeleton 단계에서 재사용 |
-| `angle_estimator.py` | **(예정)** flexion 모델용 온라인 래퍼 | Phase B에서 신설 |
+| `angle_estimator.py` | `ManiFlowAngleEstimator` — flexion 모델용 온라인 래퍼 (4ch 각도 obs → 2ch chunk, 영점 캘리브레이션·denoise 오버라이드 내장) | **HLP 실행기** (Phase C에서 결합) |
+| `verify_angle_estimator.py` | Phase B 등가성 검증 스크립트 (`python -m protomotions.maniflow.verify_angle_estimator`, sbc env) — 2026-08-24 **PASS** (suit14 스트리밍 MAE 0.940°/0.961°, 기준과 Δ≤0.004°) | 래퍼 회귀 테스트로 상시 사용 가능 |
 
 **데이터 파이프라인**: `data/scripts/extract_soma23_hip_imu_zarr.py` —
 BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
@@ -267,7 +268,7 @@ python scripts/compare_hip_imu_reference.py \
 | Phase | 내용 | 상태 |
 |-------|------|------|
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
-| **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) | 예정 |
+| **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결**: ① SEED flexion GT 궤적 풀 로더 (40 fps zarr 재사용, trunk 채널 동시 스트리밍) ② `AssistTargetControl` 의도 소스 옵션화(synthetic/motion_data) ③ SEED 궤적 환경에서 LLP 재학습(chunk는 에뮬레이션 유지) ④ A/B/C 평가: assist off / 에뮬 chunk / **실 ManiFlow chunk** — 평가 궤적은 HLP 미학습분(SEED val split 3,449클립 + suit14) | 예정 |
 | **D** | **skeleton(suit) 확장**: mimic tracker(v18_2)=착용자, LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산). 균형·낙상 개입 상태의 보상/종료 재설계. β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |

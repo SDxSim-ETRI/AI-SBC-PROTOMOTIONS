@@ -15,7 +15,9 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
 |------|------|
 | `channels.py` | action 채널 계약의 단일 소스 — `HIP_DOF_NAMES`, `hip_dof_indices()`(이름 기반 공통 인덱스 파생). 수집·학습·inference가 모두 이걸 사용 |
 | `loader.py` | `maniflow` 패키지 위치 해석 + 학습 workspace 체크포인트를 inference 전용 정책으로 로드 (workspace/dataset/wandb 등 학습 의존성 우회) |
-| `torque_estimator.py` | `ManiFlowTorqueEstimator` — `RobotState`(common ordering) → 관측 벡터 구성, obs history 관리, receding-horizon 토크 예측 |
+| `torque_estimator.py` | `ManiFlowTorqueEstimator` — `RobotState`(common ordering) → 관측 벡터 구성, obs history 관리, receding-horizon 토크 예측 (레거시 torque 트랙) |
+| `angle_estimator.py` | `ManiFlowAngleEstimator` — **AI-SBC HLP**: flexion 각도 예측 모델(각도 4ch 관측 → flexion 2ch chunk)의 온라인 래퍼. 영점 캘리브레이션(obs_offset/output_bias)·denoise 스텝 오버라이드 내장 |
+| `verify_angle_estimator.py` | Phase B 등가성 검증: suit14 zarr 스트리밍으로 오프라인 기준 수치(MAE 0.95°) 재현 여부 자동 판정 — `python -m protomotions.maniflow.verify_angle_estimator` (sbc env) |
 | `hybrid_control.py` | `JointTorqueOverride` — Newton BUILT_IN_PD 위에서 특정 env의 특정 DOF만 직접 토크 구동 (per-world PD 게인 zero-out + `control.joint_f`→`qfrc_applied` 주입). ManiFlow 예측 토크를 실제 제어에 사용할 때 씀 |
 
 ## maniflow 패키지 해석 순서 (`ensure_maniflow_importable`)
