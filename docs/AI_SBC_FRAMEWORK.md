@@ -284,12 +284,13 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
 
 ## 7. 레포 위생 현황
 
-- **zarr 18.9 GB / 88,318파일 untrack 완료** (2026-08-31, 커밋 `77ec55edb`,
-  업로더인 협업 연구원님 승인). 로컬 사본(22 GB)도 삭제 — 데이터는 git
-  히스토리에서 복구 가능. ⚠️ 이 커밋을 pull하면 협업자 로컬의
-  `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/`가 삭제됨.
-  `.git`은 여전히 22 GB(히스토리 보존) — 완전한 용량 회수는
-  히스토리 재작성(filter-repo, 전원 재클론 필요)로만 가능, 별도 협의.
+- **zarr 18.9 GB 완전 제거 완료** (2026-08-31, 업로더인 협업 연구원님 승인):
+  untrack + 로컬 사본 삭제 + **git 히스토리 재작성**(filter-repo,
+  `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/` 전 히스토리 제거).
+  pack 17.7 GiB → 311 MiB, `.git` 22 GB → 4.0 GB(그중 3.6 GB는 LFS =
+  체크포인트, 보존됨). 재작성으로 **전 커밋 해시가 변경**됨 — force push
+  후 협업자는 재클론 필요. 재작성 전 백업:
+  `~/Projects/AI-SBC-PROTOMOTIONS-backup-20260831.git` (안정화 후 삭제 가능).
 - 대용량 데이터는 향후 HF(또는 사내 스토리지)로: repo에는 다운로드
   스크립트/경로만 커밋.
 - `data/seed/` 260 GB(BVH 원본+변환본), `tasks/` 24 GB — 로컬 전용(.gitignore).
