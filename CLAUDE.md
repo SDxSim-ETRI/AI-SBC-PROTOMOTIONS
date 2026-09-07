@@ -4,310 +4,93 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ProtoMotions3 is a GPU-accelerated simulation and RL framework for training physically simulated digital humans and humanoid robots. It supports multiple physics simulators (IsaacGym, IsaacLab, Newton, Genesis, MuJoCo) and RL algorithms (PPO, AMP, ASE, MaskedMimic). Written in Python 3.8+, Apache-2.0 licensed.
+ProtoMotions3: GPU-accelerated simulation + RL framework for physically simulated humanoids and humanoid robots. Simulators: IsaacGym, IsaacLab, Newton, Genesis, MuJoCo. Algorithms: PPO, AMP, ASE, MaskedMimic. Python 3.8+, Apache-2.0.
 
-## Common Commands
+This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL). Single reference point for structure, terminology, file map, experiment history, roadmap and the code-study checklist: **`docs/AI_SBC_FRAMEWORK.md`**. ManiFlow integration layer: `protomotions/maniflow/` (see its README) — simulation code must go through this package, never `import maniflow` directly.
+
+## Commands
 
 ### Setup
 ```bash
 pip install -e .
-pip install -r requirements_isaacgym.txt  # or requirements_isaaclab.txt, requirements_newton.txt, requirements_genesis.txt, requirements_mujoco.txt
+pip install -r requirements_<sim>.txt   # isaacgym | isaaclab | newton | genesis | mujoco
 ```
+- Newton: tested against 1.0.0 (`pip install "newton[examples]"`). MuJoCo backend: CPU-only, `num_envs=1`, for quick checks.
+- Conda envs: `sbc` = ProtoMotions/Newton + ManiFlow online inference; `maniflow` = ManiFlow training (framework doc §4.3).
 
-**MuJoCo CPU Backend**: For CPU-only testing, use `requirements_mujoco.txt`:
+### Training / inference (generic)
 ```bash
-# Install PyTorch CPU version (lighter, no CUDA needed)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-pip install -e .
-pip install -r requirements_mujoco.txt
+python protomotions/train_agent.py --robot-name g1 --simulator isaacgym \
+    --experiment-path examples/experiments/mimic/mlp.py --experiment-name my_exp \
+    --motion-file data/motion_for_trackers/g1_bones_seed_mini.pt --num-envs 4096 --batch-size 16384 \
+    --overrides agent.config.learning_rate=0.0001   # overrides are baked into resolved_configs.pt
+
+python protomotions/inference_agent.py --checkpoint <run>/last.ckpt \
+    --motion-file <motions>.pt --simulator newton --num-envs 16   # simulator may differ from training (sim2sim)
 ```
+Never pass `--robot-name` at inference — the robot config is loaded from the checkpoint's `resolved_configs_inference.pt`.
 
-Note: MuJoCo backend is CPU-only and supports `num_envs=1` only.
-
-### Training
+### ETRI skeleton suit (Newton) — mimic tracker = 시뮬 속 "착용자" 대역
 ```bash
-python protomotions/train_agent.py \
-    --robot-name g1 \
-    --simulator isaacgym \
-    --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name my_experiment \
-    --motion-file data/motion_for_trackers/g1_bones_seed_mini.pt \
-    --num-envs 4096 \
-    --batch-size 16384
-
-# With config overrides (these become PERMANENT in resolved_configs.pt)
-python protomotions/train_agent.py ... --overrides agent.config.learning_rate=0.0001 env.max_episode_length=1000
-```
-
-### Inference
-```bash
-# G1 pretrained model
-python protomotions/inference_agent.py \
-    --checkpoint data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt \
-    --motion-file data/motion_for_trackers/g1_bones_seed_mini.pt \
-    --simulator isaacgym --num-envs 16
-
-# SOMA pretrained model
-python protomotions/inference_agent.py \
-    --checkpoint data/pretrained_models/motion_tracker/soma-bones/last.ckpt \
-    --motion-file data/motion_for_trackers/soma23_bones_seed_mini.pt \
-    --simulator isaacgym --num-envs 16
-
-# Sim2sim: train in isaacgym, test in newton
-python protomotions/inference_agent.py \
-    --checkpoint data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt \
-    --motion-file data/motion_for_trackers/g1_bones_seed_mini.pt \
-    --simulator newton --num-envs 16
-
-# CPU-only inference with MuJoCo (single env)
-python protomotions/inference_agent.py \
-    --checkpoint data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt \
-    --motion-file data/motion_for_trackers/g1_bones_seed_mini.pt \
-    --simulator mujoco --num-envs 1
-```
-
-### ETRI Skeleton/Suit Inference (Newton, 실제 사용 포맷)
-
-**중요 규칙**:
-- `--robot-name` 옵션 사용 금지 — 로봇 설정은 체크포인트의 `resolved_configs_inference.pt`에서 자동 로드
-- skeleton 체크포인트에는 skeleton 모션 파일(23 DOF), suit 체크포인트에는 suit 모션 파일(27 DOF) 사용
-- 시각화(mesh)와 학습(plain)은 별도 XML 사용
-
-```bash
-# suit — interactive play (20초 자동 전환, mesh 시각화, hip ring 원통형 유지)
+# 재생 (mesh 에셋으로 시각화, 20초 자동 전환)
 python protomotions/inference_agent.py \
     --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
-    --simulator newton \
-    --num-envs 1 \
-    --cycle-seconds 20 \
+    --simulator newton --num-envs 1 --cycle-seconds 20 \
     --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_suit_mesh.xml"
 
-# suit — v18_2에서 warm start 재학습
-python protomotions/train_agent.py \
-    --robot-name skeleton_torque_suit_passive_cable \
-    --simulator newton \
-    --experiment-path examples/experiments/mimic/mlp.py \
-    --experiment-name <new_experiment> \
+# v18_2에서 warm start 재학습
+python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
+    --experiment-path examples/experiments/mimic/mlp.py --experiment-name <new_exp> \
     --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
-    --num-envs 2048 \
-    --batch-size 8192
+    --num-envs 2048 --batch-size 8192
 ```
+- suit 체크포인트에는 suit 모션 파일(27 DOF)만. 에셋(`protomotions/data/assets/mjcf/`):
+  `skeleton_torque_suit.xml` = 학습용(hip ring capsule, OOM 방지) / `skeleton_torque_suit_mesh.xml` = 시각화용(cylinder); `31dof/`도 같은 쌍.
+- 비suit(plain) skeleton의 XML·체크포인트·모션 파일은 **레포에 없음** (`skeleton.py`/`skeleton_torque.py`가 참조만 함) — skeleton 작업은 전부 suit 로봇 기준.
+- 체크포인트: 학습 중 `results/<exp>/`(로컬, gitignore) → 보관본은 `checkpoints/<version>/` + `INFO.md`(git/LFS). 현존: `v18_newton_suit_passive_cable`, `v18_2_newton_suit_passive_cable`.
 
-⚠️ 비suit(plain) skeleton은 현재 이 레포에 체크포인트·모션 파일·XML 에셋이
-모두 없음 (`skeleton_torque_motions_11.pt`, `results/mimic_phase12` 등은
-과거 로컬 산출물 — 2026-08-20 확인). skeleton 관련 작업은 suit 로봇 기준으로 진행.
-
-**XML 파일 역할** (`protomotions/data/assets/mjcf/`):
-- `mjcf/skeleton_torque_suit.xml` — suit 학습용 (hip ring: capsule, OOM 방지)
-- `mjcf/skeleton_torque_suit_mesh.xml` — suit 시각화용 (hip ring: cylinder 원통형 유지)
-- `mjcf/31dof/skeleton_torque_suit.xml` — 31DOF suit 학습용 (hip ring: capsule)
-- `mjcf/31dof/skeleton_torque_suit_mesh.xml` — 31DOF suit 시각화용 (hip ring: cylinder, 모든 suit geom contype=0, equality 블록 제거됨)
-- ⚠️ 비suit XML(`mjcf/skeleton_torque.xml`, `mjcf/skeleton_torque_mesh.xml`,
-  `mjcf/31dof/skeleton_torque{,_mesh}.xml`)은 레포에 없음 —
-  `skeleton.py`/`skeleton_torque.py` 로봇 설정이 참조하지만 에셋 부재
-
-**체크포인트 관리**:
-- 학습 중 자동 저장: `results/<experiment-name>/` (로컬 전용, .gitignore)
-- 목표 달성 후 영구 보관: `checkpoints/<version>/` + `INFO.md`(소스 run·epoch·메모 기록) — git 추적됨
-- 현존 보관본: `v18_newton_suit_passive_cable`, `v18_2_newton_suit_passive_cable` (15모션=11+koo_4, 성공률 100%)
-
-### AI-SBC 고관절 보조 프레임워크 (HLP + LLP)
-
-전체 구조·용어·파일 지도·실험 이력·로드맵의 단일 참조점: **`docs/AI_SBC_FRAMEWORK.md`**
-
-- HLP = ManiFlow flexion 각도 예측 (ManiFlow_Policy sibling repo에서 학습, 오프라인 검증 완료)
-- LLP = assist torque RL (`examples/experiments/assist_pendulum/`, AssistEnv/AssistTargetControl)
-- ManiFlow 통합 레이어: `protomotions/maniflow/` — 시뮬 코드는 maniflow 패키지를 직접 import하지 말고 반드시 이 레이어 경유 (README 참조)
-
+### AI-SBC LLP (hip pendulum, Newton, 물리 400 Hz / policy 100 Hz)
 ```bash
-# LLP 학습 (sbc env, Newton, 물리 400Hz/policy 100Hz)
 python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \
     --experiment-path examples/experiments/assist_pendulum/mlp.py \
     --experiment-name assist_pendulum --motion-file none --num-envs 4096 --batch-size 16384
-
-# LLP 평가 (baseline은 --overrides "env.assist_torque_limit=0")
 python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/last.ckpt \
-    --simulator newton --num-envs 16 --headless --full-eval
+    --simulator newton --num-envs 16 --headless --full-eval   # baseline: --overrides "env.assist_torque_limit=0"
 ```
 
-### Testing
+### Tests / lint
 ```bash
-pytest protomotions/tests/
-pytest protomotions/tests/test_newton_simulator_fk.py  # single test file
+pytest protomotions/tests/                  # or one file
+pre-commit run --files <file1> <file2>      # NEVER `pre-commit run --all-files` (100+ unrelated diffs)
 ```
+If pre-commit/ruff are absent from the active env, fall back to `python -m py_compile` + running the code.
+ONNX export of BeyondMimic trackers: `deployment/export_bm_tracker_onnx.py` (adapt obs keys for other configs).
 
-### Linting and Formatting
-```bash
-# IMPORTANT: Do NOT use `pre-commit run --all-files` — many repo files don't conform yet,
-# causing 100+ unrelated modifications. Instead, target specific files:
-pre-commit run --files <file1> <file2> ...   # explicit file list
-pre-commit run                                # runs only on staged files
-pre-commit run ruff --files <file1> ...       # lint only, specific files
-```
+## Architecture — where to look
 
-### ONNX Export (BeyondMimic Trackers)
-```bash
-# Reference script for BM tracker configs (auto-detects actor obs keys from checkpoint)
-python deployment/export_bm_tracker_onnx.py \
-    --checkpoint data/pretrained_models/motion_tracker/g1-bones-deploy/last.ckpt
-
-# For non-BM configs, copy and adapt this script to match your observation keys
-```
-
-## Key Dependencies
-
-torch, lightning (Fabric), tensordict, wandb
-
-**Newton simulator**: Tested against Newton 1.0.0 from PyPI. Install via `pip install "newton[examples]"` — see `requirements_newton.txt`.
-
-**MuJoCo simulator**: CPU-only backend using the `mujoco` Python package (>=3.0). Supports single environment (`num_envs=1`) for lightweight testing and debugging. Useful for quick policy validation without GPU.
-
-## Important Files
-
-- `examples/experiments/format.py` — documents experiment config function signatures
-- `protomotions/train_agent.py` — main entry point, documents config system in detail
-- `protomotions/envs/mdp_component.py` — MdpComponent design docs
-- `protomotions/envs/context_views.py` — FieldPath/context system
-- `protomotions/utils/simulator_imports.py` — simulator import order handling
-
-## Architecture
-
-### Agent Hierarchy
-
-```
-BaseAgent (abstract) — training loop, checkpoints, Lightning Fabric
-├── PPO — actor-critic, GAE advantages, clipped surrogate
-│   ├── AMP — adds discriminator, replay buffer, style rewards
-│   │   └── ASE — adds MI encoder, latent skills, diversity loss
-│   └── Mimic/ADD — adds pose tracking diff (extends AMP)
-└── MaskedMimic — expert distillation (behavioral cloning, not RL)
-```
-
-All models are `TensorDictModuleBase` subclasses. Forward passes read from and write to a shared `TensorDict`. Models use `nn.LazyLinear` extensively — input shapes are inferred on first forward pass.
-
-Key methods each algorithm implements: `create_model()`, `perform_optimization_step()`, `record_rollout_step()`, `register_algorithm_experience_buffer_keys()`.
-
-Training loop (`BaseAgent.fit()`): collect rollout (no_grad) → normalize rewards → compute advantages → optimize in minibatches → evaluate periodically.
-
-### Configuration System
-
-Configs are built from experiment Python files (not YAML), following this pipeline:
-
-1. `robot_factory()` and `simulator_factory()` create base configs
-2. `configure_robot_and_simulator()` customizes them for the experiment
-3. `env_config()` builds the environment config
-4. `agent_config()` builds the agent config
-5. CLI `--overrides` are applied (these are saved permanently)
-6. Everything is pickled to `resolved_configs.pt` for exact reproducibility
-
-On **resume**, configs are loaded directly from pickle — the experiment file is NOT re-executed. On **inference**, `resolved_configs_inference.pt` is loaded, then `apply_inference_overrides()` runs, then CLI overrides.
-
-Experiment files live in `examples/experiments/` and `examples/experiments/format.py` documents the required function signatures.
-
-All configs use `_target_` strings for dynamic class instantiation (e.g., `_target_: "protomotions.agents.ppo.agent.PPO"`).
-
-### MdpComponent System (`protomotions/envs/mdp_component.py`)
-
-The core abstraction for observations, rewards, and terminations. An `MdpComponent` binds a pure tensor function to context paths, keeping compute separate from environment state:
-
-```python
-MdpComponent(
-    compute_func=pure_tensor_function,
-    dynamic_vars={"dof_pos": EnvContext.current.dof_pos},  # resolved at runtime
-    static_params={"scale": 1.0}                           # fixed at creation
-)
-```
-
-Three compute levels: Level 1 (pure tensor), Level 2 (aggregated, ONNX-exportable), Level 3 (with side effects). Components are managed by `ComponentManager`.
-
-### Context Path System (`protomotions/envs/context_views.py`, `context_paths.py`)
-
-`FieldPath` descriptors provide dual access — class-level access returns a path string, instance-level returns the actual tensor. This enables type-safe bindings between MdpComponents and environment data without copying.
-
-Key views: `CurrentStateView` (current robot state), `HistoricalView` (state history buffer), `EnvContext` (namespace for all views). Control components populate their own views (e.g., `ctx.mimic`, `ctx.steering`).
-
-### Environment Step Flow
-
-`BaseEnv.step(actions)`:
-1. Action processing (PD control, clamping, scaling) via `ComponentManager`
-2. `simulator.step(actions)` — physics substeps with decimation
-3. `post_physics_step()` — get new robot state, update context
-4. Control components step (motion tracking, steering targets, etc.)
-5. Observations computed via `ComponentManager` (MdpComponents)
-6. Rewards computed via `ComponentManager` (MdpComponents)
-7. Terminations computed via `ComponentManager` (MdpComponents)
-8. Reset done environments
-
-### Multi-Simulator Abstraction (`protomotions/simulator/`)
-
-`Simulator` is the abstract base class with ~17 abstract methods. State exchange uses `RobotState`/`ObjectState` dataclasses with `StateConversion` (COMMON vs SIMULATOR format).
-
-**Quaternion convention**: Common format uses xyzw. IsaacGym/IsaacLab use wxyz internally (converted automatically). Newton/Genesis use xyzw natively.
-
-**Body/DOF ordering**: Each simulator has its own ordering. Conversion tensors (`body_convert_to_common`, `dof_convert_to_sim`) are computed once in `_finalize_setup()` and reused via tensor indexing.
-
-**Two-phase initialization**: Constructor creates shell; `_initialize_with_markers()` allocates GPU memory after env provides visualization markers.
-
-**Friction combine modes**: PhysX (IsaacGym/IsaacLab) uses AVERAGE, Newton uses MAX. `convert_friction_for_simulator()` handles conversion between them.
-
-**Control modes**: `BUILT_IN_PD` (simulator-native), `PROPORTIONAL` (custom PD with action scaling), `TORQUE` (direct torque). Action noise domain randomization applied in `_apply_control()`.
-
-### Robot Configuration (`protomotions/robot_configs/`)
-
-Each robot has a config file defining assets, control parameters, and body mappings. `KinematicInfo` is extracted from MJCF at `__post_init__` time via `pose_lib.extract_kinematic_info()`.
-
-Key fields: `common_naming_to_robot_body_names` (semantic body mapping — values must be **lists**), `control_info` (per-DOF stiffness/damping/effort from MJCF), `simulation_params` (per-simulator physics parameters).
-
-### Components
-
-**MotionLib** (`components/motion_lib.py`): Loads motion clips from .pt/.motion/.yaml files. Stores concatenated tensors (gts, grs, gvs, gavs, dps, dvs) with `length_starts` for O(1) motion indexing. SLERP interpolation for quaternions. Distributed loading via `.slurmrank.pt` per-rank files.
-
-**PoseLib** (`components/pose_lib.py`): Batched forward kinematics from MJCF. Multi-horizon minimum velocity estimation (filters mocap noise). Automatic region weight discovery from kinematic tree (finds end effectors as leaf nodes, traces paths to root for limb regions).
-
-**SceneLib** (`components/scene_lib.py`): Object management with mesh/box/sphere/cylinder primitives. Pointcloud sampling via trimesh for collision.
-
-**Terrain** (`components/terrains/`): Procedural height field generation (slopes, stairs, stepping stones, etc.) with curriculum levels. Separate flat "object playground" region for scene objects.
-
-### Key Directories
-
-- `protomotions/envs/obs/` — observation compute kernels (humanoid, humanoid_historical, target_poses, masked_mimic, steering, path)
-- `protomotions/envs/rewards/` — reward functions (tracking.py, regularization.py, task.py)
-- `protomotions/envs/terminations/` — termination conditions (tracking.py, base.py)
-- `protomotions/envs/action/` — action processing and PD control (action_functions.py)
-- `protomotions/envs/control/` — control components (mimic, steering, path_follower, masked_mimic, kinematic_replay)
-- `protomotions/envs/component_factories.py` — factory functions building MdpComponents from experiment configs
-- `protomotions/agents/common/` — shared NN modules (MLPWithConcat, ModuleContainer — TensorDictModuleBase subclasses)
-- `protomotions/utils/component_builder.py` — builds terrain, scene_lib, motion_lib, simulator from configs
+These files carry the design docs; read the relevant one before changing that area.
+- `protomotions/train_agent.py` — config pipeline: `robot_factory()`/`simulator_factory()` → experiment file (`configure_robot_and_simulator`, `env_config`, `agent_config`; slot signatures in `examples/experiments/format.py` — but its `apply_inference_overrides` signature is stale, so copy a working experiment such as `assist_pendulum/mlp.py` instead) → CLI `--overrides` → pickled `resolved_configs.pt`. Resume loads the pickle and does **not** re-run the experiment file. `apply_inference_overrides()` runs at **training** time (`train_agent.py:853`) and is baked into `resolved_configs_inference.pt`; inference just loads that pickle → `apply_backward_compatibility_fixes` → CLI overrides (never re-runs the experiment file).
+- `protomotions/envs/base_env/env.py` — `step()`: action processing → `simulator.step()` (decimated substeps) → state/context update → control components → obs → rewards → terminations → reset.
+- `protomotions/envs/mdp_component.py`, `context_views.py`, `component_factories.py` — obs/reward/termination = `MdpComponent(compute_func, dynamic_vars={...: EnvContext.current.dof_pos}, static_params={...})`, managed by `ComponentManager`; `FieldPath` yields a path string at class level and the tensor at instance level.
+- `protomotions/simulator/base_simulator/simulator.py`, `simulator_state.py` — abstract `Simulator` + `RobotState`/`StateConversion` (COMMON vs SIMULATOR body/DOF ordering). Common quaternion = xyzw (IsaacGym/IsaacLab convert from wxyz). Control modes `BUILT_IN_PD` / `PROPORTIONAL` / `TORQUE`. Friction combine: PhysX AVERAGE vs Newton MAX (`convert_friction_for_simulator`).
+- `protomotions/agents/` — `BaseAgent.fit()` (rollout → advantages → minibatch optimize → periodic eval); PPO ← AMP ← ASE, Mimic/ADD ← AMP; MaskedMimic = distillation. Models are `TensorDictModuleBase` using `nn.LazyLinear` (shapes inferred on first forward).
+- `protomotions/robot_configs/` — per-robot assets/control/body mapping; `KinematicInfo` extracted from MJCF in `__post_init__`.
+- `protomotions/components/` — `motion_lib.py`, `pose_lib.py`, `scene_lib.py`, `terrains/`.
+- `protomotions/utils/simulator_imports.py` — IsaacGym/IsaacLab must be imported before torch.
 
 ## Gotchas
 
-- **Import order matters**: Simulators (isaacgym/isaaclab) must be imported before torch. See `utils/simulator_imports.py`.
-- **`resolved_configs.pt` is pickle, not torch tensors** — use `weights_only=False` when loading with `torch.load()`.
-- **Resume mode ignores CLI `--overrides`** — configs are loaded from pickle, the experiment file is NOT re-executed.
-- **Pre-existing F822 errors** in `component_factories.py` `__all__` — these are known, don't fix as part of unrelated work.
-- **Robot body name mappings** (`common_naming_to_robot_body_names`) — values must be **lists**, not strings.
+- `resolved_configs*.pt` are pickles → `torch.load(..., weights_only=False)`. Resume ignores CLI `--overrides`.
+- `common_naming_to_robot_body_names` values must be **lists**, not strings.
+- `MdpComponent` `static_params` named `threshold`/`weight`/`min_value` are metadata and never reach the compute fn.
+- Newton: `TORQUE`/`PROPORTIONAL` wiring is broken (`_update_torques` never called) → use `BUILT_IN_PD` + qfrc injection; marker updates are no-op (draw with viewer `log_lines/log_arrows`).
+- Pre-existing F822 errors in `component_factories.py` `__all__` — leave them.
+- Research-side pitfalls (RNG pairing, fps, zarr versions): framework doc §8.
 
 ## Code Standards
 
-- Pre-commit hooks enforce: Ruff linting/formatting, Apache-2.0 license headers on all .py files (except setup.py), typos spell checking
-- Commits require sign-off (`git commit -s`) per DCO
-- Use OOP (`nn.Module` subclasses) for model architectures; functional style for data processing pipelines
-- All new `.py` files must have the full Apache-2.0 license header (not abbreviated):
-```python
-# SPDX-FileCopyrightText: Copyright (c) 2025-2026 The ProtoMotions Developers
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-```
+- Pre-commit: Ruff lint/format, `typos`, Apache-2.0 header on every `.py` except setup.py — copy the header **verbatim** from an existing file (e.g. `protomotions/maniflow/angle_estimator.py`); no abbreviated form.
+- Commits: `git commit -s` (DCO); gitmoji prefix + English subject.
+- OOP (`nn.Module` subclasses) for model architectures; functional style for data pipelines.

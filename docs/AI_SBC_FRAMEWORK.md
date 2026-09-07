@@ -2,7 +2,7 @@
 
 > 강체(rigid-link) 고관절 assist 착용로봇의 딥러닝 기반 제어기 연구 (2026).
 > 이 문서는 프레임워크 전체 구조, 코드 지도, 실험 이력, 로드맵의 단일 참조점이다.
-> 최종 갱신: 2026-08-20
+> 최종 갱신: 2026-09-01
 
 ---
 
@@ -272,7 +272,7 @@ python scripts/compare_hip_imu_reference.py \
 | **C** | 진자에서 **실 HLP 연결**: ① SEED flexion GT 궤적 풀 로더 (40 fps zarr 재사용, trunk 채널 동시 스트리밍) ② `AssistTargetControl` 의도 소스 옵션화(synthetic/motion_data) ③ SEED 궤적 환경에서 LLP 재학습(chunk는 에뮬레이션 유지) ④ A/B/C 평가: assist off / 에뮬 chunk / **실 ManiFlow chunk** — 평가 궤적은 HLP 미학습분(SEED val split 3,449클립 + suit14) | 예정 |
 | **D** | **skeleton(suit) 확장**: mimic tracker(v18_2)=착용자, LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산). 균형·낙상 개입 상태의 보상/종료 재설계. β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
-| 정리 (병행) | git zarr 18.9 GB untrack(연구원님과 협의 후, §7) + 대용량 데이터 HF 전환 | 협의 중 |
+| 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
 **Phase C의 검증 논리**: 에뮬레이션 chunk로 학습된 LLP가 실 HLP chunk에서도
 성능을 유지하면 노이즈/지연 에뮬레이션 설계가 옳았다는 검증. 실패하면 실
@@ -313,5 +313,320 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
   v2만 읽음. 추출기의 `zarr_format` 설정을 건드리지 말 것.
 - **`resolved_configs.pt`는 pickle** — `weights_only=False`로 로드. resume은
   실험 파일을 재실행하지 않고 pickle을 읽으므로 CLI `--overrides` 무시.
+- **`apply_inference_overrides`는 학습 시점에 실행된다** — `train_agent.py:853`이
+  config를 deepcopy해 적용한 뒤 `resolved_configs_inference.pt`로 저장한다.
+  `inference_agent.py`는 실험 파일을 아예 로드하지 않고
+  `apply_backward_compatibility_fixes`(:273)만 부른다. 따라서 **학습이 끝난
+  뒤 `apply_inference_overrides`를 고쳐도 기존 체크포인트엔 반영 안 됨** →
+  `train_agent.py --create-config-only`로 config만 다시 굽고 `--checkpoint`로
+  가중치를 이어받아야 한다.
+- **`examples/experiments/format.py`의 시그니처를 믿지 말 것** — upstream v3.1
+  (`d6bd922bb`)에서 호출부가 8개 인자(+terrain/motion_lib/scene_lib)로 확장됐는데
+  템플릿 `format.py`의 `apply_inference_overrides`만 5개로 방치됐다(upstream 버그,
+  fork 이전부터). 호출부는 `try/except Exception`
+  (`inference_utils.py:66-74`) 안이라 시그니처가 틀리면 `TypeError`가
+  **`log.warning` 한 줄로 삼켜지고 학습은 그대로 진행** → eval 설정이 조용히
+  누락된 채 `resolved_configs_inference.pt`가 구워진다.
+  → **새 실험 파일은 `format.py`가 아니라 동작 검증된
+  `examples/experiments/assist_pendulum/mlp.py`를 복사할 것.**
+  (upstream 순정 파일이므로 고치지 않는다 — rebase 비용 회피)
+- **실험 파일 안에서 class/함수/lambda를 정의해 config에 담지 말 것** —
+  실험 파일은 `importlib` `exec_module`로 로드되어 모듈명이 항상
+  `"experiment_module"`이고 `sys.modules`에 등록되지 않는다. pickle은 클래스를
+  "모듈명+이름"으로만 저장하므로 이 이름표는 복원 불가 → `save_configs`에서
+  `PicklingError`로 죽는다. 새 보상/obs 함수나 config 타입은 `protomotions/`
+  아래에 정의하고 실험 파일에서 import만 할 것(값·상수는 안전).
 - **감시/대기 루프의 pgrep -f 자기매칭** — 파이프라인은 알림 체인 대신 한
   스크립트로 체인할 것.
+
+---
+
+## 9. 코드 이해 가이드 (임시 — 완료한 항목은 지워나갈 것)
+
+> 목적: exosuit 개발 관점에서 이 레포를 읽기 — 학습/평가가 어떻게 돌아가고
+> 시뮬레이터가 어떻게 쓰이는지 파악해 앞으로 올바른 개발 지시를 내리는 것.
+> LLP(assist_pendulum) 실험을 앵커로 삼는다.
+>
+> **읽는 방법: §9.1로 깊이를 정하고, §9.2의 실행 트레이스를 A→F 순서대로
+> 따라간다.** 트레이스는 명령 실행 순서 그대로이므로 위에서 아래로 읽으면 된다.
+> HLP(§9.4)는 LLP와 별도 학습이라 접점이 없다. 파악이 끝나면 이 섹션 삭제.
+
+### 9.0 큰 그림 — 한 화면 요약
+
+```
+[학습]  train_agent.py
+          config 조립 (factory → mlp.py → --overrides) → resolved_configs.pt 저장
+          → Env(내부에 Simulator 보유) / Agent / 모델 생성        ← 여기까지 1회
+          → agent.fit() 루프:
+              rollout 32스텝(no_grad) → GAE → minibatch PPO → 주기적 eval/ckpt
+                └ env.step() 안에서만 물리가 돈다 (400 Hz × decimation 4 = 100 Hz)
+          상세 트레이스 = §9.2
+
+[추론]  inference_agent.py
+          resolved_configs_inference.pt 로드 (mlp.py 재실행 안 함)
+          → 같은 Env/모델 재구성, fit() 없이 rollout만
+          상세 = §9.3
+```
+
+시뮬레이터와의 경계는 **`Simulator` 추상 클래스 + `RobotState`(common
+ordering)** 하나뿐이다. env 이하 모든 코드(obs/reward/모델/학습 루프)는 이
+인터페이스만 보므로, `--simulator`를 바꿔도(sim2sim) 정책이 그대로 돈다.
+예외가 §2.5의 Newton 전용 경로(qfrc 주입·계측) — IsaacLab 이전 시 재구현
+대상이 바로 이것.
+
+**IsaacLab 이전을 고려한 깊이 조절 원칙**: 추상화 경계 위의 코드(§9.2의 A~D·F
+전부, E의 env 쪽)는 이전 후에도 100% 그대로이므로 깊게. Newton 내부 메커니즘
+(MuJoCo Warp, qfrc, per-world 게인)은 "무슨 기능을 하는지"만 알면 됨 — 어차피
+IsaacLab에서 같은 기능을 다시 만들 목록이다 (그 목록 = §9.1의 3줄).
+
+### 9.1 깊이 배분 — "앞으로 고칠 코드인가"로 가른다
+
+| 층 | 파일 | 어디까지 |
+|----|------|----------|
+| **A. 연구 자산** — 계속 고칠 곳, 시뮬레이터 교체 후에도 그대로 | `envs/base_env/assist_env.py`, `envs/control/assist_target_control.py`, `envs/rewards/assist.py`, `envs/obs/assist_obs.py`, `envs/terminations/assist.py`, `envs/context_views.py`(AssistContext), `examples/experiments/assist_pendulum/mlp.py`, `robot_configs/hip_pendulum.py` | **설계 의도까지** |
+| **B. 계약** — 안 고침 | `envs/base_env/env.py`의 `post_physics_step()` 호출 순서, `envs/mdp_component.py` 규약, `simulator/base_simulator/simulator.py` 추상 + `RobotState`(common ordering), `agents/base_agent/agent.py` `fit()` + `agents/ppo/*` | "언제 무엇이 어떤 인자로 불리는가"만 |
+| **C. 소모품** — Newton 전용, 버릴 것 | `simulator/newton/simulator.py` 내부(Warp 커널·CUDA graph·MuJoCo qfrc), `maniflow/hybrid_control.py`의 `robot_view` 접근 | **기능 이름만** (코드 안 읽어도 됨) |
+
+C층이 A층에 침투한 지점은 딱 3곳 — 이것이 IsaacLab 이전 작업 목록 전부다:
+
+| `assist_env.py` | 기능 | IsaacLab에서 대체 필요한 것 |
+|-----------------|------|------------------------------|
+| `_torque_override.set_torques(inject)` :178 | 관절 토크 **가산** 주입 | PD 위에 외부 토크 더하는 수단 |
+| `simulator.get_substep_mean_dof_forces()` :186 | 사람 PD 토크 substep 평균 계측 | actuator 토크 읽기 (IsaacLab은 built-in PD에서도 applied torque를 보고하므로 오히려 쉬움) |
+| `_randomize_human_gains()` :114 | env별 PD 게인 배율 | per-env PD 게인 설정 수단 |
+
+### 9.2 LLP 실행 트레이스 (체크리스트)
+
+명령 한 줄이 실행되는 순서 그대로. **경계는 `train_agent.py:891`의
+`agent.fit()`** — 그 이전은 객체를 *만드는* 1회성 구간(물리도 gradient도 없음),
+그 이후는 만든 객체를 *굴리는* 반복 구간.
+
+```bash
+python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \
+    --experiment-path examples/experiments/assist_pendulum/mlp.py \
+    --experiment-name assist_pendulum --motion-file none \
+    --num-envs 4096 --batch-size 16384
+```
+
+#### 1부 — 준비 (fit() 이전, 1회)
+
+- [ ] **A. 명령 → config 7덩어리**
+
+```
+train_agent.py:493  main()
+├ :509  detect_checkpoint_mode()                        → mode = "fresh"
+├ :567  load_experiment_module(experiment_path)
+│   └ :366  importlib exec_module                       → mlp.py 본문 실행
+├ :577  getattr(module, "env_config") 등 슬롯 함수 8개 꺼냄
+├ :588  build_standard_configs(슬롯 8개, args)          → config_builder.py:18
+│   ├ :50  robot_config("hip_pendulum") → robot_configs/hip_pendulum.py
+│   │        └ base.py:235 __post_init__ → MJCF 파싱 → number_of_actions = 2
+│   ├ :53  simulator_config("newton", …)                → NewtonSimulatorConfig
+│   ├ mlp.py:51  configure_robot_and_simulator()
+│   │              → sim_cfg._target_ 를 FixedBaseNewtonSimulator 로 교체
+│   ├ mlp.py:61/66/70  terrain / scene_lib / motion_lib  (motion_file=None)
+│   ├ mlp.py:75  env_config(robot_cfg, args)            → AssistEnvConfig
+│   │              obs 4 / reward 4 / termination 2 /
+│   │              control_components{"assist": AssistTargetControlConfig} /
+│   │              action_config / assist_torque_limit=25  ← 전부 여기서 dict 조립
+│   └ mlp.py:223 agent_config(robot_cfg, env_cfg, args) → PPOAgentConfig
+│                  actor_in_keys 3 / critic_in_keys 4 / MLP 512·256·128
+├ :608  CLI --overrides 적용
+└ :688  Fabric(...)                                     → fabric.device
+```
+
+  - 확인: **resume(:515)은 이 A 구간을 통째로 건너뛰고** pickle만 읽는다 → `--overrides` 무시 (§8)
+  - 확인: `ASSIST_TORQUE_LIMIT`(mlp.py:48) 하나가 `action_config.torque_scale`과 `assist_torque_limit` **두 곳**으로 복사된다
+
+- [ ] **B. config → 객체** (`_target_` 문자열이 클래스가 되는 지점)
+
+```
+├ :767  build_all_components(..., device=fabric.device)
+│   └ component_builder.py:102 build_simulator_from_config
+│       └ :125  get_class(sim_cfg._target_)          ★ FixedBaseNewtonSimulator 객체
+├ :788  EnvClass = get_class(env_cfg._target_)       ★ AssistEnv
+├ :789  env = AssistEnv(config, robot_config, device, terrain, scene_lib,
+│                       motion_lib, simulator)
+│   └ env.py:143  BaseEnv.__init__
+│       ├ :220  initialize_simulator()               → Newton model 빌드·기동
+│       ├ :277  ControlManager(config.control_components, self)
+│       │         └ AssistTargetControl 객체
+│       │            (:138~152 버퍼: _chunk(n,8,2) / _tau_agent(n,2) / _gain_scale(n,2))
+│       └ :285  ComponentManager(device)             → MdpComponent 등록
+├ :802  AgentClass = get_class(agent_cfg._target_)   ★ PPO
+├ :803  agent = PPO(config, env, fabric)             → base_agent/agent.py:86
+└ :805  agent.setup()                                → agent.py:173
+    ├ :175  create_model() → ppo/agent.py:114 → PPOModel → ppo/model.py:116
+    │         ├ :121  PPOActor  → :60 MuClass = MLPWithConcat (512·256·128, num_out=2)
+    │         │                 → :55 logstd = Parameter(ones(2) * −2.0)
+    │         └ :124  critic = ModuleContainer
+    ├ :193  dummy_obs = env.get_obs()
+    ├ :196  self.model(dummy_obs_td)        ★ LazyLinear 형상 확정 (75→512 / 83→512)
+    └ :201  create_optimizers()             → actor lr 1e-4 / critic lr 5e-4
+```
+
+  - 확인: `get_class` 3곳이 설정→객체 다리 전부. 문자열은 mlp.py와 robot config가 씀
+  - 확인: :196의 dummy forward가 네트워크를 **실제로 만든다** → obs 구성을 바꾸면 기존 ckpt와 가중치가 안 맞음
+
+#### 2부 — 루프 (fit() 이후, 반복)
+
+- [ ] **C. 루프 골격**
+
+```
+train_agent.py:891  agent.fit()                     → base_agent/agent.py:385
+├ :404  ExperienceBuffer(num_envs=4096, num_steps=32)
+├ :409  env.reset() → obs / :414 obs 키 등록 / :421 1회 forward로 out_keys 등록
+└ :451  while epoch < max_epochs:                            ← ⑤ 복귀
+    ├ :455  self.eval()                             (normalizer 갱신 정지)
+    ├ :459  for step in range(32):                           ← ④ 복귀
+    │   ├ :464  env.reset(done_indices)              (끝난 env만)
+    │   ├ :470  obs → 버퍼
+    │   ├ :472  collect_rollout_step()               → D
+    │   ├ :475  env.step(action)                     → E
+    │   └ :490  record_rollout_step()                (rewards / dones 저장)
+    ├ :503  normalize_rewards_in_buffer()
+    ├ :514  optimize_model()                         → F
+    └ :521 ckpt 저장 / :544 evaluator.evaluate() (주기적)
+```
+
+  - 확인: rollout 32스텝은 전부 `no_grad`(:456). gradient는 F에서만 흐른다
+  - 확인: epoch당 4096 × 32 = 131,072 transition → batch_size 16384 → 8 미니배치
+  - `num_steps`는 `batch_size`와 무관한 독립 config (기본 32)
+
+- [ ] **D. 모델 forward — obs → action**
+
+```
+agent.py:472  collect_rollout_step(obs_td, step)
+└ :376  self.model(obs_td)                          → ppo/model.py:141 PPOModel.forward
+    ├ :157  self._actor(td)                         → model.py:69 PPOActor.forward
+    │   ├ :79  self.mu(td)                          → common/mlp.py:121
+    │   │        torch.cat([assist_proprio 44, assist_target 21,
+    │   │                   previous_actions 10]) = 75
+    │   │        → normalize → Linear 512→256→128→2
+    │   │        → td["actor_trunk_out"] = mu  (4096, 2)
+    │   ├ :81  std = exp(logstd) ≈ 0.135            (actor_logstd = −2.0, 고정)
+    │   ├ :87  action = Normal(mu, std).sample()     (4096, 2)   ← 범위 제한 없음
+    │   └ :90  neglogp = −log_prob.sum(−1)
+    └ :160  self._critic(td)
+             cat(위 3개 + assist_privileged 8) = 83 → value (4096, 1)
+→ :381  action / mean_action / neglogp / value 를 버퍼에 저장
+```
+
+  - 확인: actor 75 vs critic 83 — 차이는 `assist_privileged`(τ_agent, τ_assist, θ_g−θ, gain_scale) 뿐. mlp.py의 `actor_in_keys` / `critic_in_keys`에서 갈라진다
+  - 확인: 모델 출력은 **범위 없는 실수**. N·m로 만드는 건 E의 `tanh × 25`
+
+- [ ] **E. env.step 한 번 — action → 물리 → 보상** ← 가장 중요
+
+```
+agent.py:475  env.step(actor_output["action"])       ← (4096, 2) 원시 실수
+└ assist_env.py:148  AssistEnv.step(action)
+    ├ :149  _lazy_init_assist()                     (첫 호출만)
+    │   ├ hybrid_control.py:57  JointTorqueOverride(simulator, …)
+    │   ├ :100  engage(gain_scale=1.0)
+    │   └ :101  _randomize_human_gains()            → env별 ke/kd × 0.7~1.3
+    ├ :157  _process_action(action, context)         → env.py:423
+    │   └ action_functions.py:458  normalized_torque_action
+    │       :480 tanh(action) → :484 × 25.0          → (4096, 2) [N·m]
+    ├ :158  clamp(±assist_torque_limit)              → tau_assist
+    ├ :170  comp.get_pd_targets_and_vel()            → assist_target_control.py:232
+    │   └ :209  _target_at(t)  해석적 사인 궤적      → theta_g, target_vel
+    ├ :171  tau_ff = _human_kd * target_vel                    ← 사람 몫 피드포워드
+    ├ :178  _torque_override.set_torques(tau_assist + tau_ff)
+    │   └ hybrid_control.py:184  nan_to_num → effort limit clamp
+    │       └ :205  sim.robot_view.set_dof_forces(sim.control, wp)
+    │                          ★ 정책 출력이 물리에 들어가는 유일한 지점 (qfrc 경로)
+    ├ :181  simulator.step(theta_g, markers_callback)  ★ 인자가 정책 출력이 아니다
+    │   └ base_simulator/simulator.py:648
+    │       └ :676  _physics_step()                  → newton/simulator.py:1059
+    │           ├ :1061  _apply_control() → base:1158  BUILT_IN_PD
+    │           │         targets[:, dof_convert_to_sim]
+    │           │         → :1360 _apply_simulator_pd_targets(theta_g)
+    │           └ _simulate()  :1007
+    │               └ :1012  for _ in range(decimation=4):
+    │                     solver.step(state_0, state_1, control, contacts, 1/400)
+    │                     state_0, state_1 = state_1, state_0
+    │                     :1026  accumulate_qfrc_kernel → qfrc_actuator 누적
+    ├ :186  tau_agent = simulator.get_substep_mean_dof_forces()  → :1301 누적/4
+    ├ :188  tau_agent += tau_ff
+    ├ :189  comp._tau_agent[:] = tau_agent
+    ├ :191  post_physics_step()                      → env.py:688
+    │   ├ :694  progress_buf += 1
+    │   ├ :697  state_history.rotate_and_update()    (히스토리 10칸)
+    │   ├ :749  control_manager.step()               → assist_target_control.py:382
+    │   │         10 step마다 :308 _refresh_chunk()
+    │   │           θ_g를 8 knot 떠서 delay+bias+noise → _chunk(n, 8, 2)
+    │   │                                    ★ Phase C = 이 함수만 ManiFlow로 교체
+    │   ├ :763  _build_global_context()
+    │   │   └ :933  control_manager.populate_context(ctx) → :456 AssistContext 채움
+    │   │           theta_d_future / theta_g / tau_agent / tau_assist /
+    │   │           gain_scale / chunk_age
+    │   ├ :765  compute_observations(context)
+    │   │         MdpComponent가 dynamic_vars 경로로 텐서를 뽑아
+    │   │         → assist_obs.py:31 / :62 / :89 호출
+    │   ├ :766  compute_reward(context)              → rewards/assist.py 4개
+    │   │         tracking(θ_g 기준!) · human_power · assist_effort · action_rate
+    │   │         → weight 곱해 합 → rew_buf
+    │   └ :767  check_resets_and_terminations        → terminations/assist.py
+    └ :196  return obs, rew_buf, reset_buf, terminate_buf, extras
+```
+
+  - 확인: **힘이 두 갈래 병렬** — PD 경로(:181, 사람) / qfrc 경로(:178, 정책).
+    `qfrc_actuator` 계측에 사람 토크만 잡히는 이유 (§2.5)
+  - 확인: **:749가 :765보다 먼저** — chunk 갱신 후 obs 계산. control → context →
+    obs → reward 이 순서가 `post_physics_step` 전체를 지배
+  - 확인: tracking 보상은 정책이 못 보는 **θ_g로 채점**한다 (θ_d 아님) → 노이즈 주입의 목적
+  - 함께 볼 것: `envs/mdp_component.py` (compute_func + dynamic_vars + static_params 규약),
+    `simulator/base_simulator/simulator_state.py` (RobotState / common ordering / 쿼터니언 xyzw)
+
+- [ ] **F. 최적화 — 버퍼 → GAE → PPO 업데이트**
+
+```
+agent.py:514  optimize_model()                       → agent.py:709
+├ :710  pre_process_dataset()                        → ppo/agent.py:672
+│   └ :643  compute_advantages()  GAE(gamma, tau)    → advantages / returns 버퍼에
+├ :711  process_dataset(buffer.make_dict())          → DictDataset(batch_size=16384)
+└ :715  for batch_idx in range(max_num_batches()):
+    └ :733  perform_optimization_step(batch)         → ppo/agent.py:308
+        ├ :321  actor_step(batch)                    → :396
+        │     actor forward → mu
+        │     current_neglogp = −Normal(mu, std).log_prob(batch["action"])
+        │     ratio = exp(batch["neglogp"] − current_neglogp)
+        │     clipped surrogate (e_clip) → actor_loss
+        │     :325  adaptive_lr → KL 기반 lr 조정
+        ├ critic_step(batch)                         → :536
+        │     critic forward → value, MSE vs batch["returns"]
+        └ fabric.backward → grad clip 50.0 → optimizer.step()
+```
+
+  - 확인: rollout 때 저장한 `neglogp`가 old policy 값 → ratio의 분자/분모가 여기서 만난다
+  - 확인: eval 직후 1 epoch은 정책 업데이트를 건너뛴다 (`_skip_next_policy_update`, agent.py:559)
+
+### 9.3 추론·평가 경로
+
+- [ ] `examples/experiments/assist_pendulum/runtime_utils.py` **먼저**
+      (inference_agent.py의 60줄 축소판)
+- [ ] `protomotions/inference_agent.py` — `resolved_configs_inference.pt` 로드(:233)
+      → `apply_backward_compatibility_fixes`(:273) → CLI overrides.
+      **`apply_inference_overrides`는 여기서 호출되지 않는다** (§8)
+      → 위 1부 A를 건너뛰고 B부터 재구성, `fit()` 없이 rollout만
+- [ ] `examples/experiments/assist_pendulum/compare_rollout.py` —
+      paired 평가 구성 + RNG pairing 함정 (§8)
+- 베이스라인 트릭: `--overrides env.assist_torque_limit=0` → E의 :158 clamp가 0
+      → 정책은 계속 forward하지만 주입값 전부 0 = 사람 PD 단독
+- IsaacLab 관점: 경로 동일, `--simulator isaaclab`만 바뀜. 학습 Newton → 추론
+      IsaacLab 같은 **sim2sim이 왜 가능한지**(모델이 common ordering 관측 계약에만
+      의존)를 여기서 납득하는 것이 이전 준비의 핵심.
+
+### 9.4 HLP — ManiFlow (LLP와 완전히 별도 학습)
+
+위 트레이스와 **접점이 없다.** HLP는 `maniflow` env에서 mocap 지도학습으로
+따로 훈련되고, LLP 학습 중에는 `_refresh_chunk`의 에뮬레이션이 그 자리를
+대신한다 (Phase C에서 실제 결합). 시뮬레이터와 무관.
+
+- [ ] `protomotions/maniflow/angle_estimator.py` — 온라인 래퍼.
+      `observe(obs)`(:167) → `predict()`(:191), 내부는 `policy.predict_action()` 한 줄
+- [ ] ManiFlow_Policy repo의 lowdim policy — `predict_action()` = normalizer →
+      노이즈에서 denoise 반복 → action. obs_encoder 소형 MLP,
+      DiTX transformer 6블록 / hidden 256 / 10.5M 파라미터
+- [ ] walking workspace + dataset이 zarr를 (n_obs 10, horizon 16) 창으로 자르는 방식
+- 확인: 래퍼의 히스토리 프라이밍(첫 관측을 10칸 복제)은 학습의 무엇과 대응인가
