@@ -2,7 +2,7 @@
 
 > 강체(rigid-link) 고관절 assist 착용로봇의 딥러닝 기반 제어기 연구 (2026).
 > 이 문서는 프레임워크 전체 구조, 코드 지도, 실험 이력, 로드맵의 단일 참조점이다.
-> 최종 갱신: 2026-09-01
+> 최종 갱신: 2026-09-03
 
 ---
 
@@ -284,16 +284,37 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
 
 ## 7. 레포 위생 현황
 
-- **zarr 18.9 GB 완전 제거 완료** (2026-08-31, 업로더인 협업 연구원님 승인):
-  untrack + 로컬 사본 삭제 + **git 히스토리 재작성**(filter-repo,
-  `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/` 전 히스토리 제거).
-  pack 17.7 GiB → 311 MiB, `.git` 22 GB → 4.0 GB(그중 3.6 GB는 LFS =
-  체크포인트, 보존됨). 재작성으로 **전 커밋 해시가 변경**됨 — force push
-  후 협업자는 재클론 필요. 재작성 전 백업:
-  `~/Projects/AI-SBC-PROTOMOTIONS-backup-20260831.git` (안정화 후 삭제 가능).
+- **zarr 18.9 GB 완전 제거 완료** (2026-08-31 재작성 / 2026-09-03 push·GC 완료,
+  업로더인 협업 연구원님 승인): untrack + 로컬 사본 삭제 + **git 히스토리
+  재작성**(filter-repo, `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/`
+  전 히스토리 제거).
+  - **2026-09-03 마무리**: `origin/main`에 force push 완료
+    (`--force-with-lease`, 원격 110 커밋 → 로컬 90 커밋으로 교체).
+    재작성으로 **전 커밋 해시가 변경**됨 — 협업자는 재클론 필요(다른 레포로
+    이동해 실질적 영향 없음 확인). 이어서 `git reflog expire --expire=now --all
+    && git gc --prune=now` 실행: 재작성 전 옛 팩 18 GB(고아 데이터)가 남아 있던
+    것을 제거해 **`.git` 22 GB → 4.0 GB** 달성 (objects 312 MB + LFS 3.6 GB
+    = 체크포인트 실물, 보존). `git fsck --connectivity-only` 통과.
+  - 재작성 전 백업: `~/Projects/AI-SBC-PROTOMOTIONS-backup-20260831.git`
+    (18 GB, bare. 안정화 확인됐으므로 삭제 가능).
+  - GitHub 쪽 용량은 원격 GC 시점까지 즉시 줄지 않을 수 있음(필요 시 Support 요청).
 - 대용량 데이터는 향후 HF(또는 사내 스토리지)로: repo에는 다운로드
   스크립트/경로만 커밋.
-- `data/seed/` 260 GB(BVH 원본+변환본), `tasks/` 24 GB — 로컬 전용(.gitignore).
+- **현재 용량 실측** (2026-09-03):
+  - `data/seed/` 260 GB — BONES-SEED BVH 원본+변환본. **git 미추적**(로컬 전용),
+    ManiFlow 학습 데이터라 유지.
+  - `tasks/` 2.4 GB — 실험별 작업 폴더 3개(스크립트 + INFO.md + 체크포인트 +
+    녹화). **이 중 2.0 GB가 LFS로 git 추적 중**이다 — `.gitignore`가 막는 것은
+    `maniflow_infer_results/`·`maniflow_control_results/`·`zarr_data/`뿐.
+    용량은 대부분 `output_newton`/`output_isaaclab`(246 MB씩)과 `recordings`.
+  - `checkpoints/` — `v18_2_newton_suit_passive_cable` 369 MB +
+    `v18_newton_suit_passive_cable` 246 MB (LFS).
+- **정리 대기 (미실행)**: `tasks/*/recordings`·`output_*` 바이너리 2.0 GB,
+  `checkpoints/v18`(구버전) 246 MB, `checkpoints/v18_2` 369 MB.
+  `git rm`만으로는 히스토리에 남아 용량이 줄지 않으므로 **filter-repo 재실행 +
+  force push**가 다시 필요 → 한 번에 묶어 처리할 것. `v18_2`는 §6 Phase D에서
+  "시뮬 속 착용자 대역"으로 지정돼 있어 **역할 대체 계획이 정해진 뒤** 삭제
+  판단(지우면 suit mimic tracker 재학습 필요, epoch 5000).
 
 ## 8. 함정 모음 (디버깅 시 먼저 볼 것)
 
