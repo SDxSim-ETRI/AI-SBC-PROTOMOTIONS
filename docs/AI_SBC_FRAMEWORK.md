@@ -62,7 +62,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 |---|---|---|
 | 정체 | ProtoMotions Mimic(PPO) 전신 모션 추종 RL 정책 | BONES-SEED mocap 지도학습 예측 모델 |
 | 역할 | 시뮬레이션 속 **"착용자" 대역** (skeleton을 걷게 함) | **사용자 의도 예측** (미래 flexion 출력) |
-| 실존 체크포인트 | `checkpoints/v18_2_newton_suit_passive_cable` | `ManiFlow_Policy/.../locomotion-flexion40-run01` |
+| 체크포인트 | ~~`checkpoints/v18_2_newton_suit_passive_cable`~~ — **2026-09-03 삭제**(§3.4), 새 로봇에서 재정의 예정 | `ManiFlow_Policy/.../locomotion-flexion40-run01` (현역) |
 
 ### 2.3 Chunk 인터페이스 (HLP ↔ LLP 결합점)
 
@@ -164,18 +164,28 @@ run02(재수집)→run03(DAgger)→run04(substep 평균 라벨)까지 진행 후
 결론과 함께 종료. **단, 여기서 만든 인프라는 현역**: `JointTorqueOverride`,
 `get_substep_mean_dof_forces()`, ManiFlow loader — 모두 LLP가 사용 중.
 
-### 3.4 mimic tracker (skeleton 단계의 "착용자" 대역)
+### 3.4 mimic tracker — ⏹ 체크포인트 전부 삭제 (2026-09-03)
 
-| 체크포인트 | 내용 |
-|------------|------|
-| `checkpoints/v18_2_newton_suit_passive_cable/` | suit(passive cable) 15모션(11+koo_4), Newton, epoch 5000, 성공률 100% — **git 추적됨(공유)** |
+suit 단계를 **다른 로봇 + IsaacLab**으로 진행하기로 정해졌고, mimic 체크포인트는
+로봇의 DOF 구성에 묶여 재사용이 불가능하다. 따라서 아래 가중치를 모두 삭제했다
+(§7):
+
+| 삭제된 체크포인트 | 원래 내용 |
+|-------------------|-----------|
+| `checkpoints/v18_2_newton_suit_passive_cable/` | suit(passive cable) 15모션(11+koo_4), Newton, epoch 5000, 성공률 100% |
 | `checkpoints/v18_newton_suit_passive_cable/` | v18_2의 이전 버전 |
-| `tasks/mimic_suit_active_cable_walk_23dof/output_newton_flat/score_based.ckpt` | walk 전용 (active cable) — β 실험에 사용 |
+| `tasks/mimic_suit_active_cable_walk_23dof/output_newton_flat/score_based.ckpt` | walk 전용 (active cable) — β 실험(§2.6)에 사용 |
 
-⚠️ 비착용(plain) skeleton 로봇은 현재 **에셋이 레포에 없다**:
+**남아 있는 것 = 재현 기록**: 각 디렉터리의 `INFO.md`, `resolved_configs*.yaml`,
+`experiment_config.py`, `tasks/*/`의 학습·재생·녹화 스크립트, `MANIFLOW_*.md`
+분석 문서. 즉 "어떤 설정으로 무엇을 얻었는지"는 남고 가중치만 없다.
+
+suit 에셋(`mjcf/skeleton_torque_suit*.xml`, `31dof/`)과 suit 모션 파일(27 DOF,
+`data/motion_for_trackers/`)은 **보존**했다.
+
+⚠️ 비착용(plain) skeleton 로봇은 **에셋이 레포에 없다**:
 `skeleton.py`/`skeleton_torque.py`가 참조하는 `mjcf/skeleton_torque.xml`(및
 `mjcf/31dof/skeleton_torque.xml`)이 존재하지 않음 (suit 계열 XML만 존재).
-skeleton 단계는 suit 로봇(어차피 착용 상태가 물리적으로 맞음) 기준으로 진행.
 
 ---
 
@@ -270,7 +280,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결**: ① SEED flexion GT 궤적 풀 로더 (40 fps zarr 재사용, trunk 채널 동시 스트리밍) ② `AssistTargetControl` 의도 소스 옵션화(synthetic/motion_data) ③ SEED 궤적 환경에서 LLP 재학습(chunk는 에뮬레이션 유지) ④ A/B/C 평가: assist off / 에뮬 chunk / **실 ManiFlow chunk** — 평가 궤적은 HLP 미학습분(SEED val split 3,449클립 + suit14) | 예정 |
-| **D** | **skeleton(suit) 확장**: mimic tracker(v18_2)=착용자, LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산). 균형·낙상 개입 상태의 보상/종료 재설계. β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 |
+| **D** | **skeleton(suit) 확장** — 2026-09-03 방향 변경: **다른 로봇 + IsaacLab**에서 구현(별도 레포 가능성). 따라서 Newton suit mimic 체크포인트는 폐기(§3.4·§7)하고 착용자 역할은 새 로봇에서 재정의한다(mimic tracker 재학습 / mocap θ_g 직접 주입 등 미결). 유지되는 설계: LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산), 균형·낙상 개입 상태의 보상/종료 재설계, β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 (로봇·시뮬레이터 재선정) |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
@@ -303,18 +313,24 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
 - **현재 용량 실측** (2026-09-03):
   - `data/seed/` 260 GB — BONES-SEED BVH 원본+변환본. **git 미추적**(로컬 전용),
     ManiFlow 학습 데이터라 유지.
-  - `tasks/` 2.4 GB — 실험별 작업 폴더 3개(스크립트 + INFO.md + 체크포인트 +
-    녹화). **이 중 2.0 GB가 LFS로 git 추적 중**이다 — `.gitignore`가 막는 것은
+  - `tasks/` — 정리 전 2.4 GB(그중 2.0 GB가 LFS 추적). 2026-09-03에 `.ckpt`와
+    `recordings/**`를 삭제해 스크립트·INFO.md·분석 md·`resolved_configs*.yaml`
+    만 남았다(수백 KB). `.gitignore`가 막는 것은
     `maniflow_infer_results/`·`maniflow_control_results/`·`zarr_data/`뿐.
-    용량은 대부분 `output_newton`/`output_isaaclab`(246 MB씩)과 `recordings`.
-  - `checkpoints/` — `v18_2_newton_suit_passive_cable` 369 MB +
-    `v18_newton_suit_passive_cable` 246 MB (LFS).
-- **정리 대기 (미실행)**: `tasks/*/recordings`·`output_*` 바이너리 2.0 GB,
-  `checkpoints/v18`(구버전) 246 MB, `checkpoints/v18_2` 369 MB.
-  `git rm`만으로는 히스토리에 남아 용량이 줄지 않으므로 **filter-repo 재실행 +
-  force push**가 다시 필요 → 한 번에 묶어 처리할 것. `v18_2`는 §6 Phase D에서
-  "시뮬 속 착용자 대역"으로 지정돼 있어 **역할 대체 계획이 정해진 뒤** 삭제
-  판단(지우면 suit mimic tracker 재학습 필요, epoch 5000).
+  - `checkpoints/` — 가중치는 2026-09-03에 전부 삭제(아래). 남은 것은 각
+    디렉터리의 `INFO.md`·`resolved_configs*.yaml`·`experiment_config.py`뿐.
+- **suit 바이너리 2.6 GB 정리 완료** (2026-09-03): suit 단계를 다른 로봇 +
+  IsaacLab으로 옮기기로 정해져 mimic 체크포인트가 재사용 불가 → LFS 바이너리
+  **129개 삭제** (`checkpoints/v18` 4개 + `v18_2` 5개 + `tasks/*/output_*` .ckpt
+  24개 + `tasks/*/recordings/**` 96개). `INFO.md`·`resolved_configs*.yaml`·
+  `experiment_config.py`·스크립트·분석 md는 **전부 보존**(재현 기록).
+  - **LFS는 filter-repo가 필요 없다** — git 히스토리에 들어 있는 것은 129바이트
+    포인터뿐이고(`git cat-file -s HEAD:<ckpt>` = 129) 실제 바이너리는
+    `.git/lfs`와 GitHub LFS 저장소에 있다. 따라서 일반 `git rm` + `git push`
+    (force 불필요) + `git lfs prune`으로 회수된다. 히스토리 재작성이 필요한
+    것은 **LFS를 쓰지 않은** 대용량 파일(zarr 같은)뿐.
+  - GitHub LFS 저장소 용량은 미참조 객체를 자동 삭제하지 않으므로 즉시 줄지
+    않는다(필요 시 Support 요청).
 
 ## 8. 함정 모음 (디버깅 시 먼저 볼 것)
 

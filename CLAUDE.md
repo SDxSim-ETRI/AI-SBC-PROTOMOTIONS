@@ -30,26 +30,25 @@ python protomotions/inference_agent.py --checkpoint <run>/last.ckpt \
 ```
 Never pass `--robot-name` at inference — the robot config is loaded from the checkpoint's `resolved_configs_inference.pt`.
 
-### ETRI skeleton suit (Newton) — mimic tracker = 시뮬 속 "착용자" 대역
-```bash
-# 재생 (mesh 에셋으로 시각화, 20초 자동 전환)
-python protomotions/inference_agent.py \
-    --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
-    --simulator newton --num-envs 1 --cycle-seconds 20 \
-    --overrides "robot.asset.asset_file_name=mjcf/skeleton_torque_suit_mesh.xml"
+### ETRI skeleton suit (Newton) — ⚠️ 체크포인트 전부 삭제됨 (2026-09-03)
 
-# v18_2에서 warm start 재학습
-python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
-    --experiment-path examples/experiments/mimic/mlp.py --experiment-name <new_exp> \
-    --checkpoint checkpoints/v18_2_newton_suit_passive_cable/last.ckpt \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt \
-    --num-envs 2048 --batch-size 8192
-```
-- suit 체크포인트에는 suit 모션 파일(27 DOF)만. 에셋(`protomotions/data/assets/mjcf/`):
-  `skeleton_torque_suit.xml` = 학습용(hip ring capsule, OOM 방지) / `skeleton_torque_suit_mesh.xml` = 시각화용(cylinder); `31dof/`도 같은 쌍.
-- 비suit(plain) skeleton의 XML·체크포인트·모션 파일은 **레포에 없음** (`skeleton.py`/`skeleton_torque.py`가 참조만 함) — skeleton 작업은 전부 suit 로봇 기준.
-- 체크포인트: 학습 중 `results/<exp>/`(로컬, gitignore) → 보관본은 `checkpoints/<version>/` + `INFO.md`(git/LFS). 현존: `v18_newton_suit_passive_cable`, `v18_2_newton_suit_passive_cable`.
+suit mimic tracker 체크포인트(`v18`, `v18_2`, `tasks/*/output_*`)는 **모두
+삭제**했다. suit 단계는 다른 로봇으로 진행하기로 정해졌고 mimic 체크포인트는
+로봇의 DOF 구성에 묶여 재사용이 불가능하다. suit 단계 자체도 **IsaacLab에서
+구현**할 예정(별도 레포 가능성) — 이 레포의 Newton suit 경로는 사실상 동결.
+
+남아 있는 것 = **재현 기록만**: `checkpoints/<ver>/INFO.md`,
+`resolved_configs*.yaml`, `experiment_config.py`, `tasks/*/`의 학습·재생·녹화
+스크립트와 분석 문서. 가중치(`.ckpt`)와 녹화 영상은 없다.
+
+- suit 에셋은 남아 있음 (`protomotions/data/assets/mjcf/`):
+  `skeleton_torque_suit.xml` = 학습용(hip ring capsule, OOM 방지) /
+  `skeleton_torque_suit_mesh.xml` = 시각화용(cylinder); `31dof/`도 같은 쌍.
+  suit 모션 파일(27 DOF)도 `data/motion_for_trackers/`에 남아 있음.
+- 비suit(plain) skeleton의 XML은 **레포에 없음** (`skeleton.py`/`skeleton_torque.py`가
+  참조만 함).
+- 체크포인트 보관 규약(향후 참고): 학습 중 `results/<exp>/`(로컬, gitignore) →
+  보관본은 `checkpoints/<version>/` + `INFO.md`(git/LFS).
 
 ### AI-SBC LLP (hip pendulum, Newton, 물리 400 Hz / policy 100 Hz)
 ```bash
