@@ -70,15 +70,24 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 
 - **버퍼**: knot K개 × DOF, knot 간격 `hlp_dt`, 기준시각 `t0`
 - **채움** (`_refresh_chunk`): 저주파(chunk_refresh_steps)마다 재생성.
-  현재는 θ_g에서 미래 knot을 떠서 노이즈(bias+white)와 지연을 주입하는
-  **에뮬레이션**. → 실제 HLP 통합 = 이 함수의 knot 소스를 ManiFlow 예측으로 교체
+  θ_g에서 미래 knot을 떠서 노이즈(bias+white+lead 비례 drift)와 지연을
+  주입하는 **에뮬레이션**(학습용). 실 HLP 결합은 이 함수를 override해
+  ManiFlow 예측으로 교체한다 (`MotionAssistTargetControl`, §4.1).
 - **소비** (`_interp_chunk` → `populate_context`): policy step마다 knot 사이를
-  선형 interpolation한 미래 목표 창(`theta_d_future`, 0~0.4 s)을 LLP 관측으로 제공
+  선형 interpolation한 미래 목표 창(`theta_d_future`)을 LLP 관측으로 제공.
+  v2 = 0~0.4 s (5×0.1), v3 = **0~0.15 s** (4×0.05, `obs_future_*`).
 
 시간 스케일 (진자 기준): 물리 400 Hz → policy 100 Hz (decimation 4) →
-chunk 갱신 10 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(25 ms) 프레임,
-horizon 16(= 400 ms), n_obs 10(= 250 ms), n_act 4. 통합 시 `hlp_dt=0.025`,
-`chunk_knots=16`으로 맞추면 interpolation 코드는 무변경.
+chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(25 ms)
+프레임, n_obs 10(= 250 ms), n_act 4, horizon 16.
+
+⚠️ **horizon 16 ≠ 미래 400 ms** (2026-09-08 정정). horizon은 **관측 창과
+정렬**돼 있어서 `action_pred` index k ↔ 상대 프레임 k−(n_obs−1) = k−9다.
+즉 k=0..8은 과거(−225…−25 ms), k=9가 현재, k=10..15가 미래 → **미래는
+6프레임 = 150 ms**뿐이다. 따라서 통합 시 `hlp_dt=0.025`,
+`chunk_knots = horizon − n_obs + 1 = 7`(현재 + 미래 6). knot 수·간격은
+`ManiFlowChunkSource`가 모델에서 유도하므로 더 긴 horizon으로 재학습해도
+코드는 무변경이고 `obs_future_*`만 늘리면 된다.
 
 ### 2.4 사람 모델 (시뮬레이션 근사)
 
@@ -123,12 +132,13 @@ horizon 16(= 400 ms), n_obs 10(= 250 ms), n_act 4. 통합 시 `hlp_dt=0.025`,
 |------|------|
 | 학습 데이터 | HF `bones-studio/seed` locomotion 68,960클립 / 20.7M프레임 @ **40 fps** (120 fps ÷3) |
 | 관측 | 각도 4ch: hip_flexion_r/l + trunk pitch/roll (rad, skeleton hinge 규약) |
-| 출력 | flexion 2ch × horizon 16 (미래 400 ms) |
+| 출력 | flexion 2ch × horizon 16 — 관측 창과 정렬(§2.3)이라 **미래는 7프레임(현재+150 ms)** |
 | 구조 | ManiFlow lowdim, n_obs 10 / n_act 4 |
 | run | `hip_flexion_seed-maniflow_lowdim_policy_walking-locomotion-flexion40-run01_seed42` |
 | best ckpt | `checkpoints/epoch=0021-val_loss=0.002854.ckpt` |
 | 성능 (suit14 교차평가, 캘리브레이션 후) | **MAE 0.95° / R² 0.991 / corr 0.996** (denoise 3) — 전 14모션 R²≥0.96 |
-| lead별 오차 | 25 ms 0.45° / 50 ms 1.18° / 75 ms 2.06° |
+| lead별 오차 (오프라인 suit14) | 25 ms 0.45° / 50 ms 1.18° / 75 ms 2.06° |
+| lead별 오차 (100~150 ms, `verify_chunk_source`로 신규 측정) | 100 ms 2.97° / 125 ms 3.92° / 150 ms 4.90° |
 | 추론 지연 (batch 1, RTX 5090) | denoise 3 = **5.95 ms** (권장), 10 = 19.5 ms — 과제 목표 ≤20 ms 충족 |
 
 - **캘리브레이션 (영점 오프셋)**: SEED와 ETRI suit는 중립자세 각도 규약이
@@ -209,6 +219,18 @@ suit 에셋(`mjcf/skeleton_torque_suit*.xml`, `31dof/`)과 suit 모션 파일(27
 | `examples/experiments/assist_pendulum/mlp.py` | 실험 config (chunk 파라미터, 보상 weight, PPO 구조 전부 여기) |
 | `examples/experiments/assist_pendulum/{play,compare_rollout,runtime_utils}.py` | 시각화(θ_g 고스트/토크 화살표) / paired 비교 / ckpt 재구성 유틸 |
 
+**Phase C 결합 계층** (2026-09-08 신설 — 위 파일들은 **무변경**, 전부 상속·신규):
+
+| 파일 | 역할 |
+|------|------|
+| `protomotions/envs/control/assist_motion_control.py` | `MotionAssistTargetControl` — `AssistTargetControl`을 상속해 훅 4개(`_target_at`/`_refresh_chunk`/`reset`/`step`)만 override. 의도 소스와 chunk 소스를 각각 교체 가능 |
+| `protomotions/envs/control/motion_intent.py` | `MotionIntentSource` — mocap zarr → θ_g. 클립 필터(HLP val 분할 재현·동작종류·관절범위), 40 fps 선형보간, 클립 연결 crossfade, **전용 난수 generator** |
+| `protomotions/maniflow/chunk_source.py` | `ManiFlowChunkSource` — 자체 링 버퍼(policy 10 ms) → 25 ms 격자 재표집 → `predict_horizon()` → chunk knot |
+| `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A 25 ms / B 10 ms) |
+| `protomotions/tests/test_motion_intent.py` | 의도 소스 단위 테스트 15개 |
+| `examples/experiments/assist_pendulum/mlp_v3.py` | v3 실험 config (`mlp.py`를 import만; chunk 형식·관측창·control 클래스만 교체) |
+| `examples/experiments/assist_pendulum/eval_abc.py` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
+
 **ManiFlow 통합 레이어** (`protomotions/maniflow/` — 시뮬 쪽에서 maniflow를
 직접 import하지 않고 반드시 이 패키지를 경유):
 
@@ -279,15 +301,37 @@ python scripts/compare_hip_imu_reference.py \
 |-------|------|------|
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
-| **C** | 진자에서 **실 HLP 연결**: ① SEED flexion GT 궤적 풀 로더 (40 fps zarr 재사용, trunk 채널 동시 스트리밍) ② `AssistTargetControl` 의도 소스 옵션화(synthetic/motion_data) ③ SEED 궤적 환경에서 LLP 재학습(chunk는 에뮬레이션 유지) ④ A/B/C 평가: assist off / 에뮬 chunk / **실 ManiFlow chunk** — 평가 궤적은 HLP 미학습분(SEED val split 3,449클립 + suit14) | 예정 |
+| **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
 | **D** | **skeleton(suit) 확장** — 2026-09-03 방향 변경: **다른 로봇 + IsaacLab**에서 구현(별도 레포 가능성). 따라서 Newton suit mimic 체크포인트는 폐기(§3.4·§7)하고 착용자 역할은 새 로봇에서 재정의한다(mimic tracker 재학습 / mocap θ_g 직접 주입 등 미결). 유지되는 설계: LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산), 균형·낙상 개입 상태의 보상/종료 재설계, β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 (로봇·시뮬레이터 재선정) |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
-**Phase C의 검증 논리**: 에뮬레이션 chunk로 학습된 LLP가 실 HLP chunk에서도
-성능을 유지하면 노이즈/지연 에뮬레이션 설계가 옳았다는 검증. 실패하면 실
-HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-the-loop 재학습.
-사람 의도(θ_g)를 SEED GT로 바꾸는 것이 전제 조건 — HLP는 locomotion으로
+**Phase C 결과 (2026-09-08)** — 합성 sine으로 학습한 v3를 mocap 의도 궤적
+위에서 평가. 세 조건 모두 θ_g 완전 동일(paired):
+
+| 데이터 | A 사람 단독 [W] | B 에뮬 chunk | C **실 ManiFlow** |
+|--------|----------------|--------------|-------------------|
+| SEED 미학습분 (val, 32env×30 s) | 12.2 | 6.31 (**−48.3 %**) | 7.43 (**−39.1 %**) |
+| ETRI suit14 (28env×25 s) | 49.7 | 28.96 (**−41.7 %**) | 32.76 (**−34.1 %**) |
+
+추종 오차도 두 경우 모두 개선(SEED 0.86°→0.38°, suit14 1.56°→0.95°),
+낙상/발산 종료 0건. **결론: 에뮬레이션으로 학습한 정책이 실 HLP에서도
+동작한다** — 절감 폭은 B의 8할 수준으로 줄지만 유지된다.
+
+**남은 격차의 원인 = 오차의 "구조"** (크기가 아님). SEED val에서 실 HLP는
+에뮬보다 오히려 **정확한데**(150 ms에서 2.03° vs 3.12°) 절감은 더 낮았다.
+오차를 "의도 궤적을 얼마나 늦게 본 것인가"로 환산하면:
+
+| 조건 | 50 ms lead 등가지연 | 150 ms lead | 속도 상관 (50 ms) |
+|------|--------------------|-------------|------------------|
+| B 에뮬 | 4.0 ms | 0.8 ms | −0.20 |
+| C 실 HLP | **7.1 ms** | **5.0 ms** | **−0.40** |
+
+즉 실 HLP 오차는 무작위가 아니라 **체계적 지연**이라 같은 크기라도 assist
+타이밍을 더 망친다. → 다음 개선안: 에뮬레이션의 `chunk_drift_std`(무작위)를
+줄이고 `chunk_delay_max`(지연)를 5~10 ms 수준으로 올려 재학습.
+
+사람 의도(θ_g)를 mocap으로 바꾸는 것은 평가의 전제 조건 — HLP는 locomotion으로
 학습됐으므로 합성 sine 궤적에서는 예측이 성립하지 않는다 (§2.1).
 
 ---
@@ -373,6 +417,20 @@ HLP 오차 통계에 맞춰 에뮬레이션 파라미터 조정 또는 HLP-in-th
   "모듈명+이름"으로만 저장하므로 이 이름표는 복원 불가 → `save_configs`에서
   `PicklingError`로 죽는다. 새 보상/obs 함수나 config 타입은 `protomotions/`
   아래에 정의하고 실험 파일에서 import만 할 것(값·상수는 안전).
+- **Newton은 실행 간 bit-reproducible이 아니다** — 같은 seed로 두 번 돌려도
+  `dof_pos` 최대 7.9e-3 rad, `tau_agent` 5.2 N·m 차이(2026-09-08 실측, 16env×10 s).
+  반면 `theta_g`/`theta_d`는 완전히 동일. → **회귀 판정은 RNG 유래 신호의
+  bit-identical + 집계 지표가 재실행 산포 안인지**로 한다. 기준값은 편집 전에
+  같은 seed로 2회 기록해 산포를 먼저 측정할 것.
+- **ManiFlow denoise가 전역 torch RNG를 소비한다** — paired 비교에서 의도
+  궤적이 조건마다 어긋난다. `MotionIntentSource`는 **전용 `torch.Generator`**로
+  클립을 샘플링한다 (`motion_seed`).
+- **새 config 필드는 plain default만** — `resolved_configs*.pt`(pickle)는
+  `__init__`을 거치지 않고 클래스 속성으로 해석되므로
+  `field(default_factory=...)`는 기존 체크포인트에서 복원되지 않는다.
+- **오프라인 기준과 lead별 MAE를 비교할 때 바이어스 추정 범위를 맞출 것** —
+  기준 스크립트는 `action` 4프레임만으로 출력 바이어스를 추정한다. 7프레임
+  전체로 추정하면 긴 lead의 잔차가 섞여 lead 0 MAE가 0.10°→0.31°로 부풀려진다.
 - **감시/대기 루프의 pgrep -f 자기매칭** — 파이프라인은 알림 체인 대신 한
   스크립트로 체인할 것.
 
@@ -656,12 +714,14 @@ agent.py:514  optimize_model()                       → agent.py:709
 
 ### 9.4 HLP — ManiFlow (LLP와 완전히 별도 학습)
 
-위 트레이스와 **접점이 없다.** HLP는 `maniflow` env에서 mocap 지도학습으로
-따로 훈련되고, LLP 학습 중에는 `_refresh_chunk`의 에뮬레이션이 그 자리를
-대신한다 (Phase C에서 실제 결합). 시뮬레이터와 무관.
+HLP는 `maniflow` env에서 mocap 지도학습으로 따로 훈련되고, **LLP 학습
+중에는** `_refresh_chunk`의 에뮬레이션이 그 자리를 대신한다 (학습 트레이스와
+접점 없음). **평가 시에는** `MotionAssistTargetControl`이 `_refresh_chunk`를
+override해 `ManiFlowChunkSource`(§4.1)로 실제 예측을 넣는다.
 
 - [ ] `protomotions/maniflow/angle_estimator.py` — 온라인 래퍼.
-      `observe(obs)`(:167) → `predict()`(:191), 내부는 `policy.predict_action()` 한 줄
+      `observe(obs)` → `predict()`, 내부는 `policy.predict_action()` 한 줄.
+      미래 전체(150 ms)는 `predict_horizon()`, 외부 격자 주입은 `set_history()`
 - [ ] ManiFlow_Policy repo의 lowdim policy — `predict_action()` = normalizer →
       노이즈에서 denoise 반복 → action. obs_encoder 소형 MLP,
       DiTX transformer 6블록 / hidden 256 / 10.5M 파라미터

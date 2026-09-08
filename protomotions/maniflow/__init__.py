@@ -39,6 +39,11 @@ Modules:
     hybrid_control   — per-env/per-DOF torque override on top of Newton
                        BUILT_IN_PD, for applying ManiFlow torques to a
                        subset of joints while the rest stay PD-driven.
+    chunk_source     — AI-SBC Phase C: feed the HLP's real predictions into
+                       the LLP chunk buffer (own ring buffer at policy rate,
+                       resampled onto the model's 25 ms grid). Equivalence
+                       check: ``python -m
+                       protomotions.maniflow.verify_chunk_source``.
 """
 
 from protomotions.maniflow.channels import (  # noqa: F401
@@ -57,3 +62,4 @@ from protomotions.maniflow.angle_estimator import (  # noqa: F401
     ManiFlowAngleEstimator,
 )
 from protomotions.maniflow.hybrid_control import JointTorqueOverride  # noqa: F401
+from protomotions.maniflow.angle_estimator import FLEXION_FRAME_DT  # noqa: F401

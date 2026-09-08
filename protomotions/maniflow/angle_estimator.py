@@ -34,6 +34,16 @@ history 관리 구조를 쓰되, 관측이 ``RobotState``가 아니라 **각도 
 chunk의 첫 프레임(lead 0)은 **마지막 observe와 같은 시각**이고, 나머지가
 +25/+50/+75 ms 미래다.
 
+⚠️ **horizon 정렬 — 미래는 400 ms가 아니라 150 ms다** (2026-09-08 확인):
+모델의 `horizon`(=16)은 **관측 창과 정렬**돼 있다. `action_pred` index k는
+상대 프레임 `k − (n_obs_steps − 1)`, 즉 k=0..8은 과거(−225…−25 ms),
+k=9가 현재, k=10..15가 미래(+25…**+150 ms**)다. :meth:`predict`가 주는
+`action`은 그 중 k=9..12(현재+75 ms)일 뿐이고, 실제로 쓸 수 있는 미래
+전체는 :meth:`predict_horizon`으로 꺼내야 한다(현재+미래 7프레임).
+lead별 MAE(suit14 walk, denoise 3): +25 ms 0.36° / +50 0.90° / +75 1.44° /
++100 2.00° / +125 2.58° / +150 3.11°. 더 긴 선행 시간이 필요하면 horizon을
+`n_obs_steps + 미래프레임수`로 늘려 **재학습**해야 한다.
+
 캘리브레이션 (영점 오프셋, §3.1): SEED와 실측(suit) 데이터는 중립자세 각도
 규약이 채널별 상수만큼 다르다. ``obs_offset``(관측에 가산)과
 ``output_bias``(예측에서 감산)를 상수로 주입한다 — 오프라인 검증은 데이터
@@ -60,6 +70,9 @@ FLEXION_OBS_CHANNELS = (
     "trunk_roll",
 )
 FLEXION_ACTION_CHANNELS = ("hip_flexion_r", "hip_flexion_l")
+
+# 모델 native 프레임 간격 [s] (40 fps)
+FLEXION_FRAME_DT = 0.025
 
 _TensorLike = Union[torch.Tensor, Sequence[float]]
 
@@ -138,6 +151,16 @@ class ManiFlowAngleEstimator:
     def num_inference_steps(self) -> int:
         return int(self.policy.num_inference_steps)
 
+    @property
+    def horizon(self) -> int:
+        """모델 예측 창 길이 [프레임]. 관측 창과 정렬돼 있다(모듈 docstring)."""
+        return int(self.policy.horizon)
+
+    @property
+    def num_future_steps(self) -> int:
+        """현재 프레임을 포함한 미래 프레임 수 = ``horizon − n_obs_steps + 1``."""
+        return self.horizon - self.n_obs_steps + 1
+
     def set_calibration(
         self,
         obs_offset: Optional[_TensorLike] = None,
@@ -200,3 +223,48 @@ class ManiFlowAngleEstimator:
             raise RuntimeError("predict() called before observe() primed all envs")
         result = self.policy.predict_action({self.obs_key: self._history})
         return result["action"].detach() - self._output_bias
+
+    def set_history(self, env_ids: Optional[torch.Tensor], history: torch.Tensor) -> None:
+        """history를 외부에서 직접 써넣는다 (25 ms 격자 재표집 등).
+
+        ``observe``와 달리 rolling push가 아니라 창 전체를 덮어쓴다. 시뮬레이션
+        policy 주기(10 ms)가 모델 프레임(25 ms)의 정수배가 아닐 때, 호출자가
+        자체 링 버퍼를 25 ms 격자로 보간해 넣는 용도다.
+
+        Args:
+            env_ids: 대상 env (None이면 전체).
+            history: (m, n_obs_steps, obs_dim) rad — ``obs_offset``은 내부에서
+                가산된다 (``observe``와 동일 규약).
+        """
+        history = history.to(device=self.device, dtype=torch.float32)
+        m = self.num_envs if env_ids is None else int(env_ids.numel())
+        expected = (m, self.n_obs_steps, self.obs_dim)
+        if tuple(history.shape) != expected:
+            raise ValueError(f"history must be {expected}, got {tuple(history.shape)}")
+        history = history + self._obs_offset
+        if env_ids is None:
+            self._history = history
+            self._primed[:] = True
+        else:
+            self._history[env_ids] = history
+            self._primed[env_ids] = True
+
+    @torch.no_grad()
+    def predict_horizon(self, env_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """예측 창 **전체**를 반환 (미래 150 ms까지 접근하는 유일한 경로).
+
+        Args:
+            env_ids: 대상 env (None이면 전체).
+
+        Returns:
+            (m, horizon, action_dim) rad, ``output_bias`` 감산 완료.
+            index k = 상대 프레임 ``k − (n_obs_steps − 1)`` — 즉
+            ``k = n_obs_steps − 1``이 현재 시각이고 그 이후가 미래다.
+            미래 부분만 쓰려면 ``[:, n_obs_steps - 1:]`` (7프레임).
+        """
+        history = self._history if env_ids is None else self._history[env_ids]
+        primed = self._primed if env_ids is None else self._primed[env_ids]
+        if not bool(primed.all()):
+            raise RuntimeError("predict_horizon() called before observe/set_history")
+        result = self.policy.predict_action({self.obs_key: history})
+        return result["action_pred"].detach() - self._output_bias
