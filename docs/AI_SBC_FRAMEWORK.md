@@ -485,11 +485,15 @@ train_agent.py:493  main()
 ├ :789  env = AssistEnv(config, robot_config, device, terrain, scene_lib,
 │                       motion_lib, simulator)
 │   └ env.py:143  BaseEnv.__init__
-│       ├ :220  initialize_simulator()               → Newton model 빌드·기동
-│       ├ :277  ControlManager(config.control_components, self)
-│       │         └ AssistTargetControl 객체
-│       │            (:138~152 버퍼: _chunk(n,8,2) / _tau_agent(n,2) / _gain_scale(n,2))
-│       └ :285  ComponentManager(device)             → MdpComponent 등록
+│       └ :218  initialize_simulator()               (정의는 :220)
+│           ├ :277  ControlManager(config.control_components, self)
+│           │         └ AssistTargetControl 객체
+│           │            (:138~152 버퍼: _chunk(n,8,2) / _tau_agent(n,2) / _gain_scale(n,2))
+│           ├ :282  simulator._initialize_with_markers(markers)
+│           │   └ base_simulator/simulator.py:214  _create_simulation()
+│           │       └ newton/simulator.py:218      ★ Newton model 빌드·기동
+│           ├ :285  ComponentManager(device)         → MdpComponent 등록
+│           └ :292  _initialize_observations()
 ├ :802  AgentClass = get_class(agent_cfg._target_)   ★ PPO
 ├ :803  agent = PPO(config, env, fabric)             → base_agent/agent.py:86
 └ :805  agent.setup()                                → agent.py:173
