@@ -19,6 +19,8 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
 | `angle_estimator.py` | `ManiFlowAngleEstimator` — **AI-SBC HLP**: flexion 각도 예측 모델(각도 4ch 관측 → flexion 2ch chunk)의 온라인 래퍼. 영점 캘리브레이션(obs_offset/output_bias)·denoise 스텝 오버라이드 내장 |
 | `verify_angle_estimator.py` | Phase B 등가성 검증: suit14 zarr 스트리밍으로 오프라인 기준 수치(MAE 0.95°) 재현 여부 자동 판정 — `python -m protomotions.maniflow.verify_angle_estimator` (sbc env) |
 | `hybrid_control.py` | `JointTorqueOverride` — Newton BUILT_IN_PD 위에서 특정 env의 특정 DOF만 직접 토크 구동 (per-world PD 게인 zero-out + `control.joint_f`→`qfrc_applied` 주입). ManiFlow 예측 토크를 실제 제어에 사용할 때 씀 |
+| `chunk_source.py` | `ManiFlowChunkSource` — **AI-SBC Phase C**: 실 HLP 예측을 LLP의 chunk 버퍼에 넣는다. policy 주기(10 ms) 링 버퍼를 모델 프레임(25 ms) 격자로 재표집 → `predict_horizon()` → knot. knot 수·간격은 모델에서 유도(horizon 무관) |
+| `verify_chunk_source.py` | chunk 소스 등가성 검증 — suit14를 모드 A(25 ms, 프레임 정확)와 모드 B(10 ms 업샘플 후 재표집)로 흘려 오프라인 lead별 MAE를 재현. `python -m protomotions.maniflow.verify_chunk_source` |
 
 ## maniflow 패키지 해석 순서 (`ensure_maniflow_importable`)
 
@@ -27,6 +29,19 @@ lowdim inverse-dynamics 모델)을 ProtoMotions 시뮬레이션 루프 안에서
    (둘 다 `maniflow` 패키지를 담은 디렉토리, 예: `.../ManiFlow_Policy/ManiFlow`)
 3. 설치/vendoring되어 경로 조작 없이 import 가능한 패키지 ← **추후 개편 시 여기로 수렴**
 4. 관례 경로 `~/Projects/ManiFlow_Policy/ManiFlow`
+
+## HLP(flexion) horizon 정렬 — 미래는 150 ms
+
+`angle_estimator`의 모델은 `horizon=16`이지만 **관측 창과 정렬**돼 있다:
+`predict_action`의 `action_pred` index k ↔ 상대 프레임 `k − (n_obs_steps − 1)`.
+따라서 k=0..8은 과거(−225…−25 ms), k=9가 현재, k=10..15가 미래
+(+25…**+150 ms**). `predict()`가 주는 `action`은 `action_pred[:, 9:13]`
+(현재 + 75 ms)뿐이므로, 미래 전체를 쓰려면 `predict_horizon()`을 호출하고
+`[:, n_obs_steps - 1:]`(7프레임)을 취한다. `ManiFlowChunkSource`가 이 계산을
+담당하므로 chunk knot 수는 `horizon − n_obs + 1`로 자동 유도된다.
+
+외부에서 25 ms 격자 창을 직접 만들어 넣을 때는 `set_history(env_ids, hist)`를
+쓴다 (`observe`의 rolling push와 달리 창 전체를 덮어쓴다).
 
 ## 관측 계약 (walking hip-torque 태스크)
 
