@@ -80,7 +80,7 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human moc
 | 〃 | 2 | 169.3 → 146.5 | −13.5 % | 0.79 |
 | 〃 | 3 | 169.3 → 136.5 | −19.4 % | 0.79 |
 | 〃 | 4 | 169.3 → 127.4 | −24.8 % | 0.78 |
-| 보행 tracker (학습 중, epoch ≈1300, 30 s) | 1 | 167.1 → 173.3 | +3.7 % | −0.07 |
+| 보행 tracker (학습 중, epoch ≈2600, 30 s) | 1 | 226.5 → 236.0 | +4.2 % | −0.11 |
 
 해석:
 
@@ -96,6 +96,9 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human moc
    관측 계약(hip-local)은 그대로 두고 플랜트·사람 모델만 바꾸면 된다 — 이 러너가 그 학습
    환경의 평가 하네스로 그대로 쓰인다.
 
-tracker 항목은 학습 중간 체크포인트 기준(자체 평가 성공률 1.0, 위치 오차 8.6 cm, hip 추종
-10.8°, HLP 150 ms MAE 9.5° — tracker의 hip 궤적이 mocap보다 덜 사람 같아 HLP도 나빠진다)이며
-400 Hz 물리(학습 120 Hz)에서 30 s 낙상 없이 걸었다. 학습이 끝나면 같은 명령으로 갱신할 것.
+tracker 항목은 학습 중간 체크포인트 기준이며 400 Hz 물리(학습 120 Hz)에서 30 s 낙상 없이
+걸었다. epoch 1300→2600에서 tracker 자체 지표(자체 평가 성공률 1.0, 몸체 위치 오차 8.6→7.5 cm)는
+좋아졌지만 **hip flexion의 mocap 추종은 10.8°→14.2°로 나빠졌고** HLP 150 ms MAE도 9.5°→11.0°
+— mimic 보상은 몸체 위치를 맞추지 관절각을 맞추지 않으므로, hip 궤적이 사람 같지 않아도
+성공으로 친다. 착용자 대역으로 쓰려면 관절각(특히 hip) 추종 항을 강화한 tracker가 필요하다.
+(epoch 1300 결과: 167.1→173.3 W, +3.7 %, corr −0.07.) 학습이 끝나면 같은 명령으로 갱신할 것.
