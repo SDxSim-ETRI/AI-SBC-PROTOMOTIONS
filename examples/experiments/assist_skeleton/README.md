@@ -80,7 +80,7 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human moc
 | 〃 | 2 | 169.3 → 146.5 | −13.5 % | 0.79 |
 | 〃 | 3 | 169.3 → 136.5 | −19.4 % | 0.79 |
 | 〃 | 4 | 169.3 → 127.4 | −24.8 % | 0.78 |
-| 보행 tracker (학습 중, epoch ≈780) | 1 | 200.9 → 207.5 | +3.3 % | −0.04 |
+| 보행 tracker (학습 중, epoch ≈1300, 30 s) | 1 | 167.1 → 173.3 | +3.7 % | −0.07 |
 
 해석:
 
@@ -97,4 +97,5 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human moc
    환경의 평가 하네스로 그대로 쓰인다.
 
 tracker 항목은 학습 중간 체크포인트 기준(자체 평가 성공률 1.0, 위치 오차 8.6 cm, hip 추종
-10.5°)이며 400 Hz 물리에서 10 s 낙상 없이 걸었다. 학습이 끝나면 같은 명령으로 갱신할 것.
+10.8°, HLP 150 ms MAE 9.5° — tracker의 hip 궤적이 mocap보다 덜 사람 같아 HLP도 나빠진다)이며
+400 Hz 물리(학습 120 Hz)에서 30 s 낙상 없이 걸었다. 학습이 끝나면 같은 명령으로 갱신할 것.
