@@ -30,25 +30,23 @@ python protomotions/inference_agent.py --checkpoint <run>/last.ckpt \
 ```
 Never pass `--robot-name` at inference — the robot config is loaded from the checkpoint's `resolved_configs_inference.pt`.
 
-### ETRI skeleton suit (Newton) — ⚠️ 체크포인트 전부 삭제됨 (2026-09-03)
+### ETRI skeleton suit (Newton) — 착용자 tracker 재학습 중 (2026-09-12)
 
-suit mimic tracker 체크포인트(`v18`, `v18_2`, `tasks/*/output_*`)는 **모두
-삭제**했다. suit 단계는 다른 로봇으로 진행하기로 정해졌고 mimic 체크포인트는
-로봇의 DOF 구성에 묶여 재사용이 불가능하다. suit 단계 자체도 **IsaacLab에서
-구현**할 예정(별도 레포 가능성) — 이 레포의 Newton suit 경로는 사실상 동결.
+suit mimic tracker 가중치는 2026-09-03에 전부 삭제됐었다(`checkpoints/<ver>/INFO.md`,
+`resolved_configs*.yaml`, `tasks/*/` 스크립트만 남음). 2026-09-11에 **새 로봇이 넘어오기
+전까지 이전 인체모델(`skeleton_torque_suit`, 슈트 관절 4개 토크 0 = `_passive_cable`)로
+통합 시스템을 완성**하기로 재조정 → 같은 레시피로 tracker를 다시 학습 중이다:
 
-남아 있는 것 = **재현 기록만**: `checkpoints/<ver>/INFO.md`,
-`resolved_configs*.yaml`, `experiment_config.py`, `tasks/*/`의 학습·재생·녹화
-스크립트와 분석 문서. 가중치(`.ckpt`)와 녹화 영상은 없다.
-
-- suit 에셋은 남아 있음 (`protomotions/data/assets/mjcf/`):
-  `skeleton_torque_suit.xml` = 학습용(hip ring capsule, OOM 방지) /
-  `skeleton_torque_suit_mesh.xml` = 시각화용(cylinder); `31dof/`도 같은 쌍.
-  suit 모션 파일(27 DOF)도 `data/motion_for_trackers/`에 남아 있음.
-- 비suit(plain) skeleton의 XML은 **레포에 없음** (`skeleton.py`/`skeleton_torque.py`가
-  참조만 함).
-- 체크포인트 보관 규약(향후 참고): 학습 중 `results/<exp>/`(로컬, gitignore) →
-  보관본은 `checkpoints/<version>/` + `INFO.md`(git/LFS).
+```bash
+bash examples/experiments/assist_skeleton/train_tracker_walk.sh       # walk 단일 → results/mimic_suit_passive_walk/
+bash examples/experiments/assist_skeleton/train_tracker_motions15.sh  # 15모션, walk에서 warm start
+```
+- 에셋: `protomotions/data/assets/mjcf/skeleton_torque_suit.xml`(학습용 capsule) /
+  `_mesh.xml`(시각화); suit 모션(27 DOF) `data/motion_for_trackers/skeleton_torque_suit_*.pt`.
+  plain skeleton XML은 레포에 없음. robot config의 `passive/active_cable`은 슈트
+  slide 관절 4개의 토크 0/구동 차이일 뿐 — 보조는 항상 hip qfrc 주입.
+- 체크포인트 보관 규약: 학습 중 `results/<exp>/`(로컬, gitignore) → 보관본은
+  `checkpoints/<version>/` + `INFO.md`(git/LFS).
 
 ### AI-SBC LLP (hip pendulum, Newton, 물리 400 Hz / policy 100 Hz)
 ```bash
@@ -58,6 +56,21 @@ python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton 
 python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/last.ckpt \
     --simulator newton --num-envs 16 --headless --full-eval   # baseline: --overrides "env.assist_torque_limit=0"
 ```
+LLP v3(실 HLP 150 ms chunk 형식) = `results/assist_pendulum_v3/`, 실험 파일 `mlp_v3.py`,
+A/B/C 평가 `eval_abc.py` (framework doc §6 Phase C).
+
+### AI-SBC 통합 시스템 — HLP + LLP → 스켈레톤 (2026-09-12, framework doc §3.5)
+독립 제어기 `protomotions/assist/AssistController`(env 비의존, 실기기 후보) + 서브스텝 훅
+러너. 상세는 `examples/experiments/assist_skeleton/README.md`.
+```bash
+python -m protomotions.assist.verify_controller --checkpoint results/assist_pendulum_v3/last.ckpt  # 진자 env와 등가성 (PASS)
+python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --seconds 30            # 골반 고정 대역
+python examples/experiments/assist_skeleton/run_system.py --human tracker \
+    --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30                    # 보행 착용자
+DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --record     # 뷰어/mp4
+```
+결과 요지: 진자 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
+않는다(0.19/≈0) → LLP를 실제 플랜트에서 재학습해야 함. 러너가 그 평가 하네스.
 
 ### Tests / lint
 ```bash
@@ -78,6 +91,7 @@ These files carry the design docs; read the relevant one before changing that ar
 - `protomotions/robot_configs/` — per-robot assets/control/body mapping; `KinematicInfo` extracted from MJCF in `__post_init__`.
 - `protomotions/components/` — `motion_lib.py`, `pose_lib.py`, `scene_lib.py`, `terrains/`.
 - `protomotions/utils/simulator_imports.py` — IsaacGym/IsaacLab must be imported before torch.
+- `protomotions/assist/` — HLP+LLP 독립 제어기(`controller.py`), actor 로더(`llp_policy.py`), 스켈레톤 특징량(`skeleton_features.py`), 등가성 검증. `protomotions/simulator/newton/substep_hook.py` — env step 안에서 10 ms 콜백(LLP)을 돌리는 Newton 확장(CUDA graph 끔).
 
 ## Gotchas
 
@@ -85,6 +99,7 @@ These files carry the design docs; read the relevant one before changing that ar
 - `common_naming_to_robot_body_names` values must be **lists**, not strings.
 - `MdpComponent` `static_params` named `threshold`/`weight`/`min_value` are metadata and never reach the compute fn.
 - Newton: `TORQUE`/`PROPORTIONAL` wiring is broken (`_update_torques` never called) → use `BUILT_IN_PD` + qfrc injection; marker updates are no-op (draw with viewer `log_lines/log_arrows`).
+- tracker env dt(50 ms)는 관측이 묶여 있어 못 바꾼다 — 다른 주기의 제어기는 `SubstepHookMixin`으로 서브스텝 안에서 돌릴 것. 훅 시뮬레이터는 CUDA graph를 시도하지 않는다(캡처 중 간헐 크래시).
 - Pre-existing F822 errors in `component_factories.py` `__all__` — leave them.
 - Research-side pitfalls (RNG pairing, fps, zarr versions): framework doc §8.
 

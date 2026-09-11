@@ -2,7 +2,7 @@
 
 > 강체(rigid-link) 고관절 assist 착용로봇의 딥러닝 기반 제어기 연구 (2026).
 > 이 문서는 프레임워크 전체 구조, 코드 지도, 실험 이력, 로드맵의 단일 참조점이다.
-> 최종 갱신: 2026-09-03
+> 최종 갱신: 2026-09-12
 
 ---
 
@@ -62,7 +62,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 |---|---|---|
 | 정체 | ProtoMotions Mimic(PPO) 전신 모션 추종 RL 정책 | BONES-SEED mocap 지도학습 예측 모델 |
 | 역할 | 시뮬레이션 속 **"착용자" 대역** (skeleton을 걷게 함) | **사용자 의도 예측** (미래 flexion 출력) |
-| 체크포인트 | ~~`checkpoints/v18_2_newton_suit_passive_cable`~~ — **2026-09-03 삭제**(§3.4), 새 로봇에서 재정의 예정 | `ManiFlow_Policy/.../locomotion-flexion40-run01` (현역) |
+| 체크포인트 | ~~`checkpoints/v18_2_newton_suit_passive_cable`~~ — **2026-09-03 삭제**(§3.4), 2026-09-12 같은 로봇으로 **재학습 중** (`results/mimic_suit_passive_walk/`) | `ManiFlow_Policy/.../locomotion-flexion40-run01` (현역) |
 
 ### 2.3 Chunk 인터페이스 (HLP ↔ LLP 결합점)
 
@@ -124,7 +124,7 @@ chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(
 
 ---
 
-## 3. 구성요소 현황 (2026-08-20)
+## 3. 구성요소 현황 (2026-09-12)
 
 ### 3.1 HLP — ManiFlow flexion 예측 모델 ✅ 오프라인 검증 완료
 
@@ -174,11 +174,19 @@ run02(재수집)→run03(DAgger)→run04(substep 평균 라벨)까지 진행 후
 결론과 함께 종료. **단, 여기서 만든 인프라는 현역**: `JointTorqueOverride`,
 `get_substep_mean_dof_forces()`, ManiFlow loader — 모두 LLP가 사용 중.
 
-### 3.4 mimic tracker — ⏹ 체크포인트 전부 삭제 (2026-09-03)
+### 3.4 mimic tracker — 🔁 재학습 중 (2026-09-12; 가중치는 2026-09-03 삭제)
 
-suit 단계를 **다른 로봇 + IsaacLab**으로 진행하기로 정해졌고, mimic 체크포인트는
-로봇의 DOF 구성에 묶여 재사용이 불가능하다. 따라서 아래 가중치를 모두 삭제했다
-(§7):
+**2026-09-11 방향 재조정**: 새 로봇이 넘어오기 전까지 **이전 인체모델(Newton
+suit skeleton)** 위에서 통합 시스템을 완성하기로 했다(§3.5). 착용자 대역이 필요하므로
+삭제했던 tracker를 같은 레시피로 다시 학습한다 —
+`examples/experiments/assist_skeleton/train_tracker_walk.sh` (walk 단일 모션부터,
+robot `skeleton_torque_suit_passive_cable`, Newton 120 Hz/6, 4096 env). 현재 코드가
+만드는 config가 보관된 v18_2 `resolved_configs.yaml`과 env/agent 동일함을
+`--create-config-only`로 확인했다. warm-start 계보(v17/v18)가 없어 처음부터 학습하며
+약 5.5 s/epoch. 이어서 15모션은 `train_tracker_motions15.sh`(walk에서 warm start).
+결과는 `results/mimic_suit_passive_walk/`(로컬); 보관 시 `checkpoints/<ver>/`+INFO.md.
+
+2026-09-03에 삭제한 내용 (§7):
 
 | 삭제된 체크포인트 | 원래 내용 |
 |-------------------|-----------|
@@ -196,6 +204,41 @@ suit 에셋(`mjcf/skeleton_torque_suit*.xml`, `31dof/`)과 suit 모션 파일(27
 ⚠️ 비착용(plain) skeleton 로봇은 **에셋이 레포에 없다**:
 `skeleton.py`/`skeleton_torque.py`가 참조하는 `mjcf/skeleton_torque.xml`(및
 `mjcf/31dof/skeleton_torque.xml`)이 존재하지 않음 (suit 계열 XML만 존재).
+robot config 이름의 `passive_cable`/`active_cable`은 suit MJCF의 slide1–4
+관절(슈트 하드웨어 모델링)을 토크 0으로 둘지/정책이 구동할지의 차이일 뿐이다 —
+보조 토크는 항상 hip 관절 qfrc 주입이었다.
+
+### 3.5 통합 시스템 — HLP + LLP → 스켈레톤 assist ✅ 폐루프 동작 (2026-09-12)
+
+`examples/experiments/assist_skeleton/README.md`가 상세 문서. 요지:
+
+- **독립 제어기** `protomotions/assist/AssistController` — env 비의존. 입력 = 고관절
+  각·각속도 + 몸통 pitch/roll 스트림(10 ms), 출력 = assist 토크. 내부에서 HLP
+  링버퍼→25 ms 재표집→ManiFlow→chunk, LLP 히스토리·미래 창·이전 action 조립→actor.
+  `python -m protomotions.assist.verify_controller`로 진자 학습 env와 **bit-exact**
+  일치 확인(action 차이 0.0, RNG 페어링 시 HLP knot 2e-5°).
+- **시간 구조**: tracker env 50 ms(관측이 dt에 묶임) 안에서 LLP 10 ms →
+  `SubstepHookMixin`이 물리 400 Hz 서브스텝 루프에서 4 서브스텝마다 콜백.
+- **착용자 대역 두 가지**: `mocap_pd`(골반 고정 + 관절 PD가 mocap 추종, tracker 불필요;
+  PD 게인은 진자 플랜트와 같은 ω_n/ζ가 되도록 ×12.4/×6.2) / `tracker`(보행).
+- **HLP 관측**: hip flexion = 관절각, trunk = pelvis 자세 × lumbar FK(추출기와 동일),
+  영점 = 클립 평균을 SEED 평균에 맞추는 오프셋.
+
+**결과 (walk 30 s, LLP v3 그대로, 착용자 hip 파워 A→B)**:
+
+| 착용자 대역 | assist 배율 | 절감 | assist↔τ_agent 상관 |
+|---|---|---|---|
+| 골반 고정, 관절 다리 | 1 / 3 | −4.5 % / −4.0 % | 0.19 |
+| 골반 고정, 강체 다리(무릎·발목 잠금) | 1 / 2 / 3 / 4 | −7.0 / −13.5 / −19.4 / −24.8 % | 0.80 |
+| 보행 tracker (학습 중 epoch≈780) | 1 | +3.3 % | −0.04 |
+
+**발견**: 진자 LLP는 강체 진자 플랜트에는 모양이 맞고(corr 0.80) 크기만 8배
+부족하다(다리 관성 3.53 vs 진자 0.43 kg·m², 출력 한계 25 N·m). 무릎이 움직이면
+(스윙 굴곡 ≤65°, 무릎 PD 반력의 hip 토크 스파이크 ±100 N·m) 맞지 않고(corr 0.19),
+보행에서는 지면 반력까지 더해져 corr≈0. → **LLP를 실제 플랜트(관절 다리 + 지면
+접촉, 실제 토크 스케일)에서 재학습**해야 한다. 관측 계약(hip-local)은 유지하고
+플랜트·사람 모델만 바꾸면 되며, 러너가 그 학습 환경의 평가 하네스가 된다.
+추론 시간 HLP 7.9 ms + LLP 0.4 ms (batch 2, RTX 5090).
 
 ---
 
@@ -230,6 +273,20 @@ suit 에셋(`mjcf/skeleton_torque_suit*.xml`, `31dof/`)과 suit 모션 파일(27
 | `protomotions/tests/test_motion_intent.py` | 의도 소스 단위 테스트 15개 |
 | `examples/experiments/assist_pendulum/mlp_v3.py` | v3 실험 config (`mlp.py`를 import만; chunk 형식·관측창·control 클래스만 교체) |
 | `examples/experiments/assist_pendulum/eval_abc.py` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
+
+**통합 제어기 + 스켈레톤 시스템** (2026-09-12, §3.5):
+
+| 파일 | 역할 |
+|------|------|
+| `protomotions/assist/controller.py` | `AssistController` — HLP+LLP 결합 독립 제어기 (env 비의존, 실기기 후보). `reset/observe/act`; `joint_sign`으로 관절 규약 변환 |
+| `protomotions/assist/llp_policy.py` | `LLPPolicy` — assist_pendulum ckpt에서 actor + `LLPObsLayout`(히스토리·미래창·스케일·토크 한계) 복원 |
+| `protomotions/assist/skeleton_features.py` | 스켈레톤 상태 → HLP 4ch (trunk = pelvis × lumbar FK), `calibration_offset_from_motion` |
+| `protomotions/assist/verify_controller.py` | 진자 env ↔ 제어기 등가성 검증 (chunk 주입 / 링버퍼 / RNG 페어링) |
+| `protomotions/simulator/newton/substep_hook.py` | `SubstepHookMixin` + `SubstepHook{,FixedBase}NewtonSimulator` — 서브스텝 콜백, 창 단위 PD 토크 평균, fixed-base 루트 z 오프셋 |
+| `examples/experiments/assist_skeleton/run_system.py` | 폐루프 러너 (A 무보조 / B 보조 paired; `--human mocap_pd|tracker`) |
+| `examples/experiments/assist_skeleton/{analysis,viz}.py` | 지표·리포트·그림 / 뷰어 고스트·토크 화살표 |
+| `examples/experiments/assist_skeleton/train_tracker_{walk,motions15}.sh` | 착용자 tracker 재학습 |
+| `protomotions/tests/test_assist_controller.py` | 특징량·interpolation 단위 테스트 (CPU) |
 
 **ManiFlow 통합 레이어** (`protomotions/maniflow/` — 시뮬 쪽에서 maniflow를
 직접 import하지 않고 반드시 이 패키지를 경유):
@@ -287,6 +344,13 @@ python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/l
 python examples/experiments/assist_pendulum/play.py --checkpoint results/assist_pendulum_v2/last.ckpt
 python examples/experiments/assist_pendulum/compare_rollout.py --checkpoint results/assist_pendulum_v2/last.ckpt
 
+# ── 통합 시스템 (스켈레톤, §3.5) ──
+python -m protomotions.assist.verify_controller --checkpoint results/assist_pendulum_v3/last.ckpt
+python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --seconds 30
+python examples/experiments/assist_skeleton/run_system.py --human tracker \
+    --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30
+bash examples/experiments/assist_skeleton/train_tracker_walk.sh      # 착용자 tracker 재학습
+
 # ── HLP 오프라인 교차평가 (maniflow env, ManiFlow_Policy repo에서) ──
 python scripts/compare_hip_imu_reference.py \
     --zarr_path ManiFlow/data/hip-flexion-etri-suit14-40fps.zarr \
@@ -302,7 +366,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton(suit) 확장** — 2026-09-03 방향 변경: **다른 로봇 + IsaacLab**에서 구현(별도 레포 가능성). 따라서 Newton suit mimic 체크포인트는 폐기(§3.4·§7)하고 착용자 역할은 새 로봇에서 재정의한다(mimic tracker 재학습 / mocap θ_g 직접 주입 등 미결). 유지되는 설계: LLP assist(hip flexion 2ch qfrc), HLP 온라인(trunk는 torso 자세에서 계산), 균형·낙상 개입 상태의 보상/종료 재설계, β 가산 실험(−31%)이 주입 인프라의 실증 전례 | 올해 목표 (로봇·시뮬레이터 재선정) |
+| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 🔁 tracker 재학습(walk → 15모션) ⏭ **LLP 재학습**: 관절 다리 + 지면 접촉 + 실제 토크 스케일 플랜트 (진자 LLP는 강체 진자에만 맞음, §3.5). 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
@@ -433,6 +497,18 @@ python scripts/compare_hip_imu_reference.py \
   전체로 추정하면 긴 lead의 잔차가 섞여 lead 0 MAE가 0.10°→0.31°로 부풀려진다.
 - **감시/대기 루프의 pgrep -f 자기매칭** — 파이프라인은 알림 체인 대신 한
   스크립트로 체인할 것.
+- **tracker의 env dt(50 ms)는 바꾸면 안 된다** — mimic 관측(미래 레퍼런스 프레임)이
+  dt 간격이라 주기를 바꾸면 분포가 어긋난다. LLP(10 ms)는 `SubstepHookMixin`으로
+  서브스텝 루프 안에서 돌린다 (물리 400 Hz / decimation 20 / hook_every 4).
+- **서브스텝 훅 시뮬레이터는 CUDA graph를 아예 시도하지 않는다** — 캡처 중
+  파이썬 콜백·torch 할당이 끼면 다른 프로세스가 GPU를 쓰는 동안 간헐적으로
+  프로세스째 죽었다(학습 병행 시 2/14회). `wp.is_mempool_enabled`를 잠시 False로.
+- **골반 고정 대역의 PD 게인은 로봇 config 값(hip 200/20)을 그대로 쓰면 안 된다** —
+  다리 관성(3.53 kg·m²)에 비해 물러 ζ≈0.38, 12° 오버슈트 → HLP 분포 밖(150 ms
+  MAE 8.8°). 진자 플랜트와 같은 ω_n/ζ(×12.4/×6.2)로 두면 추종 0.78°, MAE 6.3°.
+- **진자 LLP의 토크 스케일** — 출력 한계 25 N·m는 진자(I=0.43 kg·m²) 기준.
+  스켈레톤 다리(3.53)는 8배 토크가 필요하다. `--assist-scale`은 진단용 배율일 뿐
+  해법이 아니다(관절 다리에서는 배율을 올려도 corr 0.19로 절감이 늘지 않는다).
 
 ---
 
