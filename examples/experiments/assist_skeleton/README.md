@@ -192,8 +192,16 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
 | v30 (걸음 A) | 225.4 → 159.1 | **−29.4 %** | 0.57 | 23.8 | v3: −31.7 % |
 | v31 (걸음 B) | 175.0 → 133.8 | **−23.5 %** | 0.40 | 20.0 | v3: −2.4 % |
 
-env마다 착용자를 무작위 배정해 학습한 한 정책이 **두 걸음 스타일 모두**를 보조한다 — v30에서 2 %p 손해로 v31에서
-+21 %p. 착용자 다양성은 학습 분포 문제이지 구조 문제가 아니다. 학습은 계속 중.
+env마다 착용자를 무작위 배정해 학습한 한 정책이 **두 걸음 스타일 모두**를 보조한다. 착용자 다양성은 학습 분포
+문제이지 구조 문제가 아니다.
+
+**v5 최종 (epoch 1780, 평가 파워 1200 epoch부터 평탄 → 중단; `results/llp_skel_walk_ens_v5/`)**:
+v30 walk **−31.7 %** (다른 구간·시드 −30.9 %), v31 walk **−25.6 %** (−26.0 %), corr 0.55 / 0.40, 낙상 0 — 각 착용자
+전용 정책(v3 −31.7 %, v4 walk −19.6 %)과 같거나 더 낫다.
+
+### 보관
+`checkpoints/llp_v3_skel_walk_40Nm`, `checkpoints/llp_v4_skel_motions15_40Nm`(+`EVAL_motions.md`),
+`checkpoints/llp_v5_skel_walk_ensemble_40Nm` — 각 INFO.md에 설정·결과·사용법.
 
 ### v4 (15모션 + v31 tracker) — epoch 1060 스냅샷, 모션별 A/B (`eval_motions.py`, 20 s/클립, 06:10)
 

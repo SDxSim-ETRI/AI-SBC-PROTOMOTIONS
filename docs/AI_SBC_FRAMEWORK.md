@@ -265,8 +265,9 @@ walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착�
 정책이라, 실사용에는 착용자 다양성(tracker 앙상블·게인 랜덤화·모션 다양성) 학습이
 필요하다. **v4(15모션, v31 tracker, 1890 ep 수렴)**: 14모션 시간 가중 **−21.8 %**, 낙상 0
 (highknee −28, run −26, walk −20, stepinplace3 −36 %; 느린 동작도 −3~−15 %, squat만 +5 %).
-**v5(착용자 앙상블 v30+v31 × walk, 1090 ep 스냅샷)**: 한 정책이 v30 walk **−29.4 %**, v31 walk
-**−23.5 %** (v3는 −31.7/−2.4) — 착용자 다양성은 학습 분포로 해결된다. 표: README.
+**v5(착용자 앙상블 v30+v31 × walk, 1780 ep 수렴)**: 한 정책이 v30 walk **−31.7 %**, v31 walk
+**−25.6 %** (v3는 −31.7/−2.4) — 착용자 다양성은 학습 분포로 해결된다. 세 LLP는
+`checkpoints/llp_v{3,4,5}_*`에 보관(INFO.md). 표: README.
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
 ---
@@ -398,7 +399,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습 (walk)**: 통합 env(동결 tracker + 실 HLP)에서 v3 = 착용자 hip 파워 **−31 %**, 낙상 0 (`results/llp_skel_walk_v3/`) 🔁 15모션 일반화(v4) 학습 중 ⏭ 부드러움 항 강화, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
+| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습**: 통합 env(동결 tracker + 실 HLP)에서 walk v3 **−31 %**, 15모션 v4 **−22 %**(14모션 가중), 착용자 앙상블 v5 **−32/−26 %**(두 착용자), 낙상 0 — `checkpoints/llp_v{3,4,5}_*` ⏭ 부드러움 항(bang-bang 토크 완화), squat류 저파워 동작 보완, 관절각 추종 강화 tracker, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
