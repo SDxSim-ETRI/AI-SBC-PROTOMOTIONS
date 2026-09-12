@@ -265,7 +265,8 @@ walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착�
 정책이라, 실사용에는 착용자 다양성(tracker 앙상블·게인 랜덤화·모션 다양성) 학습이
 필요하다. **v4(15모션, v31 tracker, 1060 ep 스냅샷)**: 14모션 시간 가중 **−18.6 %**, 낙상 0
 (highknee −27, run −23, walk −19.5, stepinplace3 −32 %; squat·lunge·한 걸음은 중립~+8 %).
-v5(착용자 앙상블 v30+v31 × walk) 학습 중. 표: README.
+**v5(착용자 앙상블 v30+v31 × walk, 1090 ep 스냅샷)**: 한 정책이 v30 walk **−29.4 %**, v31 walk
+**−23.5 %** (v3는 −31.7/−2.4) — 착용자 다양성은 학습 분포로 해결된다. 표: README.
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
 ---

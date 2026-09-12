@@ -185,6 +185,16 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
   × 8 s에 종료 17). → **v5** = 앙상블 {v30, v31} × walk 클립, hinge, 40 N·m (`results/llp_skel_walk_ens_v5/`):
   한 LLP가 걸음 스타일이 다른 두 착용자를 모두 보조할 수 있는지.
 
+### v5 (착용자 앙상블 {v30, v31} × walk) — epoch 1090 스냅샷 (07:05)
+
+| 착용자 | 착용자 파워 A→B [W] | 절감 | corr | assist RMS | 비고 (v3 walk 학습 LLP) |
+|---|---|---|---|---|---|
+| v30 (걸음 A) | 225.4 → 159.1 | **−29.4 %** | 0.57 | 23.8 | v3: −31.7 % |
+| v31 (걸음 B) | 175.0 → 133.8 | **−23.5 %** | 0.40 | 20.0 | v3: −2.4 % |
+
+env마다 착용자를 무작위 배정해 학습한 한 정책이 **두 걸음 스타일 모두**를 보조한다 — v30에서 2 %p 손해로 v31에서
++21 %p. 착용자 다양성은 학습 분포 문제이지 구조 문제가 아니다. 학습은 계속 중.
+
 ### v4 (15모션 + v31 tracker) — epoch 1060 스냅샷, 모션별 A/B (`eval_motions.py`, 20 s/클립, 06:10)
 
 | 모션 | 착용자 파워 A→B [W] | 절감 | corr | 모션 | A→B [W] | 절감 | corr |
