@@ -149,7 +149,8 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
 - **오라클 상한 (23:45, `check_train_env.py --oracle-beta`)**: τ_assist = β·τ_agent(직전 step 계측, ±25 N·m clamp)를
   넣으면 착용자 hip 파워 240 W → β 0.3: 208.5 W (−13 %), β 0.6: 197.8 W (−18 %), 몸체 오차 7.9→8.2 cm.
   즉 **25 N·m 한계에서는 완벽한 위상의 보조라도 −15~−20 %가 상한**이다 (β 실험의 −31 %는 한계 없이).
-  → v3 (23:48 시작): hinge 목적함수 + `--assist-limit 40`. v2(25 N·m)와 비교.
+  40 N·m 한계에서는 β 0.3: −14 %, 0.6: −22 %, 1.0: −26 % (178 W) — 한계를 올려도 tracker가 적응해 상한은 완만히 오른다.
+  → v3 (23:55 시작): hinge 목적함수 + `--assist-limit 40`. v2(25 N·m)와 비교.
 - **train_agent.py 함정**: 스크립트 디렉터리 `protomotions/`가 sys.path[0]이라 `import maniflow`가
   `protomotions/maniflow`(통합 레이어)로 잡혀 ManiFlow 로딩이 깨졌다 — `loader.py`가 진짜 namespace
   패키지를 `sys.modules`에 명시 등록하도록 고쳤다.
