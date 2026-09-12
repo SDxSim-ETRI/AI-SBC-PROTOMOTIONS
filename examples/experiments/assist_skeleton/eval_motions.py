@@ -101,7 +101,7 @@ def main():
         "",
         f"tracker `{args.tracker_checkpoint}`, {args.seconds:.0f} s/클립(짧은 클립은 90 %), calibration {args.calibration}, seed {args.seed}",
         "",
-        "| id | 모션 | 착용자 파워 A→B [W] | 절감 | corr | assist RMS | hip 오차 A→B [deg] | HLP 150 ms MAE | 낙상 |",
+        "| id | 모션 | 착용자 파워 A→B [W] | 절감(+ = 감소) | corr | assist RMS | hip 오차 A→B [deg] | HLP 150 ms MAE | 낙상 |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:

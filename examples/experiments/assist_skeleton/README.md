@@ -174,6 +174,12 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
   구간·시드 포함), 낙상 0. 영상: `results/assist_skeleton/2026-09-13_04-37-54_tracker_v3final_video/sim.mp4`.
 - **v4 (03:36 시작, `results/llp_skel_motions15_v4/`)**: 15모션 + v31 tracker, hinge, 40 N·m — 일반화. 학습 분포의
   착용자 hip 파워는 ≈88 W(느린 동작 포함)로 walk의 1/2.5.
+- **착용자 특이성 (05:00, `eval_motions.py`)**: walk 학습 LLP(v3)를 **다른 착용자**(v31 tracker)의 같은 walk 클립에
+  올리면 −31.7 %(v30) → **−2.4 %**(v31). HLP 영점 보정을 바꿔도 같고(−2.6 %), v30로 되돌리면 −31.7 %로 돌아온다.
+  v31의 걸음은 hip 오차 9.6°·파워 175 W로 v30(16.8°·226 W)과 다른 스타일이다 — 즉 v3는 **특정 착용자의 운동
+  패턴에 맞춘 정책**이다. 다른 모션(run/squat/highknee)에서는 v31 위에서도 +6~+23 % 절감, stepinplace(22 W)에서는
+  파워를 65 % 늘렸다(bang-bang 토크가 느린 동작에 해롭다). → 실사용(다양한 사람)을 위해서는 착용자 다양성
+  (여러 tracker 앙상블·게인 랜덤화·모션 다양성)을 학습에 넣어야 한다.
 - 토크 패턴은 보행 위상에 맞춘 거의 bang-bang(±한계)이다 — 파워 목적함수만으로는 부드러움을 요구하지
   않으므로. 실기기용이라면 effort/action-rate 벌점을 키워 재학습하거나 출력에 저역통과를 두어야 한다.
 - 착용자의 hip mocap 추종은 1.3° 나빠졌고 몸체 추종은 hinge 범위(≈8 cm) 안에 머물렀다(학습 중 벌점 ≈0).
