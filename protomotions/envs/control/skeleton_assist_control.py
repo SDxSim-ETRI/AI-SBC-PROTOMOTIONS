@@ -168,7 +168,10 @@ class SkeletonAssistControlConfig(MotionAssistTargetControlConfig):
 
     Attributes:
         assist_dof_names: LLP가 담당하는 관절 (COMMON dof 이름).
-        tracker_checkpoint: 착용자 대역 mimic tracker `last.ckpt`.
+        tracker_checkpoint: 착용자 대역 mimic tracker `last.ckpt`. 쉼표로 여러 개를 주면
+            **착용자 앙상블** — env마다 리셋 때 무작위로 하나를 배정한다 (걸음 스타일이
+            다른 착용자들 = 사용자 다양성; walk LLP v3가 다른 tracker에서 −31→−2 %로
+            떨어진 착용자 특이성 대책).
         tracker_period_steps: tracker 행동 주기 [env step] (50 ms / 10 ms = 5).
         hlp_calibration: "motion"(재생 mocap 평균 → SEED 평균 오프셋) | "none".
         motion_file_for_calibration: 오프셋 계산에 쓸 motion .pt (None이면 env의 motion_lib 파일).
@@ -209,9 +212,16 @@ class SkeletonAssistControl(ControlComponent):
         self._lumbar_idx = list(lumbar_indices(names))
         d = self.num_assist_dofs
 
-        # --- 착용자: 동결 tracker ---
+        # --- 착용자: 동결 tracker (여러 개면 env별 배정) ---
         assert config.tracker_checkpoint, "SkeletonAssistControlConfig.tracker_checkpoint is required"
-        self.tracker = TrackerPolicy(config.tracker_checkpoint, dev)
+        paths = [p.strip() for p in str(config.tracker_checkpoint).split(",") if p.strip()]
+        self.trackers = [TrackerPolicy(p, dev) for p in paths]
+        self.tracker = self.trackers[0]
+        for t in self.trackers[1:]:
+            assert t.in_keys == self.tracker.in_keys and t.num_actions == self.tracker.num_actions, (
+                "tracker ensemble members must share observation keys and action size"
+            )
+        self._tracker_id = torch.zeros(n, dtype=torch.long, device=dev)
         n_dofs = robot.number_of_actions
         self._pd_targets = robot.default_dof_pos.to(dev, torch.float32).unsqueeze(0).repeat(n, 1)
         # tracker 관측의 previous_actions는 두 결정 전 action (state history 규약)
@@ -257,8 +267,8 @@ class SkeletonAssistControl(ControlComponent):
         self._future_offsets = torch.arange(config.obs_future_samples, device=dev, dtype=torch.float32) * config.obs_future_dt
 
         logger.info(
-            "SkeletonAssistControl: assist dofs %s, tracker %s (period %d steps), HLP %s",
-            config.assist_dof_names, config.tracker_checkpoint, config.tracker_period_steps, ckpt,
+            "SkeletonAssistControl: assist dofs %s, trackers %s (period %d steps), HLP %s",
+            config.assist_dof_names, paths, config.tracker_period_steps, ckpt,
         )
 
     # ------------------------------------------------------------------
@@ -320,8 +330,20 @@ class SkeletonAssistControl(ControlComponent):
             return
         tracker_obs = dict(obs)
         tracker_obs["previous_actions"] = self._tracker_prev2
-        raw = self.tracker.act(tracker_obs)
-        targets = self.tracker.pd_targets(raw)
+        if len(self.trackers) == 1:
+            raw = self.tracker.act(tracker_obs)
+            targets = self.tracker.pd_targets(raw)
+        else:
+            # 앙상블: 정책마다 전 배치를 계산하고(1024×6 MLP, 비용 미미) env별 배정으로 고른다
+            raw = torch.zeros(self.env.num_envs, self.tracker.num_actions, device=self._pd_targets.device)
+            targets = torch.zeros_like(self._pd_targets)
+            for k, tracker in enumerate(self.trackers):
+                sel = self._tracker_id == k
+                if not bool(sel.any()):
+                    continue
+                r = tracker.act(tracker_obs)
+                raw[sel] = r[sel]
+                targets[sel] = tracker.pd_targets(r)[sel]
         self._pd_targets[due] = targets[due]
         self._tracker_prev2[due] = self._tracker_prev1[due]
         self._tracker_prev1[due] = raw[due]
@@ -338,6 +360,10 @@ class SkeletonAssistControl(ControlComponent):
         self._tracker_prev1[env_ids] = 0.0
         self._tracker_prev2[env_ids] = 0.0
         self._pd_targets[env_ids] = self.env.robot_config.default_dof_pos.to(self._pd_targets)
+        if len(self.trackers) > 1:
+            self._tracker_id[env_ids] = torch.randint(
+                len(self.trackers), (len(env_ids),), device=self._tracker_id.device
+            )
         dof_pos, trunk = self._hlp_observation(env_ids)
         self._chunk_src.reset(env_ids, dof_pos, trunk)
         self._refresh_chunk(env_ids, torch.zeros(len(env_ids), device=self.env.device))

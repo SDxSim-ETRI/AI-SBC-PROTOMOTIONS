@@ -66,7 +66,7 @@ DEFAULT_TRACKER = "checkpoints/v30_newton_suit_passive_walk/last.ckpt"
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--tracker-checkpoint", type=str, default=DEFAULT_TRACKER,
-                        help="착용자 대역 mimic tracker last.ckpt")
+                        help="착용자 대역 mimic tracker last.ckpt (쉼표로 여러 개 = 착용자 앙상블, env별 무작위 배정)")
     parser.add_argument("--hlp-checkpoint", type=str, default=None,
                         help="ManiFlow flexion ckpt (None = flexion40 run 자동 탐색)")
     parser.add_argument("--hlp-denoise", type=int, default=3)
@@ -82,7 +82,7 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
 
 def _tracker_resolved(args: argparse.Namespace):
     """tracker의 **학습** resolved config (inference 판은 종료 조건이 비어 있다)."""
-    ckpt_dir = Path(args.tracker_checkpoint).parent
+    ckpt_dir = Path(args.tracker_checkpoint.split(",")[0].strip()).parent  # 앙상블이면 첫 tracker 기준
     path = ckpt_dir / "resolved_configs.pt"
     if not path.exists():
         path = ckpt_dir / "resolved_configs_inference.pt"
@@ -149,7 +149,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
             future_dt=0.05,
         ),
         "assist": SkeletonAssistControlConfig(
-            tracker_checkpoint=str(Path(args.tracker_checkpoint)),
+            tracker_checkpoint=str(args.tracker_checkpoint),
             tracker_period_steps=5,
             maniflow_ckpt=args.hlp_checkpoint,
             maniflow_denoise_steps=args.hlp_denoise,
