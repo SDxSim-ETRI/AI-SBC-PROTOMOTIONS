@@ -76,7 +76,9 @@ def main():
     p.add_argument("--run", default="results/llp_skel_smoke")
     p.add_argument("--num-envs", type=int, default=16)
     p.add_argument("--steps", type=int, default=600)
-    p.add_argument("--assist-scale", type=float, default=0.0, help="0 = 착용자 단독")
+    p.add_argument("--assist-scale", type=float, default=0.0, help="0 = 착용자 단독 (>0: 가우시안 무작위 action 표준편차)")
+    p.add_argument("--oracle-beta", type=float, default=0.0,
+                   help="오라클 보조: τ_assist = β·τ_agent(직전 step 계측)로 주입 — 이 tracker·토크 한계에서 도달 가능한 절감 상한 점검")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
@@ -89,10 +91,15 @@ def main():
 
     logs = {k: [] for k in ("err_g", "tau_agent", "power", "body_err", "root_z", "hip_pos", "chunk", "t0", "age", "t")}
     resets, term_track, term_vel, done_clip = 0, 0, 0, 0
+    limit = float(env.config.assist_torque_limit)
     for step in range(args.steps):
         action = torch.zeros(args.num_envs, n_act, device=env.device)
         if args.assist_scale != 0.0:
             action = torch.randn_like(action) * args.assist_scale
+        if args.oracle_beta != 0.0:
+            # tanh(a)·limit = clamp(β·τ_agent_prev) → a = atanh(x/limit)
+            x = torch.clamp(args.oracle_beta * comp._tau_agent, -0.999 * limit, 0.999 * limit)
+            action = torch.atanh(x / limit)
         obs, rew, done, term, extras = env.step(action)
         ctx = env._current_context
         a = ctx.assist
@@ -117,8 +124,8 @@ def main():
 
     L = {k: torch.stack(v) for k, v in logs.items()}  # (T, N, ...)
     err_g = L["err_g"]
-    print("\n=== SkeletonAssistEnv 점검 (assist_scale=%.2f, %d env × %d step = %.1f s) ===" % (
-        args.assist_scale, args.num_envs, args.steps, args.steps * env.dt))
+    print("\n=== SkeletonAssistEnv 점검 (assist_scale=%.2f, oracle_beta=%.2f, %d env × %d step = %.1f s) ===" % (
+        args.assist_scale, args.oracle_beta, args.num_envs, args.steps, args.steps * env.dt))
     print(f"episodes reset: {resets} (terminated by failure: {term_track})  env dt={env.dt}")
     print(f"body tracking error [m]: mean {L['body_err'].mean():.3f}  p95 {L['body_err'].quantile(0.95):.3f}")
     print(f"root z [m]: mean {L['root_z'].mean():.3f}  min {L['root_z'].min():.3f}")

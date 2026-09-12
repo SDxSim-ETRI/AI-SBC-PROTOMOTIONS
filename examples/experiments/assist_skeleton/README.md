@@ -145,7 +145,11 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
   써서 착용자 몸체 추종을 0.86→0.94로 "개선"하는 해에 머물렀고 파워는 그대로였다(통합 평가 −0.8 %, corr −0.04).
   추종을 좋게 만드는 데 보상을 주면 최대 토크로 착용자를 mocap 쪽으로 끌어당기는 것이 이득이기 때문.
   v2는 몸체 오차가 무보조 수준(0.09 m)을 **넘는 만큼만 벌점**(hinge, weight 10) + 파워 −0.003 + effort −5e-5.
-  둘 다 `results/llp_skel_walk_v{1,2}/`에서 병렬 학습 중.
+  v1은 1270 epoch에서 중단(평탄), v2는 계속.
+- **오라클 상한 (23:45, `check_train_env.py --oracle-beta`)**: τ_assist = β·τ_agent(직전 step 계측, ±25 N·m clamp)를
+  넣으면 착용자 hip 파워 240 W → β 0.3: 208.5 W (−13 %), β 0.6: 197.8 W (−18 %), 몸체 오차 7.9→8.2 cm.
+  즉 **25 N·m 한계에서는 완벽한 위상의 보조라도 −15~−20 %가 상한**이다 (β 실험의 −31 %는 한계 없이).
+  → v3 (23:48 시작): hinge 목적함수 + `--assist-limit 40`. v2(25 N·m)와 비교.
 - **train_agent.py 함정**: 스크립트 디렉터리 `protomotions/`가 sys.path[0]이라 `import maniflow`가
   `protomotions/maniflow`(통합 레이어)로 잡혀 ManiFlow 로딩이 깨졌다 — `loader.py`가 진짜 namespace
   패키지를 `sys.modules`에 명시 등록하도록 고쳤다.
