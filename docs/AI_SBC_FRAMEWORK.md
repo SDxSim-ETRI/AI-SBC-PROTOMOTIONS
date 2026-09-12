@@ -255,11 +255,12 @@ env로 쓴다.** 별도 플랜트는 또 다른 근사(무릎·접촉·토크 �
 **v1 교훈(850 epoch)**: 착용자 추종 *보상*(exp)을 주면 정책이 최대 토크로 착용자를
 mocap 쪽으로 끌어 추종만 개선하고 파워는 못 줄인다(−0.8 %). → v2/v3는 몸체 오차가
 무보조 수준을 넘는 만큼만 벌점(hinge) + 파워 weight ×2, 한계 25/40 N·m.
-**중간 결과 (2026-09-13 01:30, 스냅샷)**: 통합 시스템 30 s 평가에서 착용자 hip 파워
-v2(25 N·m, 1270 ep) **−20.0 %**, v3(40 N·m, 900 ep) **−27.0 %**, corr 0.53–0.54, 낙상 0 —
-오라클 상한(β·τ_agent 주입: 25 N·m −18 %, 40 N·m −26 %) 수준. 진자 LLP는 같은
-조건에서 +4 %. 토크는 보행 위상에 맞춘 bang-bang(±한계) 형태라 실기기용은 부드러움
-항 강화 필요. 표: README "중간 결과".
+**결과 (2026-09-13)**: 통합 시스템 평가(walk, A/B paired)에서 착용자 hip 파워
+v2(25 N·m, 1270 ep) **−20.0 %**, **v3(40 N·m, 2500 ep 수렴) −31~−32 %** (60 s·다른
+구간·시드 일관, corr ≈0.5, 낙상 0) — 오라클 상한(β·τ_agent 주입: 25 N·m −18 %,
+40 N·m −26 %) 이상. 진자 LLP는 같은 조건에서 +4 %. 대가: hip mocap 오차 +0.6°,
+몸체 추종은 무보조 수준 유지. 토크는 보행 위상에 맞춘 bang-bang(±한계) 형태라
+실기기용은 부드러움 항 강화 필요. v4(15모션, v31 tracker) 학습 중. 표: README.
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
 ---
@@ -391,7 +392,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) 🔁 **LLP 재학습 진행 중** (`llp_walk.py`, 통합 env에서 동결 tracker + 실 HLP; 진자 LLP는 강체 진자에만 맞음, §3.5). 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
+| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습 (walk)**: 통합 env(동결 tracker + 실 HLP)에서 v3 = 착용자 hip 파워 **−31 %**, 낙상 0 (`results/llp_skel_walk_v3/`) 🔁 15모션 일반화(v4) 학습 중 ⏭ 부드러움 항 강화, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
