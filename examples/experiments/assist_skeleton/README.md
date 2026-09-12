@@ -210,7 +210,12 @@ env마다 착용자를 무작위 배정해 학습한 한 정책이 **두 걸음 
 줄이고, 파워가 작은 느린 동작(squat·lunge·한 걸음)은 거의 중립~약간 악화. 같은 walk 클립에서 v3(walk 학습, v30
 착용자용)는 v31 위에서 −2.4 %였는데 v4는 −19.5 % → **학습 때 본 착용자에 맞는 것이 관건**. 거꾸로 v4를 학습 때
 못 본 v30 착용자의 walk에 올리면 −11.3 % (v3→v31의 −2.4 %보다 낫다 — 모션 다양성이 착용자 특이성도 줄인다).
-학습은 계속 중.
+
+**v4 최종 (epoch 1890, 평가 파워 1200 epoch부터 평탄 → 중단; `results/llp_skel_motions15_v4/last.ckpt`)** — 14모션
+시간 가중 **84.3 → 66.0 W (−21.8 %)**, 낙상 0. 모션별: highknee −28, run −26, stepinplace3 −36, walk −19.6,
+walk_koo −20.5, lunge_left −15.5, stepinplace1 −14.5, onestep L/R −11/−12, onehop −12, stepinplace2 −7, onesteplong −3.5,
+lunge_right −1.2, squat **+5.1 %**(유일한 악화). 1060 epoch 대비 느린 동작들이 중립→절감으로 넘어왔다
+(`results/assist_skeleton_motions/v4_final/summary.md`).
 - 토크 패턴은 보행 위상에 맞춘 거의 bang-bang(±한계)이다 — 파워 목적함수만으로는 부드러움을 요구하지
   않으므로. 실기기용이라면 effort/action-rate 벌점을 키워 재학습하거나 출력에 저역통과를 두어야 한다.
 - 착용자의 hip mocap 추종은 1.3° 나빠졌고 몸체 추종은 hinge 범위(≈8 cm) 안에 머물렀다(학습 중 벌점 ≈0).
