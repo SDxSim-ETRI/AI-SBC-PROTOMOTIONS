@@ -141,6 +141,11 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
 - **점검 결과 (assist 0, 16 env × 8 s)**: 종료 0, 몸체 오차 7.9 cm(단독 tracker 7.6 cm) → 내장 tracker가
   400 Hz 물리에서 정상 보행. τ_agent RMS 79 N·m, hip 파워 240 W, HLP 150 ms MAE 10.6°.
 - **속도**: 4096 env에서 ≈3 s/epoch (실 HLP 배치 4096 예측 포함).
+- **v1 → v2 (22:57)**: v1(tracker의 gt/rh 추종 보상, 파워 −0.0015)은 850 epoch에서 assist를 한계(RMS 23/25 N·m)까지
+  써서 착용자 몸체 추종을 0.86→0.94로 "개선"하는 해에 머물렀고 파워는 그대로였다(통합 평가 −0.8 %, corr −0.04).
+  추종을 좋게 만드는 데 보상을 주면 최대 토크로 착용자를 mocap 쪽으로 끌어당기는 것이 이득이기 때문.
+  v2는 몸체 오차가 무보조 수준(0.09 m)을 **넘는 만큼만 벌점**(hinge, weight 10) + 파워 −0.003 + effort −5e-5.
+  둘 다 `results/llp_skel_walk_v{1,2}/`에서 병렬 학습 중.
 - **train_agent.py 함정**: 스크립트 디렉터리 `protomotions/`가 sys.path[0]이라 `import maniflow`가
   `protomotions/maniflow`(통합 레이어)로 잡혀 ManiFlow 로딩이 깨졌다 — `loader.py`가 진짜 namespace
   패키지를 `sys.modules`에 명시 등록하도록 고쳤다.

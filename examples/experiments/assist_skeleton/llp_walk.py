@@ -26,7 +26,7 @@
 | HLP chunk | 에뮬레이션 | **실 ManiFlow** (배치 예측, 20 ms마다) |
 | LLP 주기 | 10 ms | 10 ms (물리 400 Hz / decimation 4) |
 | 관측 | hip 2ch 상태·히스토리 10, 미래 창 4×50 ms, 이전 action 5 | 동일 |
-| 보상 | hip 목표 추종(exp) + 파워 + effort + action rate | **착용자 몸체 추종(tracker의 gt/rh 항)** + 파워 + effort + action rate |
+| 보상 | hip 목표 추종(exp) + 파워 + effort + action rate | **착용자 몸체 오차 hinge 벌점**(무보조 수준 초과분만) + 파워 + effort + action rate (`--reward-variant tracker` = v1의 gt/rh 추종 보상) |
 | 종료 | 추종 실패 / 과속 | mimic 몸체 오차 0.5 m(낙상 포함) / 과속 |
 
 hip 목표 추종 항을 착용자 몸체 추종으로 바꾼 이유: 보행 착용자의 "의도"를 hip 각도
@@ -72,7 +72,12 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--hlp-denoise", type=int, default=3)
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
-    parser.add_argument("--human-power-weight", type=float, default=-0.0015)
+    parser.add_argument("--human-power-weight", type=float, default=-0.003)
+    parser.add_argument("--reward-variant", choices=["hinge", "tracker"], default="hinge",
+                        help="hinge: 몸체 오차가 margin 초과분만 벌점(권장) / tracker: tracker의 gt·rh 추종 보상(v1)")
+    parser.add_argument("--body-err-margin", type=float, default=0.09, help="hinge 시작 몸체 오차 [m]")
+    parser.add_argument("--body-err-weight", type=float, default=10.0, help="hinge 벌점 weight (0.05 m 초과 → −0.5/step)")
+    parser.add_argument("--assist-effort-weight", type=float, default=-5.0e-5)
 
 
 def _tracker_resolved(args: argparse.Namespace):
@@ -127,6 +132,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
     )
     from protomotions.envs.rewards.assist import (
         compute_assist_effort_rew,
+        compute_body_error_hinge_rew,
         compute_human_power_rew,
     )
     from protomotions.envs.terminations.assist import compute_dof_vel_failure_term
@@ -189,11 +195,12 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         ),
     }
 
-    # 보행 hip 파워는 진자(~17 W)의 10배 규모라 weight를 1/10로 (항 크기 균형 유지).
-    # 착용자 보행 유지 = tracker 자신의 몸체 위치(gt)·루트 높이(rh) 추종 보상 (config 객체 그대로)
+    # 보행 hip 파워는 진자(~17 W)의 10배 규모라 weight를 1/10 안팎으로 (항 크기 균형 유지).
+    # 착용자 보행 유지:
+    #   hinge  — 몸체 오차가 무보조 수준(margin)을 넘는 만큼만 벌점. v1(tracker의 exp 추종 보상)은
+    #            정책이 최대 토크로 착용자를 mocap 쪽으로 끌어 "추종 개선"만 얻고 파워는 못 줄였다.
+    #   tracker — tracker 자신의 gt/rh 추종 보상 (v1 재현용)
     reward_components = {
-        "human_gt": tracker_env.reward_components["gt_rew"],
-        "human_rh": tracker_env.reward_components["rh_rew"],
         "human_power": MdpComponent(
             compute_func=compute_human_power_rew,
             dynamic_vars={
@@ -205,10 +212,22 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         "assist_effort": MdpComponent(
             compute_func=compute_assist_effort_rew,
             dynamic_vars={"tau_assist": EnvContext.assist.tau_assist},
-            static_params={"weight": -2.0e-5},
+            static_params={"weight": float(args.assist_effort_weight)},
         ),
         "action_rate": action_smoothness_factory(weight=-0.005),
     }
+    if args.reward_variant == "hinge":
+        reward_components["human_body_hinge"] = MdpComponent(
+            compute_func=compute_body_error_hinge_rew,
+            dynamic_vars={
+                "current_rigid_body_pos": EnvContext.current.rigid_body_pos,
+                "ref_rigid_body_pos": EnvContext.mimic.ref_state.rigid_body_pos,
+            },
+            static_params={"weight": float(args.body_err_weight), "margin": float(args.body_err_margin)},
+        )
+    else:
+        reward_components["human_gt"] = tracker_env.reward_components["gt_rew"]
+        reward_components["human_rh"] = tracker_env.reward_components["rh_rew"]
 
     termination_components = {
         # 착용자 몸체가 레퍼런스에서 0.5 m 이상 벗어나면 (낙상 포함) — tracker 설정 그대로

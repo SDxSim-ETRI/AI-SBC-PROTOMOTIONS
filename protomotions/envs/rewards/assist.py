@@ -105,3 +105,25 @@ def compute_human_power_eval(tau_agent: Tensor, dof_vel: Tensor) -> Tensor:
         [num_envs] 파워 합.
     """
     return (tau_agent * dof_vel).abs().sum(dim=-1)
+
+def compute_body_error_hinge_rew(
+    current_rigid_body_pos: Tensor,
+    ref_rigid_body_pos: Tensor,
+    margin: float = 0.09,
+) -> Tensor:
+    """착용자 몸체 추종 오차가 무보조 수준(margin)을 넘는 만큼만 벌점 (보행 착용자 LLP용).
+
+    보조가 착용자의 보행 과제를 **깨뜨리지 않게** 하되, 추종을 "더 좋게" 만드는 데
+    보상을 주지는 않는다 — exp 형 추종 보상을 그대로 쓰면 정책이 최대 토크로 착용자를
+    mocap 쪽으로 끌어당기는 해(파워 절감 없음)로 수렴했다 (llp_skel_walk_v1, 2026-09-12).
+
+    Args:
+        current_rigid_body_pos: [num_envs, num_bodies, 3].
+        ref_rigid_body_pos: 레퍼런스 몸체 위치 [num_envs, num_bodies, 3].
+        margin: 벌점이 시작되는 평균 몸체 오차 [m] (단독 tracker ≈ 0.08).
+
+    Returns:
+        [num_envs] ≤ 0. weight 곱은 MdpComponent가 한다.
+    """
+    err = (current_rigid_body_pos - ref_rigid_body_pos).norm(dim=-1).mean(dim=-1)
+    return -(err - margin).clamp(min=0.0)

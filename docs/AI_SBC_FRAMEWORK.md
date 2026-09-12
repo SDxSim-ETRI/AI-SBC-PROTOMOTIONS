@@ -252,6 +252,9 @@ env로 쓴다.** 별도 플랜트는 또 다른 근사(무릎·접촉·토크 �
 `examples/experiments/assist_skeleton/llp_walk.py`. 보상은 진자의 hip 목표 추종 대신
 **착용자 몸체 추종(tracker의 gt/rh 항)** + 파워(−0.0015) + effort + action rate.
 학습 env 점검: 내장 tracker 몸체 오차 7.9 cm(단독 7.6), 종료 0, ≈3 s/epoch @4096 env.
+**v1 교훈(850 epoch)**: 착용자 추종 *보상*(exp)을 주면 정책이 최대 토크로 착용자를
+mocap 쪽으로 끌어 추종만 개선하고 파워는 못 줄인다(−0.8 %). → v2는 몸체 오차가
+무보조 수준을 넘는 만큼만 벌점(hinge) + 파워 weight ×2 (`llp_skel_walk_v2`, 병렬 학습).
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
 ---
