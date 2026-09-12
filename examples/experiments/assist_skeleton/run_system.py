@@ -101,7 +101,8 @@ def parse_args():
     p.add_argument("--llp-checkpoint", default="results/assist_pendulum_v3/last.ckpt")
     p.add_argument("--hlp-checkpoint", default=None, help="None이면 flexion40 run 자동 탐색")
     p.add_argument("--denoise", type=int, default=3)
-    p.add_argument("--calibration", default="motion", help="motion | none | 'p,q,r,s' (deg, 4ch 관측 오프셋)")
+    p.add_argument("--calibration", default="motion",
+                   help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | none | 'p,q,r,s' (deg)")
     p.add_argument("--physics-fps", type=int, default=400)
     p.add_argument("--env-dt", type=float, default=0.05, help="착용자 env 주기 [s] (tracker 학습 50 ms)")
     p.add_argument("--llp-dt", type=float, default=0.01, help="LLP 주기 [s] (학습 10 ms)")
@@ -292,12 +293,11 @@ def resolve_calibration(args, dof_names):
     spec = args.calibration.strip().lower()
     if spec == "none":
         return None
-    if spec == "motion":
-        off = calibration_offset_from_motion(
+    if spec in ("motion", "motion_all"):
+        return calibration_offset_from_motion(
             args.motion_file, dof_names, fixed_root=(args.human == "mocap_pd"),
-            motion_index=args.motion_id,
+            motion_index=None if spec == "motion_all" else args.motion_id,
         )
-        return off
     vals = [float(v) for v in args.calibration.split(",")]
     assert len(vals) == 4, "--calibration 'p,q,r,s' needs 4 values (deg)"
     return torch.deg2rad(torch.tensor(vals, dtype=torch.float32))
