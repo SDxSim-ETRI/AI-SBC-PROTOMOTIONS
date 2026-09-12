@@ -263,7 +263,9 @@ v2(25 N·m, 1270 ep) **−20.0 %**, **v3(40 N·m, 2500 ep 수렴) −31~−32 %*
 실기기용은 부드러움 항 강화 필요. **착용자 특이성**: v3를 다른 tracker(v31)의 같은
 walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착용자의 운동 패턴에 맞춘
 정책이라, 실사용에는 착용자 다양성(tracker 앙상블·게인 랜덤화·모션 다양성) 학습이
-필요하다. v4(15모션, v31 tracker) 학습 중. 표: README.
+필요하다. **v4(15모션, v31 tracker, 1060 ep 스냅샷)**: 14모션 시간 가중 **−18.6 %**, 낙상 0
+(highknee −27, run −23, walk −19.5, stepinplace3 −32 %; squat·lunge·한 걸음은 중립~+8 %).
+v5(착용자 앙상블 v30+v31 × walk) 학습 중. 표: README.
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
 ---

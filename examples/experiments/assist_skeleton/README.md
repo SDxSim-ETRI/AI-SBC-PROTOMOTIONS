@@ -184,6 +184,21 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-
   (`SkeletonAssistControl`). 제약: v30은 walk만 걷는 tracker라 15모션과 섞으면 비-walk 클립에서 낙상(점검 32 env
   × 8 s에 종료 17). → **v5** = 앙상블 {v30, v31} × walk 클립, hinge, 40 N·m (`results/llp_skel_walk_ens_v5/`):
   한 LLP가 걸음 스타일이 다른 두 착용자를 모두 보조할 수 있는지.
+
+### v4 (15모션 + v31 tracker) — epoch 1060 스냅샷, 모션별 A/B (`eval_motions.py`, 20 s/클립, 06:10)
+
+| 모션 | 착용자 파워 A→B [W] | 절감 | corr | 모션 | A→B [W] | 절감 | corr |
+|---|---|---|---|---|---|---|---|
+| highknee | 298.5 → 218.0 | **−27.0 %** | 0.27 | onestepleft | 27.0 → 24.7 | −8.6 % | 0.02 |
+| run | 229.1 → 175.6 | **−23.3 %** | 0.79 | onestepright | 20.5 → 19.3 | −5.9 % | −0.15 |
+| stepinplace3 | 99.3 → 67.4 | **−32.1 %** | 0.27 | onesteplong | 31.6 → 33.0 | +4.5 % | 0.09 |
+| walk | 175.0 → 140.9 | **−19.5 %** | 0.15 | squat | 23.3 → 25.2 | +8.0 % | −0.29 |
+| walk_koo | 175.5 → 141.6 | **−19.4 %** | 0.16 | stepinplace1/2 | 22.5/42.2 | +1.4 / +2.7 % | 0.2/0.1 |
+| onehopforward | 54.9 → 49.5 | −9.9 % | 0.23 | lunge L/R | 30.3/42.3 | +2.0 / +1.3 % | 0.5/0.15 |
+
+시간 가중 평균 **90.9 → 73.9 W (−18.6 %)**, 낙상 0/14. 파워가 큰 동작(highknee·run·walk·stepinplace3)에서 크게
+줄이고, 파워가 작은 느린 동작(squat·lunge·한 걸음)은 거의 중립~약간 악화. 같은 walk 클립에서 v3(walk 학습, v30
+착용자용)는 v31 위에서 −2.4 %였는데 v4는 −19.5 % → **학습 때 본 착용자에 맞는 것이 관건**. 학습은 계속 중.
 - 토크 패턴은 보행 위상에 맞춘 거의 bang-bang(±한계)이다 — 파워 목적함수만으로는 부드러움을 요구하지
   않으므로. 실기기용이라면 effort/action-rate 벌점을 키워 재학습하거나 출력에 저역통과를 두어야 한다.
 - 착용자의 hip mocap 추종은 1.3° 나빠졌고 몸체 추종은 hinge 범위(≈8 cm) 안에 머물렀다(학습 중 벌점 ≈0).
