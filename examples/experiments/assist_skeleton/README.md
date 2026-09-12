@@ -102,3 +102,45 @@ tracker 항목은 학습 중간 체크포인트 기준이며 400 Hz 물리(학�
 — mimic 보상은 몸체 위치를 맞추지 관절각을 맞추지 않으므로, hip 궤적이 사람 같지 않아도
 성공으로 친다. 착용자 대역으로 쓰려면 관절각(특히 hip) 추종 항을 강화한 tracker가 필요하다.
 (epoch 1300 결과: 167.1→173.3 W, +3.7 %, corr −0.07.) 학습이 끝나면 같은 명령으로 갱신할 것.
+
+## LLP 재학습 — 보행 착용자 위에서 (2026-09-12 시작)
+
+위 결과의 결론대로 LLP를 실제 플랜트에서 다시 학습한다. "따로 보행 비슷하게 만든 플랜트"
+대신 **통합 시스템 그대로**를 학습 env로 쓴다: 착용자 = 동결 mimic tracker(v30), HLP = 실
+ManiFlow(배치 예측), LLP만 학습. 관측 계약(hip-local)은 진자와 동일하므로 학습된 정책은
+`AssistController`가 그대로 싣는다 (`flexion_sign`·보조 관절 목록은 체크포인트 config에서 읽음).
+
+| 파일 | 역할 |
+|------|------|
+| `protomotions/envs/base_env/skeleton_assist_env.py` | `SkeletonAssistEnv` — env 10 ms, policy action 2ch(hip), 착용자 PD 목표는 tracker가 5 step마다 갱신, τ_agent = hip substep 평균 PD 토크 |
+| `protomotions/envs/control/skeleton_assist_control.py` | `TrackerPolicy`(동결 tracker actor + PD 목표 변환), `TrackerMimicControl`(미래 레퍼런스 +50 ms), `SkeletonAssistControl`(실 HLP chunk, θ_g = mocap hip, hip 부분집합 컨텍스트) |
+| `llp_walk.py` | 실험 파일. tracker config에서 관측(`max_coords_obs`, `mimic_target_poses`)·종료(`tracking_error`)·motion manager·보상(`gt_rew`, `rh_rew`) 객체를 그대로 가져옴 |
+| `check_train_env.py` | 학습 env 점검: 내장 tracker가 걷는지(몸체 오차), 신호 스케일, HLP 오차 |
+
+```bash
+python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
+    --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_skel_walk_v1 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_walk.pt --num-envs 4096 --batch-size 16384 \
+    --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt   # [--assist-limit 25 --human-power-weight -0.0015]
+python examples/experiments/assist_skeleton/check_train_env.py --run results/llp_skel_walk_v1 --num-envs 16 --steps 800
+# 평가 (통합 시스템, 새 LLP)
+python examples/experiments/assist_skeleton/run_system.py --human tracker --llp-checkpoint results/llp_skel_walk_v1/last.ckpt --seconds 30
+```
+
+설계 결정:
+
+- **보상**: 진자의 "hip 목표 추종" 항을 **착용자 몸체 추종**(tracker 자신의 `gt_rew` 0.5·`rh_rew` 0.2)으로
+  바꿨다. 보행 착용자의 의도를 hip 각도 하나로 정의할 수 없어서다 — tracker의 PD 목표는 실제 각도와
+  15~20° 차이 나는 토크 명령이고, mocap hip 각도는 tracker 자체가 16° 벗어나 따라간다. "보조가
+  보행 과제를 깨뜨리지 않는다"를 직접 재는 편이 맞다. 파워 항은 −0.0015 (보행 hip 파워 240 W →
+  −0.36/step, 몸체 추종 보상 ≈ +0.4/step와 균형). θ_g = mocap hip flexion은 평가·critic 관측에만 쓴다.
+- **시간 구조**: 학습 env 주기 10 ms(LLP), tracker는 5 step마다. tracker 관측은 tracker config의
+  MdpComponent 객체를 그대로 env에 넣어 매 step 계산하고(정책은 5 step마다 소비), 미래 레퍼런스만
+  `TrackerMimicControl`이 +50 ms로 만든다. 이전 action은 tracker 자체 버퍼(두 결정 전 action —
+  state history 규약과 동일).
+- **점검 결과 (assist 0, 16 env × 8 s)**: 종료 0, 몸체 오차 7.9 cm(단독 tracker 7.6 cm) → 내장 tracker가
+  400 Hz 물리에서 정상 보행. τ_agent RMS 79 N·m, hip 파워 240 W, HLP 150 ms MAE 10.6°.
+- **속도**: 4096 env에서 ≈3 s/epoch (실 HLP 배치 4096 예측 포함).
+- **train_agent.py 함정**: 스크립트 디렉터리 `protomotions/`가 sys.path[0]이라 `import maniflow`가
+  `protomotions/maniflow`(통합 레이어)로 잡혀 ManiFlow 로딩이 깨졌다 — `loader.py`가 진짜 namespace
+  패키지를 `sys.modules`에 명시 등록하도록 고쳤다.

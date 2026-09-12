@@ -68,9 +68,15 @@ python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --sec
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30                    # 보행 착용자
 DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --record     # 뷰어/mp4
+# LLP 재학습 (보행 착용자 = 동결 tracker v30, 실 HLP; env 10 ms, 4096 env ≈3 s/epoch)
+python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
+    --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_skel_walk_v1 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_walk.pt --num-envs 4096 --batch-size 16384 \
+    --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt
 ```
 결과 요지: 진자 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
-않는다(0.19/≈0) → LLP를 실제 플랜트에서 재학습해야 함. 러너가 그 평가 하네스.
+않는다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 LLP 재학습 중. tracker 체크포인트:
+`checkpoints/v30_newton_suit_passive_walk`(walk), `v31_newton_suit_passive_motions15`(15모션).
 
 ### Tests / lint
 ```bash

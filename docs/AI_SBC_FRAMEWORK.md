@@ -242,6 +242,18 @@ robot config 이름의 `passive_cable`/`active_cable`은 suit MJCF의 slide1–4
 플랜트·사람 모델만 바꾸면 되며, 러너가 그 학습 환경의 평가 하네스가 된다.
 추론 시간 HLP 7.9 ms + LLP 0.4 ms (batch 2, RTX 5090).
 
+**LLP 재학습 (2026-09-12 22:00 시작, `results/llp_skel_walk_v1/`)** — "따로 보행 비슷한
+플랜트를 만들지 vs 통합 시스템에서 학습할지"에 대한 결정: **통합 시스템 그대로 학습
+env로 쓴다.** 별도 플랜트는 또 다른 근사(무릎·접촉·토크 스케일 중 무엇을 빠뜨리든
+전이 격차가 다시 생김)이고, 착용자(tracker v30/v31)·HLP·주입 경로가 이미 갖춰져
+있으며, LLP의 관측 계약(hip-local)은 그대로라 "따로 학습해 어디든 싣는다"는 원칙은
+유지된다. 구현: `SkeletonAssistEnv`(env 10 ms, action 2ch) + `SkeletonAssistControl`
+(동결 tracker 5 step마다 행동, 실 ManiFlow 배치 chunk, θ_g = mocap hip) +
+`examples/experiments/assist_skeleton/llp_walk.py`. 보상은 진자의 hip 목표 추종 대신
+**착용자 몸체 추종(tracker의 gt/rh 항)** + 파워(−0.0015) + effort + action rate.
+학습 env 점검: 내장 tracker 몸체 오차 7.9 cm(단독 7.6), 종료 0, ≈3 s/epoch @4096 env.
+상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
+
 ---
 
 ## 4. 파일 지도
@@ -289,6 +301,9 @@ robot config 이름의 `passive_cable`/`active_cable`은 suit MJCF의 slide1–4
 | `examples/experiments/assist_skeleton/{analysis,viz}.py` | 지표·리포트·그림 / 뷰어 고스트·토크 화살표 |
 | `examples/experiments/assist_skeleton/train_tracker_{walk,motions15}.sh` | 착용자 tracker 재학습 |
 | `protomotions/tests/test_assist_controller.py` | 특징량·interpolation 단위 테스트 (CPU) |
+| `protomotions/envs/base_env/skeleton_assist_env.py` | `SkeletonAssistEnv` — 보행 착용자(동결 tracker) 위 LLP 학습 env (action 2ch, τ_agent hip 계측) |
+| `protomotions/envs/control/skeleton_assist_control.py` | `TrackerPolicy`/`TrackerMimicControl`/`SkeletonAssistControl` — 내장 tracker, 실 HLP chunk, hip 부분집합 컨텍스트 |
+| `examples/experiments/assist_skeleton/llp_walk.py`, `check_train_env.py` | LLP 재학습 실험 파일 / 학습 env 점검 |
 
 **ManiFlow 통합 레이어** (`protomotions/maniflow/` — 시뮬 쪽에서 maniflow를
 직접 import하지 않고 반드시 이 패키지를 경유):
@@ -368,7 +383,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 🔁 tracker 재학습(walk → 15모션) ⏭ **LLP 재학습**: 관절 다리 + 지면 접촉 + 실제 토크 스케일 플랜트 (진자 LLP는 강체 진자에만 맞음, §3.5). 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
+| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) 🔁 **LLP 재학습 진행 중** (`llp_walk.py`, 통합 env에서 동결 tracker + 실 HLP; 진자 LLP는 강체 진자에만 맞음, §3.5). 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 
@@ -508,6 +523,13 @@ python scripts/compare_hip_imu_reference.py \
 - **골반 고정 대역의 PD 게인은 로봇 config 값(hip 200/20)을 그대로 쓰면 안 된다** —
   다리 관성(3.53 kg·m²)에 비해 물러 ζ≈0.38, 12° 오버슈트 → HLP 분포 밖(150 ms
   MAE 8.8°). 진자 플랜트와 같은 ω_n/ζ(×12.4/×6.2)로 두면 추종 0.78°, MAE 6.3°.
+- **`train_agent.py`에서 `import maniflow`가 통합 레이어를 잡는다** — 스크립트
+  디렉터리 `protomotions/`가 sys.path[0]이고 ManiFlow의 `maniflow`는 namespace
+  package라, 일반 패키지 `protomotions/maniflow`가 순서와 무관하게 이긴다.
+  `loader.ensure_maniflow_importable`이 진짜 패키지를 `sys.modules`에 명시 등록한다.
+- **mimic tracker의 PD 목표는 "의도"가 아니다** — 실제 각도와 15~20° 차이 나는 토크
+  명령이다. 보행 착용자에서 LLP의 θ_g는 mocap hip flexion(평가용)으로 두고, 보상은
+  hip 추종 대신 착용자 몸체 추종 항으로.
 - **진자 LLP의 토크 스케일** — 출력 한계 25 N·m는 진자(I=0.43 kg·m²) 기준.
   스켈레톤 다리(3.53)는 8배 토크가 필요하다. `--assist-scale`은 진단용 배율일 뿐
   해법이 아니다(관절 다리에서는 배율을 올려도 corr 0.19로 절감이 늘지 않는다).
