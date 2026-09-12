@@ -72,6 +72,10 @@ class LLPObsLayout:
     target_low: Tensor
     target_high: Tensor
     in_keys: List[str]
+    # 데이터 flexion(+굴곡) → LLP 관절각 부호 (hip_pendulum −1, skeleton +1)
+    flexion_sign: float = -1.0
+    # 보조 관절 이름 (전신 로봇에서 LLP가 담당하는 DOF; 진자는 전 관절)
+    assist_dof_names: tuple = ()
 
     # actor in_keys 이름 (assist_pendulum/mlp.py의 observation_components 키)
     KEY_PROPRIO = "assist_proprio"
@@ -105,8 +109,19 @@ class LLPPolicy:
         action_cfg = env_cfg.action_config
         kin = robot_cfg.kinematic_info
         margin = float(getattr(comp, "dof_limit_margin", 1.0))
+        # 보조 관절: 전신 로봇이면 config의 assist_dof_names, 진자면 전 관절
+        assist_names = tuple(getattr(comp, "assist_dof_names", ()) or ())
+        if assist_names:
+            dof_idx = [list(kin.dof_names).index(n) for n in assist_names]
+        else:
+            dof_idx = list(range(int(robot_cfg.number_of_actions)))
+        num_dofs = int(getattr(agent_cfg.model.actor, "num_out", None) or len(dof_idx))
+        assert num_dofs == len(dof_idx), (
+            f"actor num_out {num_dofs} ≠ assist dofs {len(dof_idx)} ({assist_names or 'all'})"
+        )
+        idx_t = torch.tensor(dof_idx, dtype=torch.long)
         self.layout = LLPObsLayout(
-            num_dofs=int(robot_cfg.number_of_actions),
+            num_dofs=num_dofs,
             history_steps=int(env_cfg.num_state_history_steps),
             dof_vel_scale=float(
                 _static_param(obs_components[LLPObsLayout.KEY_PROPRIO], "dof_vel_scale", 1.0)
@@ -123,9 +138,11 @@ class LLPPolicy:
             torque_scale=float(action_cfg["torque_scale"]),
             action_transform=action_cfg.get("action_transform", "tanh"),
             torque_limit=float(env_cfg.assist_torque_limit),
-            target_low=(kin.dof_limits_lower.float() * margin).to(self.device),
-            target_high=(kin.dof_limits_upper.float() * margin).to(self.device),
+            target_low=(kin.dof_limits_lower.float()[idx_t] * margin).to(self.device),
+            target_high=(kin.dof_limits_upper.float()[idx_t] * margin).to(self.device),
             in_keys=list(agent_cfg.model.actor.in_keys),
+            flexion_sign=float(getattr(comp, "flexion_sign", -1.0)),
+            assist_dof_names=assist_names,
         )
         expected = {
             LLPObsLayout.KEY_PROPRIO,

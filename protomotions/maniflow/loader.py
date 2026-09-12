@@ -32,6 +32,7 @@ Runtime dependencies of the ManiFlow lowdim policy import chain:
 import logging
 import os
 import sys
+from importlib import machinery as importlib_machinery
 from importlib import util as importlib_util
 from pathlib import Path
 from typing import Optional, Tuple
@@ -61,17 +62,52 @@ def ensure_maniflow_importable(maniflow_root: Optional[str] = None) -> str:
     def _package_dir_valid(root: Path) -> bool:
         return (root / "maniflow" / "policy").is_dir()
 
-    if "maniflow" in sys.modules:
-        pkg_paths = list(sys.modules["maniflow"].__path__)
-        found_root = str(Path(pkg_paths[0]).parent)
-        if maniflow_root is not None and Path(maniflow_root).resolve() != Path(
-            found_root
-        ).resolve():
-            log.warning(
-                f"maniflow already imported from {found_root}; "
-                f"ignoring requested root {maniflow_root}"
+    def _pin(root: Path) -> str:
+        """진짜 ManiFlow 패키지를 sys.modules['maniflow']로 명시 등록한다.
+
+        sys.path 순서만으로는 부족하다: ManiFlow의 ``maniflow``는 namespace
+        package라, sys.path 어딘가에 같은 이름의 **일반 패키지**(예: train_agent.py
+        실행 시 스크립트 디렉터리 protomotions/의 ``protomotions/maniflow``)가
+        있으면 순서와 무관하게 그쪽이 이긴다. 부모 모듈을 직접 만들어 두면
+        ``maniflow.policy.*`` 하위 import는 sys.path가 아니라 부모의 ``__path__``만
+        본다.
+        """
+        pkg_dir = root / "maniflow"
+        init_py = pkg_dir / "__init__.py"
+        if init_py.exists():
+            spec = importlib_util.spec_from_file_location(
+                "maniflow", str(init_py), submodule_search_locations=[str(pkg_dir)]
             )
-        return found_root
+            module = importlib_util.module_from_spec(spec)
+            sys.modules["maniflow"] = module
+            spec.loader.exec_module(module)
+        else:
+            spec = importlib_machinery.ModuleSpec("maniflow", loader=None, is_package=True)
+            spec.submodule_search_locations = [str(pkg_dir)]
+            sys.modules["maniflow"] = importlib_util.module_from_spec(spec)
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        return str(root)
+
+    if "maniflow" in sys.modules:
+        pkg_paths = list(getattr(sys.modules["maniflow"], "__path__", []))
+        found_root = str(Path(pkg_paths[0]).parent) if pkg_paths else ""
+        if found_root and _package_dir_valid(Path(found_root)):
+            if maniflow_root is not None and Path(maniflow_root).resolve() != Path(
+                found_root
+            ).resolve():
+                log.warning(
+                    f"maniflow already imported from {found_root}; "
+                    f"ignoring requested root {maniflow_root}"
+                )
+            return found_root
+        # 이름만 같은 다른 패키지가 'maniflow'로 잡혀 있다 — 예: train_agent.py는
+        # 스크립트 디렉터리(protomotions/)가 sys.path[0]이라 이 통합 레이어
+        # (protomotions/maniflow)가 top-level 'maniflow'로 import된다. 걷어내고
+        # 진짜 ManiFlow 루트를 sys.path 맨 앞에 넣어 다시 해석한다.
+        log.warning(f"'maniflow' in sys.modules is not the ManiFlow package ({found_root}); re-resolving")
+        for name in [m for m in sys.modules if m == "maniflow" or m.startswith("maniflow.")]:
+            del sys.modules[name]
 
     candidates = []
     if maniflow_root is not None:
@@ -82,21 +118,21 @@ def ensure_maniflow_importable(maniflow_root: Optional[str] = None) -> str:
 
     for root in candidates:
         if _package_dir_valid(root):
-            sys.path.insert(0, str(root))
             log.info(f"maniflow package resolved from: {root}")
-            return str(root)
+            return _pin(root)
         log.warning(f"maniflow not found under requested root: {root}")
 
     spec = importlib_util.find_spec("maniflow")
     if spec is not None and spec.submodule_search_locations:
         found_root = str(Path(list(spec.submodule_search_locations)[0]).parent)
-        log.info(f"maniflow package already importable from: {found_root}")
-        return found_root
+        if _package_dir_valid(Path(found_root)):
+            log.info(f"maniflow package already importable from: {found_root}")
+            return _pin(Path(found_root))
+        log.warning(f"importable 'maniflow' at {found_root} is not the ManiFlow package; skipping")
 
     if _package_dir_valid(DEFAULT_MANIFLOW_ROOT):
-        sys.path.insert(0, str(DEFAULT_MANIFLOW_ROOT))
         log.info(f"maniflow package resolved from default: {DEFAULT_MANIFLOW_ROOT}")
-        return str(DEFAULT_MANIFLOW_ROOT)
+        return _pin(Path(DEFAULT_MANIFLOW_ROOT))
 
     raise ImportError(
         "Could not resolve the maniflow package. Pass maniflow_root=, set the "

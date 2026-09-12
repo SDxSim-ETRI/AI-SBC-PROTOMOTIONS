@@ -34,10 +34,11 @@ ProtoMotions env에 의존하지 않는다. 입력은 실기기에서 측정 가
 3. `reset(env_ids, s_0)` — 히스토리를 현재 상태로 채우고(edge padding) chunk를
    t=0에서 1회 예측
 
-부호 규약: LLP는 hip_pendulum 규약(+θ = 신전, `flexion_sign = −1`)으로
-학습됐다. 데이터/HLP 규약은 +θ = 굴곡이다. `joint_sign`은 "관절각 → 데이터
-flexion" 부호이며, 내부 LLP 규약으로는 `θ_llp = −joint_sign·θ_joint`,
-`τ_joint = −joint_sign·τ_llp`로 양방향 변환한다 (skeleton +1, hip_pendulum −1).
+부호 규약: 데이터/HLP 규약은 +θ = 굴곡. LLP 체크포인트마다 "데이터 flexion →
+LLP 관절각" 부호 `flexion_sign`이 config에 있다 (hip_pendulum −1: +θ = 신전,
+skeleton 학습 +1). `joint_sign`은 실제 관절각 → 데이터 flexion 부호(skeleton +1,
+hip_pendulum −1). 내부 LLP 규약으로는 `θ_llp = flexion_sign·joint_sign·θ_joint`,
+`τ_joint = flexion_sign·joint_sign·τ_llp`로 양방향 변환한다.
 
 등가성은 `python -m protomotions.assist.verify_controller`로 진자 env와 step
 단위로 대조한다.
@@ -56,9 +57,6 @@ from protomotions.maniflow.angle_estimator import ManiFlowAngleEstimator
 from protomotions.maniflow.chunk_source import DEFAULT_DENOISE_STEPS, ManiFlowChunkSource
 
 logger = logging.getLogger(__name__)
-
-# LLP(hip_pendulum) 규약: 데이터 flexion(+굴곡) × (−1) = 관절각
-LLP_FLEXION_SIGN = -1.0
 
 
 @dataclass
@@ -140,7 +138,7 @@ class AssistController:
             num_envs=self.num_envs,
             dt=self.dt,
             device=self.device,
-            flexion_sign=LLP_FLEXION_SIGN,
+            flexion_sign=lay.flexion_sign,  # HLP(데이터 규약) knot → LLP 관절각 규약
         )
         # chunk 격자는 모델이 결정한다 (MotionAssistTargetControl과 동일 규칙)
         self.hlp_dt = float(self.hlp.knot_dt)
@@ -156,7 +154,8 @@ class AssistController:
 
         # --- 상태 버퍼 (LLP 규약) ---
         n, d = self.num_envs, lay.num_dofs
-        self._joint_to_llp = -float(config.joint_sign)  # θ_llp = −joint_sign·θ_joint
+        # θ_llp = flexion_sign·joint_sign·θ_joint (부호 곱은 자기 역원 → 토크 역변환에도 사용)
+        self._joint_to_llp = float(lay.flexion_sign) * float(config.joint_sign)
         self._q = torch.zeros(n, lay.history_steps + 1, d, device=self.device)
         self._qd = torch.zeros(n, lay.history_steps + 1, d, device=self.device)
         self._a = torch.zeros(n, lay.prev_action_steps + 1, d, device=self.device)
@@ -184,12 +183,14 @@ class AssistController:
         self.llp_ms: list = []
 
         logger.info(
-            "AssistController: LLP %s (epoch %d, dt %.3f s, limit %.1f N·m) + HLP %s "
-            "(denoise %d, knots %d × %.3f s)",
+            "AssistController: LLP %s (epoch %d, dt %.3f s, limit %.1f N·m, flexion_sign %+.0f, "
+            "dofs %s) + HLP %s (denoise %d, knots %d × %.3f s)",
             config.llp_checkpoint,
             self.llp.epoch,
             self.dt,
             self.torque_limit,
+            lay.flexion_sign,
+            lay.assist_dof_names or "all",
             hlp_ckpt,
             config.hlp_denoise_steps,
             self.num_knots,
