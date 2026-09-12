@@ -32,7 +32,7 @@ trunk_roll]`(rad)로 학습됐다. suit 데이터 경로에서
 Phase C 평가(eval_abc `--align-ref-zarr`)와 같은 정렬 방식.
 """
 
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -117,23 +117,25 @@ def motion_channel_mean(
     motion_file: str,
     dof_names: Sequence[str],
     fixed_root: bool = False,
-    motion_index: int = 0,
+    motion_index: Optional[int] = None,
 ) -> Tensor:
-    """mocap 클립 전체의 HLP 4ch 평균 [rad] — 런타임과 같은 함수로 계산.
+    """mocap 클립의 HLP 4ch 평균 [rad] — 런타임과 같은 함수로 계산.
 
     Args:
         motion_file: ProtoMotions motion .pt (dps / grs 포함).
         fixed_root: True면 pelvis 자세를 identity로 둔다 (골반 고정 대역은 루트가
             직립 고정이라 trunk pitch에 mocap 골반 기울기가 들어오지 않는다).
-        motion_index: 여러 클립 파일이면 몇 번째 클립인지.
+        motion_index: 특정 클립만 쓸 때의 인덱스. None이면 파일의 전 클립 평균
+            (여러 모션으로 학습·평가할 때 — eval_abc의 데이터셋 평균 정렬과 같은 뜻).
     """
     m = torch.load(motion_file, map_location="cpu", weights_only=False)
     dps, grs = m["dps"].float(), m["grs"].float()
-    starts = m["length_starts"]
-    n_frames = m["motion_num_frames"]
-    s = int(starts[motion_index])
-    e = s + int(n_frames[motion_index])
-    dps, grs = dps[s:e], grs[s:e]
+    if motion_index is not None:
+        starts = m["length_starts"]
+        n_frames = m["motion_num_frames"]
+        s = int(starts[motion_index])
+        e = s + int(n_frames[motion_index])
+        dps, grs = dps[s:e], grs[s:e]
     pelvis = grs[:, 0]
     if fixed_root:
         pelvis = torch.zeros_like(pelvis)
@@ -147,7 +149,7 @@ def calibration_offset_from_motion(
     dof_names: Sequence[str],
     fixed_root: bool = False,
     seed_mean_deg: Sequence[float] = SEED_CHANNEL_MEAN_DEG,
-    motion_index: int = 0,
+    motion_index: Optional[int] = None,
 ) -> Tensor:
     """HLP 관측 영점 오프셋 [rad] = SEED 평균 − 클립 평균 (관측에 가산)."""
     seed_mean = torch.deg2rad(torch.tensor(seed_mean_deg, dtype=torch.float32))
