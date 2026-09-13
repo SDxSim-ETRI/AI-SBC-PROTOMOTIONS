@@ -78,6 +78,9 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--body-err-margin", type=float, default=0.09, help="hinge 시작 몸체 오차 [m]")
     parser.add_argument("--body-err-weight", type=float, default=10.0, help="hinge 벌점 weight (0.05 m 초과 → −0.5/step)")
     parser.add_argument("--assist-effort-weight", type=float, default=-5.0e-5)
+    parser.add_argument("--action-rate-weight", type=float, default=-0.005,
+                        help="연속 step 사이 토크 변화 벌점. 크게 잡으면 토크가 부드러워지는 대신 "
+                             "절감이 줄어든다 (v6 −0.005 vs v7 −0.05 비교)")
 
 
 def _tracker_resolved(args: argparse.Namespace):
@@ -214,7 +217,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
             dynamic_vars={"tau_assist": EnvContext.assist.tau_assist},
             static_params={"weight": float(args.assist_effort_weight)},
         ),
-        "action_rate": action_smoothness_factory(weight=-0.005),
+        "action_rate": action_smoothness_factory(weight=float(args.action_rate_weight)),
     }
     if args.reward_variant == "hinge":
         reward_components["human_body_hinge"] = MdpComponent(

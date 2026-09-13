@@ -281,12 +281,16 @@ class NewtonSimulator(Simulator):
         self.robot.default_shape_cfg.mu = 1.0
 
         # 2. Load MJCF
+        # 시각 전용 geom(뼈 메시 등)은 뷰어가 있을 때만 읽는다. headless 대규모 학습에서
+        # env당 90개씩 늘어나면 매 substep 형상 변환 비용이 커진다 — 충돌·질량·관성은
+        # <inertial>과 contype=1 geom이 정하므로 물리는 어느 쪽이든 같다.
         self.robot.add_mjcf(
             asset_path,
             ignore_names=["floor", "ground"],
             collapse_fixed_joints=False,
             floating=not self.robot_config.asset.fix_base_link,
             enable_self_collisions=self.robot_config.asset.self_collisions,
+            parse_visuals=not self.headless,
         )
 
         # 3. Set per-DOF joint properties ON THE BUILDER (before finalize)

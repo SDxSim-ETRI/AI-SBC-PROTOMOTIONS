@@ -110,6 +110,10 @@ def parse_args():
     p.add_argument("--warmup", type=float, default=1.0, help="지표에서 제외할 초반 구간 [s]")
     p.add_argument("--assist-scale", type=float, default=1.0, help="B에 주입하는 τ_assist 배율 (0 = 차단)")
     p.add_argument("--torque-limit", type=float, default=None, help="assist 토크 한계 [N·m] (None = LLP 학습값)")
+    p.add_argument("--torque-lpf-hz", type=float, default=0.0,
+                   help="assist 출력 1차 저역통과 차단주파수 [Hz] (0 = 끔) — 구동기 대역 모사")
+    p.add_argument("--torque-slew-limit", type=float, default=None,
+                   help="assist 출력 변화율 한계 [N·m/s] (None = 끔)")
     p.add_argument("--fixed-base-z", type=float, default=0.6, help="mocap_pd: 골반을 올릴 높이 [m]")
     p.add_argument("--no-feedforward", action="store_true", help="mocap_pd: 속도 피드포워드 Kd·θ̇_g 끄기")
     p.add_argument("--human-kp-scale", type=float, default=12.4,
@@ -459,6 +463,8 @@ def main():
             joint_sign=1.0,  # skeleton hinge: +θ = 굴곡 = 데이터 규약
             dt=args.llp_dt,
             torque_limit=args.torque_limit,
+            torque_lpf_hz=args.torque_lpf_hz,
+            torque_slew_limit=args.torque_slew_limit,
             measure_timing=True,
         ),
         num_envs=2,
@@ -554,6 +560,8 @@ def main():
         "warmup": args.warmup,
         "assist_scale": args.assist_scale,
         "torque_limit": ctrl.torque_limit,
+        "torque_lpf_hz": args.torque_lpf_hz or None,
+        "torque_slew_limit": args.torque_slew_limit,
         "feedforward": hook.use_ff,
         "human_kp_scale": args.human_kp_scale if args.human == "mocap_pd" else None,
         "human_kd_scale": args.human_kd_scale if args.human == "mocap_pd" else None,

@@ -111,6 +111,15 @@ def compute_metrics(tr, meta):
             _corr(tau_assist_prev[:, B, d], tau_agent[:, A, d]) for d in range(2)
         ])),
         "total_torque_conservation_rms_Nm": _rms(conservation),
+        # 토크가 얼마나 거칠게 변하는가 (구동기·착용감 관점)
+        "assist_slew_rms_Nm_s": float(_rms(np.diff(tau_assist_prev[:, B], axis=0)) / dt),
+        "assist_saturation_pct": float(
+            100.0 * np.mean(np.abs(tau_assist_prev[:, B]) > 0.95 * meta["torque_limit"])
+        ),
+        "assist_sign_flips_per_s": float(
+            np.mean(np.sum(np.diff(np.sign(tau_assist_prev[:, B]), axis=0) != 0, axis=0))
+            / max(dt * (len(idx) - 1), 1e-9)
+        ),
         "survived_s": meta.get("survived_s"),
         "hlp_ms_mean": meta["hlp_ms"]["mean"],
         "llp_ms_mean": meta["llp_ms"]["mean"],
@@ -200,6 +209,9 @@ def write_report(metrics, meta, out_path: Path):
         f"| 착용자 토크 RMS [N·m] | {s['tau_agent_rms_A']:.2f} | {s['tau_agent_rms_B']:.2f} | {s['tau_agent_rms_reduction_pct']:+.1f} % 절감 |",
         f"| 추종 오차 평균 [deg] | {s['tracking_err_deg_A']:.2f} | {s['tracking_err_deg_B']:.2f} | |",
         f"| assist 토크 RMS [N·m] | 0 | {s['assist_rms_Nm']:.2f} | |",
+        f"| assist 토크 변화율 RMS [N·m/s] | 0 | {s['assist_slew_rms_Nm_s']:.0f} | 낮을수록 부드럽다 |",
+        f"| assist 한계 도달 시간 비율 [%] | 0 | {s['assist_saturation_pct']:.1f} | |",
+        f"| assist 부호 전환 [회/s] | 0 | {s['assist_sign_flips_per_s']:.2f} | |",
         f"| assist 파워 [W] | 0 | {s['assist_power_W']:.2f} | |",
         f"| assist ↔ τ_agent(A) 상관 | | {s['assist_vs_agentA_corr']:.2f} | |",
         f"| 총토크 보존 오차 RMS [N·m] | | {s['total_torque_conservation_rms_Nm']:.2f} | |",

@@ -45,6 +45,7 @@ hip_pendulum −1). 내부 LLP 규약으로는 `θ_llp = flexion_sign·joint_sig
 """
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence
@@ -74,6 +75,12 @@ class AssistControllerConfig:
             hip_pendulum −1.
         dt: 호출 주기 [s]. None이면 LLP 학습 dt.
         torque_limit: assist 토크 한계 [N·m]. None이면 LLP 학습값.
+        torque_lpf_hz: 출력 1차 저역통과 차단주파수 [Hz]. 0이면 끔(기본).
+            학습된 정책은 매 10 ms마다 토크를 크게 바꿀 수 있는데, 실제 구동기는
+            그 대역을 못 내고 착용자도 진동으로 느낀다. 여기서 걸면 시뮬과 실기기가
+            같은 필터를 쓴다.
+        torque_slew_limit: 출력 변화율 한계 [N·m/s]. None이면 끔. 구동기의
+            토크 상승률 한계를 그대로 모사한다 (저역통과 뒤에 적용).
         measure_timing: True면 HLP 예측·LLP 추론 시간을 기록 (CUDA sync 포함).
     """
 
@@ -84,6 +91,8 @@ class AssistControllerConfig:
     joint_sign: float = 1.0
     dt: Optional[float] = None
     torque_limit: Optional[float] = None
+    torque_lpf_hz: float = 0.0
+    torque_slew_limit: Optional[float] = None
     measure_timing: bool = False
 
 
@@ -165,6 +174,19 @@ class AssistController:
         # 마지막 act()의 raw action — 다음 observe()에서 히스토리에 push된다
         # (env: step 중 적용된 action을 post-physics에서 push하는 것과 동일)
         self._pending_raw = torch.zeros(n, d, device=self.device)
+        # 출력 필터 상태 (LLP 규약). act()는 멱등이어야 하므로 갱신은 observe()에서.
+        self._tau_prev = torch.zeros(n, d, device=self.device)
+        self._pending_tau = torch.zeros(n, d, device=self.device)
+        lpf_hz = float(config.torque_lpf_hz or 0.0)
+        # 1차 저역통과의 이산 계수: α = dt / (dt + 1/(2πf))
+        self._lpf_alpha = (
+            self.dt / (self.dt + 1.0 / (2.0 * math.pi * lpf_hz)) if lpf_hz > 0.0 else 1.0
+        )
+        self._slew_step = (
+            float(config.torque_slew_limit) * self.dt
+            if config.torque_slew_limit is not None
+            else None
+        )
         self._future_offsets = (
             torch.arange(lay.obs_future_samples, device=self.device, dtype=torch.float32)
             * lay.obs_future_dt
@@ -274,6 +296,8 @@ class AssistController:
         self._qd[ids] = qd.unsqueeze(1).expand(-1, self._qd.shape[1], -1)
         self._a[ids] = 0.0
         self._pending_raw[ids] = 0.0
+        self._tau_prev[ids] = 0.0
+        self._pending_tau[ids] = 0.0
         self._k[ids] = 0
         self.hlp.reset(ids, q, self._trunk(trunk, ids.numel(), self.device))
         if not self.external_chunk:
@@ -291,6 +315,7 @@ class AssistController:
         self._qd[:, 0] = qd
         self._a = self._a.roll(shifts=1, dims=1)
         self._a[:, 0] = self._pending_raw
+        self._tau_prev = self._pending_tau
         self.hlp.observe(q, self._trunk(trunk, self.num_envs, self.device))
         if not self.external_chunk:
             refresh = (self._k % self.layout.chunk_refresh_steps) == 0
@@ -341,12 +366,23 @@ class AssistController:
             torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None
             self.llp_ms.append((time.perf_counter() - t_start) * 1e3)
 
+        tau_llp = self._smooth(tau_llp)
+
         self._pending_raw = raw
+        self._pending_tau = tau_llp
         self.theta_d_future = theta_d_future
         self.chunk_age = t - self._chunk_t0
         self.last_raw_action = raw
         self.last_tau_llp = tau_llp
         return self._to_joint(tau_llp)
+
+    def _smooth(self, tau: Tensor) -> Tensor:
+        """출력 저역통과 + 변화율 제한 (LLP 규약). 둘 다 꺼져 있으면 그대로 반환."""
+        if self._lpf_alpha < 1.0:
+            tau = self._tau_prev + self._lpf_alpha * (tau - self._tau_prev)
+        if self._slew_step is not None:
+            tau = self._tau_prev + (tau - self._tau_prev).clamp(-self._slew_step, self._slew_step)
+        return tau
 
     @torch.no_grad()
     def step(self, hip_pos: Tensor, hip_vel: Tensor, trunk: Optional[Tensor] = None) -> Tensor:
