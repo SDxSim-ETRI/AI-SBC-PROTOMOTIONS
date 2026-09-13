@@ -82,8 +82,12 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="HLP 영점: motion(재생 클립 평균) | none | 'p,q,r,s'(deg, 착용자 스트림 평균으로 잰 값). "
                              "착용자 자세는 mocap과 10° 가까이 다를 수 있다 — run_system.py --calibration wearer가 측정값을 찍어 준다")
     parser.add_argument("--action-rate-weight", type=float, default=-0.005,
-                        help="연속 step 사이 토크 변화 벌점. 크게 잡으면 토크가 부드러워지는 대신 "
-                             "절감이 줄어든다 (v6 −0.005 vs v7 −0.05 비교)")
+                        help="연속 step 사이 토크 변화 벌점. ×10(−0.05)은 과했다 — 정책이 거의 일정한 "
+                             "큰 토크로 수렴해 오히려 착용자를 방해했다(v7). 부드러움은 --assist-lpf-hz 쪽을 쓸 것")
+    parser.add_argument("--assist-lpf-hz", type=float, default=0.0,
+                        help="주입 전 1차 저역통과 [Hz] (0 = 끔). 구동기 대역을 플랜트에 넣는 방식 — "
+                             "정책이 그 한계 안에서 위상을 맞추는 법을 배운다. 실행 시 "
+                             "run_system.py --torque-lpf-hz 같은 값으로")
 
 
 def _tracker_resolved(args: argparse.Namespace):
@@ -260,6 +264,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         termination_components=termination_components,
         action_config=make_torque_action_config(torque_scale=float(args.assist_limit), action_transform="tanh"),
         assist_torque_limit=float(args.assist_limit),
+        assist_torque_lpf_hz=float(args.assist_lpf_hz),
     )
 
 

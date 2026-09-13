@@ -42,6 +42,8 @@ Newton + BUILT_IN_PD 전용. control_components에 `SkeletonAssistControl`
 
 from dataclasses import dataclass
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -57,12 +59,19 @@ class SkeletonAssistEnvConfig(EnvConfig):
     Attributes:
         assist_torque_limit: assist 토크 한계 [N·m] (qfrc 경로는 effort limit
             클램프를 받지 않으므로 여기서 직접 제한).
+        assist_torque_lpf_hz: 주입 전에 거는 1차 저역통과의 차단주파수 [Hz].
+            0이면 끔(기본). **벌점이 아니라 플랜트의 일부**로 다루는 쪽이다 —
+            구동기가 못 내는 대역을 학습 때부터 막아 두면 정책이 그 한계 안에서
+            위상을 맞추는 법을 배운다. 변화율 벌점을 키우는 방식(action_rate)은
+            "아무것도 안 하는" 해로 몰리기 쉽다. 실행 시에는 같은 필터를
+            `AssistControllerConfig.torque_lpf_hz`로 켠다.
         assist_component_name: control_components에서 `SkeletonAssistControl`의 키.
     """
 
     _target_: str = "protomotions.envs.base_env.skeleton_assist_env.SkeletonAssistEnv"
 
     assist_torque_limit: float = 25.0
+    assist_torque_lpf_hz: float = 0.0
     assist_component_name: str = "assist"
 
 
@@ -79,6 +88,12 @@ class SkeletonAssistEnv(BaseEnv):
         # policy action = 보조 관절 수. BaseEnv가 만든 로봇 DOF 크기 버퍼를 교체한다.
         self._current_raw_action = torch.zeros(self.num_envs, n_act, device=self.device)
         self._current_processed_action = torch.zeros(self.num_envs, n_act, device=self.device)
+        # 구동기 대역 모사 (0이면 통과). α = dt / (dt + 1/(2πf))
+        lpf_hz = float(getattr(self.config, "assist_torque_lpf_hz", 0.0) or 0.0)
+        self._assist_lpf_alpha = (
+            self.dt / (self.dt + 1.0 / (2.0 * math.pi * lpf_hz)) if lpf_hz > 0.0 else 1.0
+        )
+        self._tau_assist_prev = torch.zeros(self.num_envs, n_act, device=self.device)
         if self.state_history is not None:
             old = self.state_history
             self.state_history = StateHistoryBuffer(
@@ -103,6 +118,15 @@ class SkeletonAssistEnv(BaseEnv):
         self._current_context = None
         all_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
         self._process_observations(self.context, all_ids)
+
+    def reset(self, env_ids=None, **kwargs):
+        out = super().reset(env_ids, **kwargs)
+        if self._assist_lpf_alpha < 1.0:
+            if env_ids is None:
+                self._tau_assist_prev.zero_()
+            else:
+                self._tau_assist_prev[env_ids] = 0.0
+        return out
 
     @property
     def assist_component(self):
@@ -137,6 +161,12 @@ class SkeletonAssistEnv(BaseEnv):
             -self.config.assist_torque_limit,
             self.config.assist_torque_limit,
         )
+        if self._assist_lpf_alpha < 1.0:
+            # 구동기 대역 모사: τ ← τ_prev + α(τ_cmd − τ_prev) (에피소드 리셋 시 0)
+            tau_assist = self._tau_assist_prev + self._assist_lpf_alpha * (
+                tau_assist - self._tau_assist_prev
+            )
+            self._tau_assist_prev = tau_assist
         self._current_processed_action[:] = tau_assist
 
         comp = self.assist_component
