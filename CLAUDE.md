@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ProtoMotions3: GPU-accelerated simulation + RL framework for physically simulated humanoids and humanoid robots. Simulators: IsaacGym, IsaacLab, Newton, Genesis, MuJoCo. Algorithms: PPO, AMP, ASE, MaskedMimic. Python 3.8+, Apache-2.0.
 
-This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL). Single reference point for structure, terminology, file map, experiment history, roadmap and the code-study checklist: **`docs/AI_SBC_FRAMEWORK.md`**. ManiFlow integration layer: `protomotions/maniflow/` (see its README) — simulation code must go through this package, never `import maniflow` directly.
+This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL). Single reference point for structure, terminology, file map, experiment history, roadmap and the code-study checklist: **`docs/AI_SBC_FRAMEWORK.md`**. 어떤 버전이 무엇이고 지금 무엇을 쓰는지: **`docs/AI_SBC_VERSIONS.md`** (브라우저용 `docs/versions.html`). ManiFlow integration layer: `protomotions/maniflow/` (see its README) — simulation code must go through this package, never `import maniflow` directly.
 
 ## Commands
 
@@ -30,19 +30,24 @@ python protomotions/inference_agent.py --checkpoint <run>/last.ckpt \
 ```
 Never pass `--robot-name` at inference — the robot config is loaded from the checkpoint's `resolved_configs_inference.pt`.
 
-### ETRI skeleton suit (Newton) — 착용자 tracker 재학습 중 (2026-09-12)
+### ETRI skeleton suit (Newton) — 착용자 tracker (2026-09-12 재학습 완료)
 
 suit mimic tracker 가중치는 2026-09-03에 전부 삭제됐었다(`checkpoints/<ver>/INFO.md`,
 `resolved_configs*.yaml`, `tasks/*/` 스크립트만 남음). 2026-09-11에 **새 로봇이 넘어오기
 전까지 이전 인체모델(`skeleton_torque_suit`, 슈트 관절 4개 토크 0 = `_passive_cable`)로
-통합 시스템을 완성**하기로 재조정 → 같은 레시피로 tracker를 다시 학습 중이다:
+통합 시스템을 완성**하기로 재조정 → 같은 레시피로 다시 학습해 `checkpoints/v30`(walk),
+`v31`(15모션)로 보관했다. 재현 스크립트:
 
 ```bash
 bash examples/experiments/assist_skeleton/train_tracker_walk.sh       # walk 단일 → results/mimic_suit_passive_walk/
 bash examples/experiments/assist_skeleton/train_tracker_motions15.sh  # 15모션, walk에서 warm start
 ```
-- 에셋: `protomotions/data/assets/mjcf/skeleton_torque_suit.xml`(학습용 capsule) /
-  `_mesh.xml`(시각화); suit 모션(27 DOF) `data/motion_for_trackers/skeleton_torque_suit_*.pt`.
+- 에셋: `protomotions/data/assets/mjcf/skeleton_torque_suit.xml` — **해부학적 뼈 메시
+  (그리기 전용, contype=0) + 캡슐/박스 충돌**이 한 파일에 들어 있다(2026-09-13 통합).
+  충돌·질량·관성은 그 전과 같아 이전 체크포인트가 모두 유효하다. Newton은 headless일 때
+  시각 geom을 아예 읽지 않는다(`parse_visuals=not headless`) — 안 그러면 env당 90개씩
+  늘어 4096 env 학습이 3.5 → 14 s/epoch로 느려진다. `_mesh.xml`은 옛 시각화 전용 쌍둥이.
+  suit 모션(27 DOF) `data/motion_for_trackers/skeleton_torque_suit_*.pt`.
   plain skeleton XML은 레포에 없음. robot config의 `passive/active_cable`은 슈트
   slide 관절 4개의 토크 0/구동 차이일 뿐 — 보조는 항상 hip qfrc 주입.
 - 체크포인트 보관 규약: 학습 중 `results/<exp>/`(로컬, gitignore) → 보관본은
@@ -59,7 +64,7 @@ python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/l
 LLP v3(실 HLP 150 ms chunk 형식) = `results/assist_pendulum_v3/`, 실험 파일 `mlp_v3.py`,
 A/B/C 평가 `eval_abc.py` (framework doc §6 Phase C).
 
-### AI-SBC 통합 시스템 — HLP + LLP → 스켈레톤 (2026-09-12, framework doc §3.5)
+### AI-SBC 통합 시스템 — HLP + LLP → 스켈레톤 (framework doc §3.5, 버전 표 `docs/AI_SBC_VERSIONS.md`)
 독립 제어기 `protomotions/assist/AssistController`(env 비의존, 실기기 후보) + 서브스텝 훅
 러너. 상세는 `examples/experiments/assist_skeleton/README.md`.
 ```bash
@@ -68,15 +73,19 @@ python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --sec
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30                    # 보행 착용자
 DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --record     # 뷰어/mp4
-# LLP 재학습 (보행 착용자 = 동결 tracker v30, 실 HLP; env 10 ms, 4096 env ≈3 s/epoch)
+python examples/experiments/assist_skeleton/run_system.py ... --torque-lpf-hz 12                    # 출력 저역통과(구동기 대역)
+# 보행 계열 모션만 모은 학습·평가 세트 (walk 0.75 / run 0.25)
+python examples/experiments/assist_skeleton/make_gait_motions.py
+# LLP 학습 (착용자 = 동결 tracker, 실 HLP; env 10 ms, 4096 env ≈3.5 s/epoch)
 python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
-    --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_skel_walk_v1 \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_walk.pt --num-envs 4096 --batch-size 16384 \
-    --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt
+    --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_gait_v6 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 4096 --batch-size 16384 \
+    --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt --assist-limit 40
 ```
 결과 요지: 진자 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
-않는다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 LLP 재학습 중. tracker 체크포인트:
-`checkpoints/v30_newton_suit_passive_walk`(walk), `v31_newton_suit_passive_motions15`(15모션).
+않는다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 재학습해 walk −32 %(v3), 15모션
+−22 %(v4), 착용자 앙상블 −32/−26 %(v5). 보관: `checkpoints/llp_v{3,4,5}_*`, tracker
+`checkpoints/v30_newton_suit_passive_walk`·`v31_newton_suit_passive_motions15`.
 
 ### Tests / lint
 ```bash
@@ -107,6 +116,8 @@ These files carry the design docs; read the relevant one before changing that ar
 - Newton: `TORQUE`/`PROPORTIONAL` wiring is broken (`_update_torques` never called) → use `BUILT_IN_PD` + qfrc injection; marker updates are no-op (draw with viewer `log_lines/log_arrows`).
 - tracker env dt(50 ms)는 관측이 묶여 있어 못 바꾼다 — 다른 주기의 제어기는 `SubstepHookMixin`으로 서브스텝 안에서 돌릴 것. 훅 시뮬레이터는 CUDA graph를 시도하지 않는다(캡처 중 간헐 크래시).
 - Pre-existing F822 errors in `component_factories.py` `__all__` — leave them.
+- suit MJCF의 뼈 메시는 **그리기 전용**(contype=0)이고 headless에서는 로드되지 않는다.
+  대규모 학습이 갑자기 4배 느려지면 `parse_visuals` 경로부터 볼 것.
 - Research-side pitfalls (RNG pairing, fps, zarr versions): framework doc §8.
 
 ## Code Standards

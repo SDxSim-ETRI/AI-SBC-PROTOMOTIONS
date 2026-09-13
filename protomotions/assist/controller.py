@@ -138,10 +138,12 @@ class AssistController:
             device=self.device,
             denoise_steps=int(config.hlp_denoise_steps),
         )
+        self.hlp_obs_offset = None if config.hlp_obs_offset is None else list(config.hlp_obs_offset)
         if config.hlp_obs_offset is not None:
             off = torch.as_tensor(config.hlp_obs_offset, dtype=torch.float32)
             assert off.shape == (4,), f"hlp_obs_offset must have 4 channels, got {tuple(off.shape)}"
             estimator.set_calibration(obs_offset=off, output_bias=off[:2])
+        self._estimator = estimator
         self.hlp = ManiFlowChunkSource(
             estimator,
             num_envs=self.num_envs,
@@ -375,6 +377,17 @@ class AssistController:
         self.last_raw_action = raw
         self.last_tau_llp = tau_llp
         return self._to_joint(tau_llp)
+
+    def set_hlp_calibration(self, offset: Sequence[float]) -> None:
+        """HLP 관측 4ch 영점 오프셋 [rad]을 바꾼다 (실기기 착용 직후 영점조정에 대응).
+
+        `reset()`을 다시 부르기 전까지는 이미 예측된 chunk가 남아 있으므로, 보통
+        측정 구간이 끝난 직후 이 함수를 부르고 곧바로 `reset()` 한다.
+        """
+        off = torch.as_tensor(list(offset), dtype=torch.float32)
+        assert off.shape == (4,), f"hlp_obs_offset must have 4 channels, got {tuple(off.shape)}"
+        self._estimator.set_calibration(obs_offset=off, output_bias=off[:2])
+        self.hlp_obs_offset = off.tolist()
 
     def _smooth(self, tau: Tensor) -> Tensor:
         """출력 저역통과 + 변화율 제한 (LLP 규약). 둘 다 꺼져 있으면 그대로 반환."""

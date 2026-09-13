@@ -2,7 +2,8 @@
 
 > 강체(rigid-link) 고관절 assist 착용로봇의 딥러닝 기반 제어기 연구 (2026).
 > 이 문서는 프레임워크 전체 구조, 코드 지도, 실험 이력, 로드맵의 단일 참조점이다.
-> 최종 갱신: 2026-09-12
+> 최종 갱신: 2026-09-13
+> 버전별 요약(무엇을 언제 쓰나): `AI_SBC_VERSIONS.md` / 브라우저용 `versions.html`
 
 ---
 
@@ -270,6 +271,34 @@ walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착�
 `checkpoints/llp_v{3,4,5}_*`에 보관(INFO.md). 표: README.
 상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
 
+**보행 집중 단계 (2026-09-13)** — 목표를 우선 **보행 계열 동작**으로 좁혔다
+(`make_gait_motions.py`: walk 0.75 + run 0.25; walk_koo는 walk와 바이트 단위로 동일한
+중복이었고 squat·제자리 걸음·한 걸음·런지는 제외). 착용자는 v31 tracker.
+`llp_gait_v6`(기본 변화율 벌점)와 `llp_gait_smooth_v7`(변화율 벌점 ×10)를 병렬 학습.
+
+**토크 거칠기 — "bang-bang"이라는 표현은 과했다.** 실측(v5, v31 walk 20 s): 한계값에
+붙어 있는 시간은 **3 %**뿐이고, 대신 **1초에 6.3번 부호가 바뀌고 변화율 RMS가
+520 N·m/s**다. 즉 포화된 사각파가 아니라 *빠르게 떠는* 토크다. 지표를 analysis에
+넣었다(`assist_slew_rms_Nm_s`, `assist_saturation_pct`, `assist_sign_flips_per_s`).
+사후 저역통과(`--torque-lpf-hz`, `AssistControllerConfig.torque_lpf_hz`)의 대가:
+
+| 필터 | 파워 절감 | 토크 RMS | 변화율 RMS | 부호 전환 | τ_agent 상관 |
+|---|---|---|---|---|---|
+| 없음 | −25.5 % | 20.6 N·m | 520 N·m/s | 6.3 /s | 0.39 |
+| 12 Hz | −23.5 % | 19.5 | 430 | 5.6 | 0.46 |
+| 6 Hz | −19.0 % | 17.9 | 357 | 4.6 | 0.55 |
+| 3 Hz | −11.9 % | 15.3 | 255 | 4.4 | 0.65 |
+
+12 Hz까지는 값이 거의 유지되고 6 Hz 아래에서 무너진다 — 보조가 버는 성분이 걸음
+주파수(0.9 Hz)보다 훨씬 높은 대역에 있다. 구동기 대역이 12 Hz 이상이면 사후 필터로
+충분하고, 그 아래라면 학습 단계에서 변화율 벌점을 키우는 쪽(v7)이 맞다.
+
+**인체 모델 렌더링 (2026-09-13)**: `skeleton_torque_suit.xml`에 해부학적 뼈 메시를
+합쳤다(그리기 전용 contype=0 + 기존 캡슐 충돌 그대로). MuJoCo 기준 body/DOF/질량/관성과
+충돌 geom 33개가 모두 동일하고 폐루프 A/B 수치도 재현되므로 이전 체크포인트가 전부
+유효하다. Newton은 headless일 때 시각 geom을 읽지 않는다(`parse_visuals=not headless`) —
+읽으면 env당 90개가 늘어 4096 env 학습이 3.5 → 14 s/epoch, 11.7 → 18.2 GB로 나빠진다.
+
 ---
 
 ## 4. 파일 지도
@@ -399,7 +428,7 @@ python scripts/compare_hip_imu_reference.py \
 | **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
 | **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
 | **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습**: 통합 env(동결 tracker + 실 HLP)에서 walk v3 **−31 %**, 15모션 v4 **−22 %**(14모션 가중), 착용자 앙상블 v5 **−32/−26 %**(두 착용자), 낙상 0 — `checkpoints/llp_v{3,4,5}_*` ⏭ 부드러움 항(bang-bang 토크 완화), squat류 저파워 동작 보완, 관절각 추종 강화 tracker, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
+| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습**: 통합 env(동결 tracker + 실 HLP)에서 walk v3 **−31 %**, 15모션 v4 **−22 %**(14모션 가중), 착용자 앙상블 v5 **−32/−26 %**(두 착용자), 낙상 0 — `checkpoints/llp_v{3,4,5}_*` ✅ 토크 거칠기 정량화 + 출력 저역통과·변화율 한계(제어기 내장) ✅ 뼈 메시 인체 모델 ⏭ 보행 집중 v6/v7 학습 중, 관절각 추종 강화 tracker, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
 | 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
 | 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
 

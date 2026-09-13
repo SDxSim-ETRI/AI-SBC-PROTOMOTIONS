@@ -86,6 +86,7 @@ MIMIC_EXPERIMENT = REPO / "examples" / "experiments" / "mimic" / "mlp.py"
 HOOK_SIM = "protomotions.simulator.newton.substep_hook.SubstepHookNewtonSimulator"
 HOOK_SIM_FIXED = "protomotions.simulator.newton.substep_hook.SubstepHookFixedBaseNewtonSimulator"
 ENV_A, ENV_B = 0, 1  # A = 보조 없음, B = 보조
+SEED_MEAN_RAD = torch.deg2rad(torch.tensor(SEED_CHANNEL_MEAN_DEG, dtype=torch.float32))
 PELVIS_BODY = 0
 
 
@@ -102,7 +103,8 @@ def parse_args():
     p.add_argument("--hlp-checkpoint", default=None, help="None이면 flexion40 run 자동 탐색")
     p.add_argument("--denoise", type=int, default=3)
     p.add_argument("--calibration", default="motion",
-                   help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | none | 'p,q,r,s' (deg)")
+                   help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | "
+                        "wearer(warmup 동안 착용자 스트림을 재서 영점조정 — 실기기 방식) | none | 'p,q,r,s' (deg)")
     p.add_argument("--physics-fps", type=int, default=400)
     p.add_argument("--env-dt", type=float, default=0.05, help="착용자 env 주기 [s] (tracker 학습 50 ms)")
     p.add_argument("--llp-dt", type=float, default=0.01, help="LLP 주기 [s] (학습 10 ms)")
@@ -293,9 +295,13 @@ def pin_spawn_location(env):
 
 
 def resolve_calibration(args, dof_names):
-    """HLP 관측 4ch 영점 오프셋 [rad] 또는 None."""
+    """HLP 관측 4ch 영점 오프셋 [rad] 또는 None.
+
+    `wearer`는 착용자가 실제로 걷는 동안 측정해야 하므로 여기서는 None을 주고,
+    `SystemHook`이 warmup 구간의 채널 평균으로 잡아 제어기에 건다.
+    """
     spec = args.calibration.strip().lower()
-    if spec == "none":
+    if spec in ("none", "wearer"):
         return None
     if spec in ("motion", "motion_all"):
         return calibration_offset_from_motion(
@@ -341,6 +347,12 @@ class SystemHook:
                 device=dev, dtype=torch.long,
             )
         self.need_reset = True
+        # 착용자 영점조정: 처음 warmup 구간 동안 보조를 끄고 4ch 평균을 재서 오프셋을 잡는다
+        # (실기기에서 착용 직후 중립자세 영점조정에 대응). 그 뒤 제어기를 리셋하고 보조 시작.
+        self.calib_wearer = args.calibration.strip().lower() == "wearer"
+        self.calib_steps = int(round(max(args.warmup, 0.5) / self.llp_dt)) if self.calib_wearer else 0
+        self.calib_sum = torch.zeros(4, device=dev)
+        self.measured_calib_deg = None
         self.prev_tau_ff = torch.zeros(2, self.n_dofs, device=dev)
         self.hip_idx_t = torch.tensor(self.hip_idx, device=dev, dtype=torch.long)
 
@@ -370,12 +382,25 @@ class SystemHook:
         hip_pos, trunk = ch[:, :2], ch[:, 2:]
         hip_vel = dof_vel[:, self.hip_idx]
 
+        if self.calib_wearer and self.i < self.calib_steps:
+            # 착용자 A의 실제 스트림 평균을 모은다 (이 구간 보조는 0)
+            self.calib_sum += ch[ENV_A]
+        elif self.calib_wearer and self.i == self.calib_steps:
+            offset = SEED_MEAN_RAD.to(ch.device) - self.calib_sum / max(self.calib_steps, 1)
+            self.ctrl.set_hlp_calibration(offset.tolist())
+            self.measured_calib_deg = [math.degrees(v) for v in offset.tolist()]
+            print("[system] 착용자 영점조정 오프셋 (deg):",
+                  [round(v, 2) for v in self.measured_calib_deg], flush=True)
+            self.need_reset = True
+
         if self.need_reset:
             self.ctrl.reset(None, hip_pos, hip_vel, trunk)
             self.need_reset = False
         else:
             self.ctrl.observe(hip_pos, hip_vel, trunk)
         tau = self.ctrl.act()  # (2, 2) 관절 규약
+        if self.calib_wearer and self.i < self.calib_steps:
+            tau = torch.zeros_like(tau)
 
         # 착용자 대역 목표 (mocap_pd) / 기록용 레퍼런스 (tracker)
         t_motion = env.motion_manager.motion_times
@@ -551,7 +576,9 @@ def main():
         "llp_epoch": ctrl.llp.epoch,
         "hlp_checkpoint": ctrl.hlp_checkpoint,
         "denoise": args.denoise,
-        "calibration_deg": None if calib is None else [math.degrees(v) for v in calib.tolist()],
+        "calibration_deg": (hook.measured_calib_deg if calib is None
+                            else [math.degrees(v) for v in calib.tolist()]),
+        "calibration_mode": args.calibration,
         "seed_mean_deg": list(SEED_CHANNEL_MEAN_DEG),
         "physics_fps": args.physics_fps,
         "env_dt": args.env_dt,

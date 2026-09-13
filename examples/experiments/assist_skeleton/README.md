@@ -230,3 +230,69 @@ lunge_right −1.2, squat **+5.1 %**(유일한 악화). 1060 epoch 대비 느린
 - **train_agent.py 함정**: 스크립트 디렉터리 `protomotions/`가 sys.path[0]이라 `import maniflow`가
   `protomotions/maniflow`(통합 레이어)로 잡혀 ManiFlow 로딩이 깨졌다 — `loader.py`가 진짜 namespace
   패키지를 `sys.modules`에 명시 등록하도록 고쳤다.
+
+---
+
+## 보행 집중 단계 (2026-09-13)
+
+목표를 **보행 계열 동작**으로 좁혔다. squat·제자리 걸음·한 걸음·런지는 당분간 대상이 아니다.
+
+```bash
+python examples/experiments/assist_skeleton/make_gait_motions.py   # walk 0.75 + run 0.25 → *_gait.pt
+python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
+    --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_gait_v6 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 4096 --batch-size 16384 \
+    --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt --assist-limit 40
+#   v7 = 위와 동일 + --action-rate-weight -0.05 (변화율 벌점 ×10)
+```
+
+- `walk_koo`는 `walk`와 **바이트 단위로 동일**한 중복이었다(15모션 세트의 12번 = 10번). 보행 세트는
+  walk + run 둘뿐이며 비중은 걷기 위주로 0.75 / 0.25.
+- 모션 파일은 파생물이라 커밋하지 않는다(`.gitignore`) — 위 스크립트로 언제든 다시 만든다.
+
+### 토크가 얼마나 거친가 — "bang-bang"은 과한 표현이었다
+
+지표를 `analysis.py`에 넣고 재보니(`assist_slew_rms_Nm_s`, `assist_saturation_pct`,
+`assist_sign_flips_per_s`; v5 정책, v31 착용자 walk 20 s):
+
+| 필터 | 파워 절감 | 토크 RMS | 변화율 RMS | 부호 전환 | 한계 도달 시간 | τ_agent 상관 |
+|---|---|---|---|---|---|---|
+| 없음 | −25.5 % | 20.6 N·m | 520 N·m/s | 6.3 /s | 3 % | 0.39 |
+| 12 Hz | −23.5 % | 19.5 | 430 | 5.6 | 2 % | 0.46 |
+| 6 Hz | −19.0 % | 17.9 | 357 | 4.6 | 0 % | 0.55 |
+| 3 Hz | −11.9 % | 15.3 | 255 | 4.4 | 0 % | 0.65 |
+
+한계값에 붙어 있는 시간은 3 %뿐 — 포화된 사각파가 아니라 **빠르게 떠는 토크**다(1초에 6번 부호 전환,
+걸음 주파수 0.9 Hz의 7배). 12 Hz까지는 절감이 거의 유지되고 6 Hz 아래에서 무너진다 = 보조가 버는
+성분이 걸음 주파수보다 훨씬 높은 대역에 있다.
+
+- 사후 필터: `run_system.py --torque-lpf-hz 12` / `--torque-slew-limit 800`.
+  제어기 안(`AssistControllerConfig.torque_lpf_hz`, `torque_slew_limit`)에 있으므로 실기기에서도 같은 필터가 돈다.
+  `act()`의 멱등성은 유지된다(필터 상태는 `observe()`에서 커밋).
+- 학습 쪽: `llp_walk.py --action-rate-weight`(기본 −0.005). v7이 ×10으로 학습 중 — 사후 필터보다 나은지 비교.
+
+### 착용자 영점조정 (`--calibration wearer`)
+
+HLP는 학습 데이터(SEED)의 중립자세 규약을 기대하므로 채널별 영점 오프셋이 필요하다. 지금까지는
+**재생 클립(mocap) 평균**으로 맞췄는데, tracker가 실제로 걷는 자세는 그 mocap과 다르다 — v31은 hip
+평균 9.5°/7.2°로 걷는 반면 클립 평균은 −1.9°/0.3°. 그래서 보정이 10° 가까이 어긋나 있었다.
+
+`--calibration wearer`는 **처음 `--warmup` 구간 동안 보조를 끄고** 착용자의 4채널 평균을 재서 오프셋을
+잡고, 제어기를 리셋한 뒤 보조를 시작한다 (실기기에서 착용 직후 중립자세 영점조정에 대응).
+
+| 보정 | HLP 100 ms | 150 ms | 파워 절감 |
+|---|---|---|---|
+| motion (클립 평균) | 5.0° | 8.4° | −26.0 % |
+| 착용자 평균 (20 s 측정, 수동 입력) | 4.4° | 7.1° | −26.2 % |
+| `--calibration wearer` (2 s 자동) | 4.2° | **6.9°** | −24.8 % |
+
+예측 오차는 18 % 줄었고 파워 절감은 실행 간 산포 안에서 같다(현 LLP는 클립 평균 보정으로 학습됐다).
+측정 창이 2 s면 몸통 pitch 채널이 아직 흔들린다 — `--warmup 4` 이상을 권한다.
+
+### 인체 모델 = 뼈 스켈레톤
+
+`mjcf/skeleton_torque_suit.xml`이 이제 **해부학적 뼈 메시(그리기 전용, contype=0) + 기존 캡슐 충돌**을
+함께 갖는다. MuJoCo 기준 body 29·DOF 33·질량·관성·충돌 geom 33개가 이전과 동일하고 폐루프 A/B 수치도
+그대로라, 2026-09-13 이전 체크포인트가 전부 유효하다. Newton은 headless일 때 시각 geom을 읽지 않는다
+(`parse_visuals=not headless`) — 읽으면 env당 90개가 늘어 4096 env 학습이 3.5 → 14 s/epoch,
+11.7 → 18.2 GB가 된다. 뷰어/녹화에서는 뼈가 그려지고 충돌 캡슐은 자동으로 숨는다.
