@@ -78,6 +78,9 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--body-err-margin", type=float, default=0.09, help="hinge 시작 몸체 오차 [m]")
     parser.add_argument("--body-err-weight", type=float, default=10.0, help="hinge 벌점 weight (0.05 m 초과 → −0.5/step)")
     parser.add_argument("--assist-effort-weight", type=float, default=-5.0e-5)
+    parser.add_argument("--hlp-calibration", type=str, default="motion",
+                        help="HLP 영점: motion(재생 클립 평균) | none | 'p,q,r,s'(deg, 착용자 스트림 평균으로 잰 값). "
+                             "착용자 자세는 mocap과 10° 가까이 다를 수 있다 — run_system.py --calibration wearer가 측정값을 찍어 준다")
     parser.add_argument("--action-rate-weight", type=float, default=-0.005,
                         help="연속 step 사이 토크 변화 벌점. 크게 잡으면 토크가 부드러워지는 대신 "
                              "절감이 줄어든다 (v6 −0.005 vs v7 −0.05 비교)")
@@ -156,6 +159,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
             tracker_period_steps=5,
             maniflow_ckpt=args.hlp_checkpoint,
             maniflow_denoise_steps=args.hlp_denoise,
+            hlp_calibration=str(args.hlp_calibration),
             motion_file_for_calibration=args.motion_file,
         ),
     }

@@ -173,7 +173,10 @@ class SkeletonAssistControlConfig(MotionAssistTargetControlConfig):
             다른 착용자들 = 사용자 다양성; walk LLP v3가 다른 tracker에서 −31→−2 %로
             떨어진 착용자 특이성 대책).
         tracker_period_steps: tracker 행동 주기 [env step] (50 ms / 10 ms = 5).
-        hlp_calibration: "motion"(재생 mocap 평균 → SEED 평균 오프셋) | "none".
+        hlp_calibration: "motion"(재생 mocap 평균 → SEED 평균 오프셋) | "none" |
+            "p,q,r,s"(직접 지정, deg). 착용자(tracker)가 실제로 걷는 자세는 재생 mocap과
+            10° 가까이 다를 수 있어, 착용자 스트림 평균으로 잰 값을 직접 넣는 쪽이
+            예측 오차가 작다 (`run_system.py --calibration wearer`가 그 값을 측정해 찍어 준다).
         motion_file_for_calibration: 오프셋 계산에 쓸 motion .pt (None이면 env의 motion_lib 파일).
     """
 
@@ -276,6 +279,10 @@ class SkeletonAssistControl(ControlComponent):
         cfg = self.config
         if cfg.hlp_calibration == "none":
             return None
+        if "," in cfg.hlp_calibration:
+            vals = [float(v) for v in cfg.hlp_calibration.split(",")]
+            assert len(vals) == 4, "hlp_calibration 'p,q,r,s'는 4채널(deg)"
+            return torch.deg2rad(torch.tensor(vals, dtype=torch.float32))
         motion_file = cfg.motion_file_for_calibration or getattr(self.env.motion_lib, "motion_file", None)
         if motion_file is None:
             mcfg = getattr(getattr(self.env, "motion_lib", None), "config", None)
