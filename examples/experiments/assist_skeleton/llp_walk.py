@@ -71,6 +71,13 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="ManiFlow flexion ckpt (None = flexion40 run 자동 탐색)")
     parser.add_argument("--hlp-denoise", type=int, default=1,
                         help="HLP denoise 스텝 (실측: 정확도는 스텝 수와 무관, 지연만 스텝당 3 ms)")
+    parser.add_argument("--obs-future-samples", type=int, default=4,
+                        help="LLP가 보는 미래 창 샘플 수. HLP 예측 범위 안에 들어가야 한다 "
+                             "(150 ms 모델: 4×50 ms, 20 ms 모델: 2×10 ms)")
+    parser.add_argument("--obs-future-dt", type=float, default=0.05,
+                        help="미래 창 샘플 간격 [s]")
+    parser.add_argument("--chunk-refresh-steps", type=int, default=2,
+                        help="HLP 재예측 주기 (LLP step 단위; 10 ms step에서 2 = 20 ms)")
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
     parser.add_argument("--human-power-weight", type=float, default=-0.003)
@@ -166,6 +173,9 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
             maniflow_denoise_steps=args.hlp_denoise,
             hlp_calibration=str(args.hlp_calibration),
             motion_file_for_calibration=args.motion_file,
+            obs_future_samples=int(args.obs_future_samples),
+            obs_future_dt=float(args.obs_future_dt),
+            chunk_refresh_steps=int(args.chunk_refresh_steps),
         ),
     }
 
