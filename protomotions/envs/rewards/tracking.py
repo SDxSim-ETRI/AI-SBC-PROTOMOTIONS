@@ -77,6 +77,30 @@ def compute_gt_rew(
     )
 
 
+def compute_dof_pos_rew(
+    current_dof_pos: Tensor,
+    ref_dof_pos: Tensor,
+    coefficient: float = -50.0,
+) -> Tensor:
+    """Joint-angle tracking reward (exponential MSE).
+
+    The body-position rewards (gt/gr) only constrain where the links end up, so
+    a policy can reach the reference pose with a different joint configuration —
+    in practice with left/right hip angles tens of degrees apart even though the
+    reference gait is symmetric. This term asks for the reference joint angles
+    themselves.
+
+    Args:
+        current_dof_pos: Current joint angles [num_envs, num_dofs].
+        ref_dof_pos: Reference joint angles [num_envs, num_dofs].
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        Reward tensor [num_envs].
+    """
+    return mean_squared_error_exp(current_dof_pos, ref_dof_pos, coefficient)
+
+
 def compute_gr_rew(
     current_rigid_body_rot: Tensor,
     ref_rigid_body_rot: Tensor,

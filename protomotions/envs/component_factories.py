@@ -459,6 +459,28 @@ def action_smoothness_factory(weight: float = -0.02) -> MdpComponent:
     )
 
 
+def dof_pos_rew_factory(weight: float = 0.5, coefficient: float = -50.0) -> MdpComponent:
+    """Factory for joint-angle tracking reward.
+
+    Args:
+        weight: Reward weight.
+        coefficient: Exponential coefficient for error.
+
+    Returns:
+        MdpComponent configured for joint-angle tracking.
+    """
+    from protomotions.envs.rewards import compute_dof_pos_rew
+
+    return MdpComponent(
+        compute_func=compute_dof_pos_rew,
+        dynamic_vars={
+            "current_dof_pos": EnvContext.current.dof_pos,
+            "ref_dof_pos": EnvContext.mimic.ref_state.dof_pos,
+        },
+        static_params={"weight": weight, "coefficient": coefficient},
+    )
+
+
 def gt_rew_factory(weight: float = 0.5, coefficient: float = -100.0) -> MdpComponent:
     """Factory for position tracking reward.
 
