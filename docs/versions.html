@@ -207,7 +207,7 @@
       <tr class="now"><td class="mono">v5</td><td>walk</td><td>{v30, v31} 섞음</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−31.7 % / −25.6 %</span> 두 착용자 모두</td></tr>
       <tr class="now"><td class="mono">v6</td><td><b>보행 계열만</b> walk·run</td><td>v31</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−27.0 %</span> 걷기 / <span class="good">−31.7 %</span> 달리기</td></tr>
       <tr><td class="mono">v7</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + 변화율 벌점 ×10</td><td><span class="bad">+21.3 % 악화</span> — 거의 일정한 36 N·m로 수렴</td></tr>
-      <tr><td class="mono">v8</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + <b>플랜트에 6 Hz 구동기 필터</b></td><td class="flat">학습 중</td></tr>
+      <tr><td class="mono">v8</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + <b>플랜트에 6 Hz 구동기 필터</b></td><td>−22.3 % — v6 출력에 같은 필터를 건 것(−22.5 %)과 <b>차이 없음</b> · 보관 안 함</td></tr>
     </tbody>
   </table></div>
   <ul>
@@ -215,10 +215,11 @@
       추종만 개선하고 파워는 전혀 못 줄인다. “무보조일 때의 오차(9 cm)를 넘어선 만큼만 벌점”으로 바꾸자 비로소 파워가 줄었다.</li>
     <li><b>착용자 특이성.</b> 한 사람으로 학습한 정책은 걸음이 다른 사람에게 거의 듣지 않는다(−32 % → −2.4 %).
       학습 중 env마다 착용자를 섞으면 둘 다 된다.</li>
-    <li><b>부드러움은 벌점이 아니라 플랜트로.</b> 변화율 벌점을 10배로 키우면(v7) 토크는 부드러워지지만
+    <li><b>부드러움은 벌점으로 요구할 수 없다.</b> 변화율 벌점을 10배로 키우면(v7) 토크는 부드러워지지만
       (부호 전환 6.3 → 0.9회/s) 거의 일정한 36 N·m를 미는 해로 수렴해 걷기 파워를 21 % 더 쓰게 만들었다 —
-      변화율에 벌점을 주면 “아무것도 안 하기”가 최적이 된다. 구동기의 대역 한계를 학습 env의 주입 경로에
-      넣으면(<code>assist_torque_lpf_hz</code>) 정책이 그 한계 안에서 위상을 맞추는 법을 배운다(v8).</li>
+      변화율에 벌점을 주면 “아무것도 안 하기”가 최적이 된다.</li>
+    <li><b>구동기 대역을 학습에 넣는 것도 이득이 없었다.</b> 6 Hz 필터를 학습 env의 주입 경로에 넣은 v8(−22.3 %)과
+      v6의 출력에 같은 필터를 건 것(−22.5 %)이 같았다 → 정책은 하나만 두고 필터는 <b>실행 시</b> 구동기에 맞추면 된다.</li>
     <li><b>도달 가능 상한.</b> 착용자가 실제로 내는 토크를 그대로 되먹이는 오라클이 40 N·m에서 −26 %다.
       학습된 정책은 그보다 낫다 — 한계 토크가 절감의 상한을 정한다(25 N·m −20 %, 40 N·m −32 %).</li>
   </ul>
@@ -277,24 +278,28 @@
 </section>
 
 <section id="smooth">
-  <div class="sec-head"><span class="num">07</span><h2>토크가 얼마나 거친가</h2></div>
-  <p>학습된 보조 토크는 <b>1초에 6번꼴로 방향이 바뀌고</b>(걸음 주파수의 3배), 변화율이 초당 520 N·m에 이른다.
-  한계값에 붙어 있는 시간은 3 %뿐이라 “최대·최소만 오가는 스위치”는 아니고, <b>빠르게 떠는 토크</b>다.
-  구동기 대역과 착용감 때문에 이걸 완화해야 하는데, 출력에 1차 저역통과를 걸면 값을 얼마나 잃는지는 이렇게 나온다
-  (v5 정책, v31 착용자 walk 20 s).</p>
+  <div class="sec-head"><span class="num">07</span><h2>토크가 얼마나 거친가, 필터는 어떻게 정하나</h2></div>
+  <p>학습된 보조 토크는 <b>1초에 6번꼴로 방향이 바뀌고</b> 변화율이 초당 500~660 N·m다. 한계값에 붙어 있는
+  시간은 3~14 %뿐이라 “최대·최소만 오가는 스위치”가 아니라 <b>빠르게 떠는 토크</b>다.</p>
+  <p class="note"><strong>필터는 성능 선택지가 아니라 하드웨어 제약이다.</strong> 차단주파수 f의 1차 저역통과는
+  시상수 1/(2πf)로 토크 명령을 뭉갠다(6 Hz = 26.5 ms, 12 Hz = 13.3 ms). 구동기가 그만큼밖에 못 내면
+  <b>필터를 걸지 않아도 실제 장치에서는 어차피 걸린다</b> — 다만 예측 불가능한 형태로. 그러니 시뮬에서는
+  구동기 스펙에 맞는 값을 넣고 그 조건에서 성능을 읽는 것이 맞고, 스펙이 빠르면(≥12 Hz) 안 거는 쪽이 맞다.
+  아래 6 Hz는 스펙이 아니라 대가가 보이는 지점으로 고른 시험값이다.</p>
   <div class="scroll"><table>
-    <thead><tr><th>필터</th><th class="num">파워 절감</th><th class="num">토크 RMS</th><th class="num">변화율 RMS</th><th class="num">부호 전환</th><th class="num">사람 토크와 상관</th></tr></thead>
+    <thead><tr><th>정책 · 필터</th><th class="num">걷기 절감</th><th class="num">토크 RMS</th><th class="num">변화율 RMS</th><th class="num">부호 전환</th></tr></thead>
     <tbody>
-      <tr class="now"><td>없음</td><td class="num good">−25.5 %</td><td class="num">20.6 N·m</td><td class="num">520 N·m/s</td><td class="num">6.3 /s</td><td class="num">0.39</td></tr>
-      <tr><td>12 Hz</td><td class="num good">−23.5 %</td><td class="num">19.5</td><td class="num">430</td><td class="num">5.6</td><td class="num">0.46</td></tr>
-      <tr><td>6 Hz</td><td class="num">−19.0 %</td><td class="num">17.9</td><td class="num">357</td><td class="num">4.6</td><td class="num">0.55</td></tr>
-      <tr><td>3 Hz</td><td class="num">−11.9 %</td><td class="num">15.3</td><td class="num">255</td><td class="num">4.4</td><td class="num">0.65</td></tr>
+      <tr class="now"><td>v6 · 없음</td><td class="num good">−27.0 %</td><td class="num">23.6 N·m</td><td class="num">662 N·m/s</td><td class="num">5.8 /s</td></tr>
+      <tr><td>v6 · 12 Hz(사후)</td><td class="num good">≈−24 %</td><td class="num">—</td><td class="num">≈430</td><td class="num">5.6 /s</td></tr>
+      <tr><td>v6 · 6 Hz(사후)</td><td class="num">−22.5 %</td><td class="num">—</td><td class="num">428</td><td class="num">5.7 /s</td></tr>
+      <tr><td>v8 · 6 Hz(학습+평가)</td><td class="num">−22.3 %</td><td class="num">23.4</td><td class="num">472</td><td class="num">5.1 /s</td></tr>
+      <tr><td>v5 · 3 Hz(사후)</td><td class="num bad">−11.9 %</td><td class="num">15.3</td><td class="num">255</td><td class="num">4.4 /s</td></tr>
     </tbody>
   </table></div>
-  <p class="note">12 Hz까지는 값이 거의 그대로다(−25.5 → −23.5 %). 6 Hz 아래로 내려가면 절감이 빠르게 무너진다 —
-  보조가 효과를 내는 성분이 걸음 주파수(0.9 Hz)보다 훨씬 빠른 대역에 있다는 뜻이다.
-  필터는 <code>run_system.py --torque-lpf-hz</code> / <code>AssistControllerConfig(torque_lpf_hz=…)</code>로 켠다.
-  학습 때부터 변화율에 큰 벌점을 주는 쪽(v7)이 사후 필터보다 나은지는 비교 중.</p>
+  <p class="note">12 Hz까지는 거의 공짜, 6 Hz에서 4~5 포인트, 3 Hz에서 붕괴 — 보조가 버는 성분이 걸음
+  주파수(0.9 Hz)보다 훨씬 높은 대역에 있다는 뜻이다. 켜는 법:
+  <code>run_system.py --torque-lpf-hz</code> / <code>AssistControllerConfig(torque_lpf_hz=…)</code> —
+  제어기 안에 있으므로 실기기에서도 같은 필터가 돈다.</p>
 </section>
 
 <section id="asset">
@@ -327,7 +332,7 @@
       <tr><td class="num">09-11</td><td>새 로봇 대기 → 이전 인체모델로 통합 시스템 완성하기로 재조정</td></tr>
       <tr><td class="num">09-12</td><td>독립 제어기 등가성 PASS · tracker v30·v31 재학습 · LLP 재학습 시작</td></tr>
       <tr><td class="num">09-13</td><td>LLP v3·v4·v5 보관 · 뼈 메시 에셋 통합 · 보행 전용 v6 학습 시작</td></tr>
-      <tr><td class="num">09-14</td><td>v6 보관(걷기 −27 %, 달리기 −32 %) · 변화율 벌점 v7 실패 → 구동기 필터를 플랜트에 넣은 v8</td></tr>
+      <tr><td class="num">09-14</td><td>v6 보관(걷기 −27 %, 달리기 −32 %) · v7(변화율 벌점)·v8(구동기 필터 학습) 모두 이득 없음 확인 · 예측 범위 50 ms면 충분·지연 15 ms까지 무해 측정 · 착용자 비대칭(22°) 원인 규명 후 관절각 추종 항으로 재학습(→3.0°)</td></tr>
     </tbody>
   </table></div>
 </section>
