@@ -62,8 +62,10 @@ logger = logging.getLogger(__name__)
 
 # 링 버퍼 길이 [s] — 모델 관측 창(250 ms)보다 넉넉하게
 RING_SECONDS = 0.32
-# 권장 denoise 스텝 (suit14 MAE 0.95°, batch-1 5.95 ms)
-DEFAULT_DENOISE_STEPS = 3
+# denoise 스텝 (2026-09-14 실측으로 3 → 1). suit14 교차평가에서 정확도는 스텝 수와
+# 무관했고(lead 25 ms MAE 0.47/0.45/0.45/0.47° @ 1/2/3/6스텝) 지연만 스텝당 ~3 ms씩
+# 늘었다 (batch-1 median 4.94 / 8.13 / 11.04 ms).
+DEFAULT_DENOISE_STEPS = 1
 
 
 class ManiFlowChunkSource:

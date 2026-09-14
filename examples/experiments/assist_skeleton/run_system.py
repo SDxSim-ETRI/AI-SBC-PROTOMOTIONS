@@ -101,7 +101,8 @@ def parse_args():
     p.add_argument("--start-time", type=float, default=0.0, help="클립 시작 시각 [s]")
     p.add_argument("--llp-checkpoint", default="results/assist_pendulum_v3/last.ckpt")
     p.add_argument("--hlp-checkpoint", default=None, help="None이면 flexion40 run 자동 탐색")
-    p.add_argument("--denoise", type=int, default=3)
+    p.add_argument("--denoise", type=int, default=1,
+                   help="HLP denoise 스텝 (실측: 1이나 6이나 정확도 동일, 지연만 스텝당 3 ms 증가)")
     p.add_argument("--calibration", default="motion",
                    help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | "
                         "wearer(warmup 동안 착용자 스트림을 재서 영점조정 — 실기기 방식) | none | 'p,q,r,s' (deg)")

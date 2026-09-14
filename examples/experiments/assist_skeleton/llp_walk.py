@@ -69,7 +69,8 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="착용자 대역 mimic tracker last.ckpt (쉼표로 여러 개 = 착용자 앙상블, env별 무작위 배정)")
     parser.add_argument("--hlp-checkpoint", type=str, default=None,
                         help="ManiFlow flexion ckpt (None = flexion40 run 자동 탐색)")
-    parser.add_argument("--hlp-denoise", type=int, default=3)
+    parser.add_argument("--hlp-denoise", type=int, default=1,
+                        help="HLP denoise 스텝 (실측: 정확도는 스텝 수와 무관, 지연만 스텝당 3 ms)")
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
     parser.add_argument("--human-power-weight", type=float, default=-0.003)
