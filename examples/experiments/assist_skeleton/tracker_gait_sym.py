@@ -99,9 +99,11 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> EnvConfig:
             gav_coef=-0.1,
             rh_coef=-100.0,
         ),
-        # 관절각 자체를 맞추라는 항. coefficient −50은 지금 오차 규모(관절 MSE ≈0.02 rad²)에서
-        # exp≈0.37로 떨어져 구분이 되는 값. weight는 몸체 위치(gt 0.5)와 같은 급.
-        "dof_pos_rew": dof_pos_rew_factory(weight=0.5, coefficient=-50.0),
+        # 관절각 자체를 맞추라는 항. 출발점의 관절 오차는 MSE 0.063 rad²(RMS 14.3°)로 재어졌고,
+        # coefficient −15면 보상이 0.39에서 시작해 오차가 절반이 되면 0.79로 오른다 — 기울기가
+        # 살아 있는 구간. (−50은 0.04에서 시작해 지수 꼬리에 눌려 거의 신호가 없었다.)
+        # weight는 몸체 위치(gt 0.5)와 같은 급.
+        "dof_pos_rew": dof_pos_rew_factory(weight=0.5, coefficient=-15.0),
         "pow_rew": pow_rew_factory(weight=-1e-5, min_value=-0.5),
         "contact_match_rew": contact_match_rew_factory(
             weight=-0.1, zero_during_grace_period=True
