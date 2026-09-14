@@ -26,17 +26,19 @@
 | 역할 | 버전 | 경로 |
 |------|------|------|
 | HLP | flexion40 run01 | `ManiFlow_Policy` 레포의 flexion40 run (자동 탐색, 지정 불필요) |
-| LLP — 걷기 전용 | **llp_v5** (착용자 앙상블) | `checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt` |
+| LLP — 보행(걷기·달리기) | **llp_v6** | `checkpoints/llp_v6_gait_40Nm/last.ckpt` |
+| LLP — 착용자 두 명 모두 | llp_v5 (착용자 앙상블, walk만) | `checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt` |
 | LLP — 여러 동작 | llp_v4 | `checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt` |
 | 가상 착용자 — 걷기 | v30 | `checkpoints/v30_newton_suit_passive_walk/last.ckpt` |
 | 가상 착용자 — 15모션 | v31 | `checkpoints/v31_newton_suit_passive_motions15/last.ckpt` |
 | 인체 모델 | `skeleton_torque_suit` | `protomotions/data/assets/mjcf/skeleton_torque_suit.xml` (뼈 메시 + 캡슐 충돌) |
 
 ```bash
-# 폐루프 A/B 평가 한 방
+# 폐루프 A/B 평가 한 방 (walk = motion-id 0, run = 1)
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt --seconds 30
+    --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt \
+    --llp-checkpoint checkpoints/llp_v6_gait_40Nm/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40
 ```
 
 ---
@@ -119,8 +121,9 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 | **v3** | walk | v30 | 40 N·m | 〃 | **−32 %**(자기 착용자) / −2.4 %(다른 착용자) | 📦 보관 |
 | **v4** | 15모션 | v31 | 40 N·m | 〃 | **−21.8 %**(14모션 가중), squat만 +5 % 악화 | 📦 보관 |
 | **v5** | walk | **{v30,v31} 무작위** | 40 N·m | 〃 | **−31.7 % / −25.6 %**(두 착용자 모두) | 📦 보관·권장 |
-| v6 | **보행 계열만**(walk 0.75 + run 0.25) | v31 | 40 N·m | 〃 | 학습 중 (2026-09-13) | 🔁 |
-| v7 | 〃 | v31 | 40 N·m | 〃 + 변화율 벌점 10배 | 예정 — 토크 부드러움 대가 측정 | ⏭ |
+| **v6** | **보행 계열만**(walk 0.75 + run 0.25) | v31 | 40 N·m | 〃 | walk **−27.0 %**, run **−31.7 %** (40 s, 낙상 0) | 📦 보관·권장 |
+| v7 | 〃 | v31 | 40 N·m | 〃 + 변화율 벌점 ×10 | **walk +21.3 % 악화** — 거의 일정한 36 N·m로 수렴 | ✗ 폐기 |
+| v8 | 〃 | v31 | 40 N·m | 〃 + **플랜트에 6 Hz 구동기 필터** | 학습 중 (2026-09-14) | 🔁 |
 
 **v1의 교훈**: 착용자가 mocap을 잘 따라가는 것을 *보상*하면, 정책은 최대 토크로 착용자를
 끌어당겨 추종만 개선하고 파워는 전혀 못 줄인다(−0.8 %). "무보조일 때의 오차(9 cm)를
@@ -130,6 +133,12 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 않는다(−32 % → −2.4 %). 학습 중 env마다 착용자를 섞으면(v5) 둘 다 된다. 실제 사람에
 쓰려면 걸음 다양성이 학습 분포 안에 있어야 한다는 뜻. (2026-09-13: 사용자 결정으로
 이 항목은 뒤로 미룸.)
+
+**부드러움은 벌점이 아니라 플랜트로**: 변화율 벌점을 10배로 키운 v7은 토크가 확실히
+부드러워졌지만(부호 전환 6.3 → 0.9회/s) **거의 일정한 36 N·m를 미는 해**로 수렴해 걷기에서는
+파워를 21 % 더 쓰게 만들었다. 변화율에 벌점을 주면 "아무것도 안 하기"가 최적이 된다.
+대신 구동기의 대역 한계를 학습 env의 주입 경로에 넣으면(`assist_torque_lpf_hz`) 정책이
+그 한계 안에서 위상을 맞추는 법을 배운다 — v8이 그 판.
 
 **도달 가능 상한**: "착용자가 실제로 내는 토크를 그대로 되먹임"하는 오라클을 넣으면
 40 N·m 한계에서 −26 %가 나온다. 학습된 v3/v5는 그보다 낫다 — 한계 토크가 절감의
@@ -145,6 +154,7 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 | 스켈레톤 v3 | **−31.7 %** | −2.4 % | — | 0 |
 | 스켈레톤 v4 | −11.3 % | −19.5 % | **−21.8 %** | 0 |
 | 스켈레톤 v5 | **−31.7 %** | **−25.6 %** | — | 0 |
+| **스켈레톤 v6** (보행 전용) | — | **−27.0 %** (달리기 −31.7 %) | — | 0 |
 | 오라클(상한 진단) | −26 % | — | — | 0 |
 
 측정: 같은 난수·같은 mocap으로 보조 없음(A)과 보조(B)를 나란히 돌려 착용자 고관절의
@@ -179,3 +189,4 @@ robot config 이름의 `passive_cable`/`active_cable`은 **슈트 slide 관절 4
 | 2026-09-11 | 새 로봇 대기 → 이전 인체모델(스켈레톤)로 통합 시스템 완성하기로 재조정 |
 | 2026-09-12 | 독립 제어기 `AssistController` 등가성 PASS, tracker v30·v31 재학습, LLP 재학습 시작 |
 | 2026-09-13 | LLP v3/v4/v5 보관, 뼈 메시 에셋 통합, 보행 전용 v6 학습 시작 |
+| 2026-09-14 | v6 보관(walk −27 %, run −32 %), 변화율 벌점 v7 실패 확인 → 구동기 필터를 플랜트에 넣은 v8 |

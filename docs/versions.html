@@ -89,7 +89,7 @@
 
 <div class="wrap">
 <header class="masthead">
-  <span class="eyebrow">AI-SBC · 고관절 보조 · 2026-09-13</span>
+  <span class="eyebrow">AI-SBC · 고관절 보조 · 2026-09-14</span>
   <h1>세 모델, 열두 버전.<br>지금 무엇을 쓰면 되나</h1>
   <p class="lede">보조 토크 시스템은 따로 학습한 세 모델이 맞물려 돈다 — 앞을 내다보는 <b>HLP</b>, 토크를 내는 <b>LLP</b>,
   시뮬레이션에서 사람 역할을 하는 <b>착용자 tracker</b>. 버전 번호가 셋 다 따로 붙어 헷갈리므로 여기에 모아 둔다.
@@ -113,15 +113,17 @@
   <div class="now-panel">
     <div class="now-grid">
       <div><dt>HLP (각도 예측)</dt><dd>flexion40 run01</dd><span class="path">자동 탐색 — 따로 지정 안 해도 됨</span></div>
-      <div><dt>LLP — 걷기</dt><dd>llp_v5 · 착용자 앙상블</dd><span class="path">checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt</span></div>
+      <div><dt>LLP — 보행(걷기·달리기)</dt><dd>llp_v6</dd><span class="path">checkpoints/llp_v6_gait_40Nm/last.ckpt</span></div>
+      <div><dt>LLP — 착용자 두 명 모두</dt><dd>llp_v5 · 앙상블(walk)</dd><span class="path">checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt</span></div>
       <div><dt>LLP — 여러 동작</dt><dd>llp_v4 · 15모션</dd><span class="path">checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt</span></div>
       <div><dt>가상 착용자 — 걷기</dt><dd>v30</dd><span class="path">checkpoints/v30_newton_suit_passive_walk/last.ckpt</span></div>
       <div><dt>가상 착용자 — 15모션</dt><dd>v31</dd><span class="path">checkpoints/v31_newton_suit_passive_motions15/last.ckpt</span></div>
       <div><dt>인체 모델</dt><dd>skeleton_torque_suit</dd><span class="path">뼈 메시 + 캡슐 충돌, 27 DOF</span></div>
     </div>
     <pre><code>python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt --seconds 30</code></pre>
+    --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt \
+    --llp-checkpoint checkpoints/llp_v6_gait_40Nm/last.ckpt \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40</code></pre>
   </div>
   <p class="note"><strong>보관 규칙.</strong> 학습 중에는 <code>results/&lt;실험이름&gt;/</code>(git 추적 안 함),
   보관본은 <code>checkpoints/&lt;버전&gt;/</code> + <code>INFO.md</code>(가중치는 LFS). 학습을 멈출 때는
@@ -203,8 +205,9 @@
       <tr class="now"><td class="mono">v3</td><td>walk</td><td>v30</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−32 %</span> 자기 착용자 / <span class="bad">−2.4 %</span> 다른 착용자</td></tr>
       <tr class="now"><td class="mono">v4</td><td>15모션</td><td>v31</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−21.8 %</span> 14모션 가중 (squat만 +5 % 악화)</td></tr>
       <tr class="now"><td class="mono">v5</td><td>walk</td><td>{v30, v31} 섞음</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−31.7 % / −25.6 %</span> 두 착용자 모두</td></tr>
-      <tr><td class="mono">v6</td><td><b>보행 계열만</b> walk·run</td><td>v31</td><td class="num">40 N·m</td><td>〃</td><td class="flat">학습 중</td></tr>
-      <tr><td class="mono">v7</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + 변화율 벌점 10배</td><td class="flat">예정 — 부드러움의 대가 측정</td></tr>
+      <tr class="now"><td class="mono">v6</td><td><b>보행 계열만</b> walk·run</td><td>v31</td><td class="num">40 N·m</td><td>〃</td><td><span class="good">−27.0 %</span> 걷기 / <span class="good">−31.7 %</span> 달리기</td></tr>
+      <tr><td class="mono">v7</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + 변화율 벌점 ×10</td><td><span class="bad">+21.3 % 악화</span> — 거의 일정한 36 N·m로 수렴</td></tr>
+      <tr><td class="mono">v8</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + <b>플랜트에 6 Hz 구동기 필터</b></td><td class="flat">학습 중</td></tr>
     </tbody>
   </table></div>
   <ul>
@@ -212,6 +215,10 @@
       추종만 개선하고 파워는 전혀 못 줄인다. “무보조일 때의 오차(9 cm)를 넘어선 만큼만 벌점”으로 바꾸자 비로소 파워가 줄었다.</li>
     <li><b>착용자 특이성.</b> 한 사람으로 학습한 정책은 걸음이 다른 사람에게 거의 듣지 않는다(−32 % → −2.4 %).
       학습 중 env마다 착용자를 섞으면 둘 다 된다.</li>
+    <li><b>부드러움은 벌점이 아니라 플랜트로.</b> 변화율 벌점을 10배로 키우면(v7) 토크는 부드러워지지만
+      (부호 전환 6.3 → 0.9회/s) 거의 일정한 36 N·m를 미는 해로 수렴해 걷기 파워를 21 % 더 쓰게 만들었다 —
+      변화율에 벌점을 주면 “아무것도 안 하기”가 최적이 된다. 구동기의 대역 한계를 학습 env의 주입 경로에
+      넣으면(<code>assist_torque_lpf_hz</code>) 정책이 그 한계 안에서 위상을 맞추는 법을 배운다(v8).</li>
     <li><b>도달 가능 상한.</b> 착용자가 실제로 내는 토크를 그대로 되먹이는 오라클이 40 N·m에서 −26 %다.
       학습된 정책은 그보다 낫다 — 한계 토크가 절감의 상한을 정한다(25 N·m −20 %, 40 N·m −32 %).</li>
   </ul>
@@ -220,19 +227,19 @@
 <section id="perf">
   <div class="sec-head"><span class="num">06</span><h2>성능 한눈에</h2></div>
   <p class="cap">착용자 고관절 파워 절감 [%] · 같은 난수·같은 mocap으로 보조 없음(A)과 보조(B)를 나란히 돌려 |τ·ω| 평균 비교</p>
-  <svg class="chart" viewBox="0 0 720 268" role="img" aria-label="LLP 버전별 착용자 파워 절감 막대그래프">
+  <svg class="chart" viewBox="0 0 720 300" role="img" aria-label="LLP 버전별 착용자 파워 절감 막대그래프">
     <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
-      <line x1="210" y1="26" x2="210" y2="224" stroke="var(--rule-strong)"/>
-      <line x1="210" y1="224" x2="690" y2="224" stroke="var(--rule-strong)"/>
+      <line x1="210" y1="26" x2="210" y2="248" stroke="var(--rule-strong)"/>
+      <line x1="210" y1="248" x2="690" y2="248" stroke="var(--rule-strong)"/>
       <g fill="var(--ink-soft)" font-size="10.5">
-        <text x="210" y="242" text-anchor="middle">0</text>
-        <text x="330" y="242" text-anchor="middle">10</text>
-        <text x="450" y="242" text-anchor="middle">20</text>
-        <text x="570" y="242" text-anchor="middle">30</text>
-        <text x="690" y="242" text-anchor="middle">40</text>
-        <text x="450" y="260" text-anchor="middle">파워 절감 [%] — 클수록 좋다</text>
+        <text x="210" y="266" text-anchor="middle">0</text>
+        <text x="330" y="266" text-anchor="middle">10</text>
+        <text x="450" y="266" text-anchor="middle">20</text>
+        <text x="570" y="266" text-anchor="middle">30</text>
+        <text x="690" y="266" text-anchor="middle">40</text>
+        <text x="450" y="286" text-anchor="middle">파워 절감 [%] — 클수록 좋다</text>
       </g>
-      <g stroke="var(--rule)"><line x1="330" y1="26" x2="330" y2="224"/><line x1="450" y1="26" x2="450" y2="224"/><line x1="570" y1="26" x2="570" y2="224"/><line x1="690" y1="26" x2="690" y2="224"/></g>
+      <g stroke="var(--rule)"><line x1="330" y1="26" x2="330" y2="248"/><line x1="450" y1="26" x2="450" y2="248"/><line x1="570" y1="26" x2="570" y2="248"/><line x1="690" y1="26" x2="690" y2="248"/></g>
 
       <text x="150" y="40" text-anchor="end" fill="var(--ink-soft)">진자 v3 이식</text>
       <rect x="162" y="30" width="48" height="14" fill="var(--bad)" opacity="0.8"/>
@@ -258,7 +265,11 @@
       <rect x="210" y="190" width="307" height="14" fill="var(--bar)"/>
       <text x="527" y="201" fill="var(--ink)" font-size="11">25.6</text>
 
-      <line x1="522" y1="26" x2="522" y2="224" stroke="var(--accent)" stroke-dasharray="4 4"/>
+      <text x="150" y="232" text-anchor="end" fill="var(--ink)" font-weight="600">v6 · 보행 전용</text>
+      <rect x="210" y="222" width="324" height="14" fill="var(--bar)"/>
+      <text x="544" y="233" fill="var(--ink)" font-size="11">27.0 (달리기 31.7)</text>
+
+      <line x1="522" y1="26" x2="522" y2="216" stroke="var(--accent)" stroke-dasharray="4 4"/>
       <text x="528" y="24" fill="var(--accent)" font-size="10.5">오라클 상한 26 % (40 N·m)</text>
     </g>
   </svg>
@@ -316,6 +327,7 @@
       <tr><td class="num">09-11</td><td>새 로봇 대기 → 이전 인체모델로 통합 시스템 완성하기로 재조정</td></tr>
       <tr><td class="num">09-12</td><td>독립 제어기 등가성 PASS · tracker v30·v31 재학습 · LLP 재학습 시작</td></tr>
       <tr><td class="num">09-13</td><td>LLP v3·v4·v5 보관 · 뼈 메시 에셋 통합 · 보행 전용 v6 학습 시작</td></tr>
+      <tr><td class="num">09-14</td><td>v6 보관(걷기 −27 %, 달리기 −32 %) · 변화율 벌점 v7 실패 → 구동기 필터를 플랜트에 넣은 v8</td></tr>
     </tbody>
   </table></div>
 </section>
