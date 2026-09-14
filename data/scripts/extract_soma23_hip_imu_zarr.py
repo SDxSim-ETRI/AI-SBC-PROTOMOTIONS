@@ -531,6 +531,10 @@ def main():
     root.attrs["convention"] = args.convention
     root.attrs["embodiment"] = args.embodiment
     root.attrs["features"] = args.features
+    # 프레임 간격 — 온라인 래퍼가 chunk 격자를 여기서 읽는다 (없으면 40 fps로 가정)
+    root.attrs["fps"] = float(args.resample_fps) if args.resample_fps else None
+    if args.resample_fps:
+        root.attrs["frame_dt"] = 1.0 / float(args.resample_fps)
     if args.features == "flexion_trunk":
         root.attrs["obs_spec"] = json.dumps({
             "channels": ["hip_flexion_r", "hip_flexion_l",

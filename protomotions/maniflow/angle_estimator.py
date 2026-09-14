@@ -60,6 +60,8 @@ suit14 zarr를 스트리밍으로 흘려 오프라인 기준 스크립트
 
 from typing import Optional, Sequence, Union
 
+import logging
+
 import torch
 
 # flexion40 모델의 채널 계약 — zarr attrs(obs_spec/action_dof_names)와 대조용.
@@ -71,10 +73,33 @@ FLEXION_OBS_CHANNELS = (
 )
 FLEXION_ACTION_CHANNELS = ("hip_flexion_r", "hip_flexion_l")
 
-# 모델 native 프레임 간격 [s] (40 fps)
+logger = logging.getLogger(__name__)
+
+# 모델 native 프레임 간격 [s] — 40 fps 모델의 기본값.
+# 100 fps 등 다른 간격으로 재학습한 모델은 학습 zarr의 `frame_dt` attr에서 읽는다
+# (`_frame_dt_from_cfg`), 없으면 이 값으로 둔다.
 FLEXION_FRAME_DT = 0.025
 
 _TensorLike = Union[torch.Tensor, Sequence[float]]
+
+
+def _frame_dt_from_cfg(cfg) -> Optional[float]:
+    """학습에 쓴 zarr의 `frame_dt` attr을 읽어 모델 프레임 간격을 알아낸다.
+
+    zarr가 그 자리에 없거나(배포 환경) attr이 없으면 None — 호출부가 기본값을 쓴다.
+    """
+    try:
+        path = cfg.walking_task.dataset.zarr_path
+        import zarr
+
+        attrs = dict(zarr.open_group(str(path), mode="r").attrs)
+        dt = attrs.get("frame_dt")
+        if dt:
+            logger.info("HLP 프레임 간격을 학습 데이터에서 읽음: %.4f s (%s)", float(dt), path)
+            return float(dt)
+    except Exception as exc:  # noqa: BLE001 — 진단용, 실패해도 기본값으로 진행
+        logger.debug("frame_dt 자동 인식 실패 (%s) — 기본값 사용", exc)
+    return None
 
 
 class ManiFlowAngleEstimator:
@@ -98,10 +123,13 @@ class ManiFlowAngleEstimator:
         obs_offset: Optional[_TensorLike] = None,
         output_bias: Optional[_TensorLike] = None,
         denoise_steps: Optional[int] = None,
+        frame_dt: Optional[float] = None,
     ):
         self.policy = policy
         self.num_envs = num_envs
         self.device = torch.device(device)
+        # 모델이 내는 시퀀스의 프레임 간격. chunk 격자·관측 재표집이 모두 이 값을 쓴다.
+        self.frame_dt = float(frame_dt) if frame_dt else FLEXION_FRAME_DT
 
         self.n_obs_steps = int(policy.n_obs_steps)
         self.n_action_steps = int(policy.n_action_steps)
@@ -132,10 +160,11 @@ class ManiFlowAngleEstimator:
         denoise_steps: Optional[int] = None,
         use_ema: Optional[bool] = None,
         maniflow_root: Optional[str] = None,
+        frame_dt: Optional[float] = None,
     ) -> "ManiFlowAngleEstimator":
         from protomotions.maniflow.loader import load_maniflow_policy
 
-        policy, _cfg, _info = load_maniflow_policy(
+        policy, cfg, _info = load_maniflow_policy(
             ckpt_path, device=str(device), use_ema=use_ema, maniflow_root=maniflow_root
         )
         return cls(
@@ -145,6 +174,7 @@ class ManiFlowAngleEstimator:
             obs_offset=obs_offset,
             output_bias=output_bias,
             denoise_steps=denoise_steps,
+            frame_dt=frame_dt or _frame_dt_from_cfg(cfg),
         )
 
     @property

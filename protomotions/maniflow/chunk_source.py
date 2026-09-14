@@ -95,7 +95,7 @@ class ManiFlowChunkSource:
         self.device = torch.device(device)
         self.flexion_sign = float(flexion_sign)
 
-        self.knot_dt = FLEXION_FRAME_DT
+        self.knot_dt = float(getattr(estimator, "frame_dt", FLEXION_FRAME_DT))
         self.n_obs = estimator.n_obs_steps
         self.num_knots = estimator.num_future_steps
         self.obs_dim = estimator.obs_dim
