@@ -112,6 +112,10 @@ def parse_args():
     p.add_argument("--warmup", type=float, default=1.0, help="지표에서 제외할 초반 구간 [s]")
     p.add_argument("--assist-scale", type=float, default=1.0, help="B에 주입하는 τ_assist 배율 (0 = 차단)")
     p.add_argument("--torque-limit", type=float, default=None, help="assist 토크 한계 [N·m] (None = LLP 학습값)")
+    p.add_argument("--hlp-latency-ms", type=float, default=0.0,
+                   help="HLP 예측이 도착하기까지의 계산 지연 [ms] (실측 7 ms). 0 = 즉시(기존 가정)")
+    p.add_argument("--obs-horizon-ms", type=float, default=None,
+                   help="LLP가 보는 미래 창을 이 시간까지만 쓴다 (절제 진단; 학습값 150 ms)")
     p.add_argument("--torque-lpf-hz", type=float, default=0.0,
                    help="assist 출력 1차 저역통과 차단주파수 [Hz] (0 = 끔) — 구동기 대역 모사")
     p.add_argument("--torque-slew-limit", type=float, default=None,
@@ -488,6 +492,8 @@ def main():
             joint_sign=1.0,  # skeleton hinge: +θ = 굴곡 = 데이터 규약
             dt=args.llp_dt,
             torque_limit=args.torque_limit,
+            hlp_latency_ms=args.hlp_latency_ms,
+            obs_horizon_ms=args.obs_horizon_ms,
             torque_lpf_hz=args.torque_lpf_hz,
             torque_slew_limit=args.torque_slew_limit,
             measure_timing=True,
@@ -587,6 +593,8 @@ def main():
         "warmup": args.warmup,
         "assist_scale": args.assist_scale,
         "torque_limit": ctrl.torque_limit,
+        "hlp_latency_ms": args.hlp_latency_ms or None,
+        "obs_horizon_ms": args.obs_horizon_ms,
         "torque_lpf_hz": args.torque_lpf_hz or None,
         "torque_slew_limit": args.torque_slew_limit,
         "feedforward": hook.use_ff,

@@ -75,6 +75,15 @@ class AssistControllerConfig:
             hip_pendulum −1.
         dt: 호출 주기 [s]. None이면 LLP 학습 dt.
         torque_limit: assist 토크 한계 [N·m]. None이면 LLP 학습값.
+        hlp_latency_ms: HLP 예측이 **계산되어 실제로 쓰이기까지**의 지연 [ms].
+            0이면 즉시(기본, 지금까지의 시뮬 가정). 실기기에서는 상태를 읽은 뒤
+            모델이 도는 시간(측정 7 ms)만큼 chunk가 늦게 도착한다 — 그 동안은
+            직전 chunk를 계속 쓴다. 예측의 시각 기준(t0)은 상태를 읽은 시점이라
+            도착했을 때 이미 그만큼 낡아 있고, LLP는 그 나이를 `chunk_age`로 본다.
+        obs_horizon_ms: LLP가 실제로 보는 미래 창의 한계 [ms]. None이면 학습값
+            (150 ms) 그대로. 값을 주면 그보다 먼 표본을 그 시점 값으로 눌러
+            "예측을 짧게 준" 효과를 낸다 — 진단·절제(ablation)용이며, 짧은 창으로
+            **학습**한 정책과는 다르다(분포 밖 입력).
         torque_lpf_hz: 출력 1차 저역통과 차단주파수 [Hz]. 0이면 끔(기본).
             학습된 정책은 매 10 ms마다 토크를 크게 바꿀 수 있는데, 실제 구동기는
             그 대역을 못 내고 착용자도 진동으로 느낀다. 여기서 걸면 시뮬과 실기기가
@@ -91,6 +100,8 @@ class AssistControllerConfig:
     joint_sign: float = 1.0
     dt: Optional[float] = None
     torque_limit: Optional[float] = None
+    hlp_latency_ms: float = 0.0
+    obs_horizon_ms: Optional[float] = None
     torque_lpf_hz: float = 0.0
     torque_slew_limit: Optional[float] = None
     measure_timing: bool = False
@@ -194,6 +205,21 @@ class AssistController:
             * lay.obs_future_dt
         )
         self._all_ids = torch.arange(n, device=self.device, dtype=torch.long)
+        # HLP 계산 지연 (ms → 제어 step, 올림)
+        self._latency_steps = int(math.ceil(float(config.hlp_latency_ms) * 1e-3 / self.dt - 1e-9))
+        self._latency_steps = max(self._latency_steps, 0)
+        self._pending_chunk = torch.zeros_like(self._chunk)
+        self._pending_chunk_t0 = torch.zeros(n, device=self.device)
+        self._pending_due = torch.full((n,), -1, dtype=torch.long, device=self.device)
+        self._horizon_idx = None
+        if config.obs_horizon_ms is not None:
+            kmax = int(float(config.obs_horizon_ms) * 1e-3 / lay.obs_future_dt + 1e-6)
+            if kmax < lay.obs_future_samples - 1:
+                self._horizon_idx = max(kmax, 0)
+                logger.info(
+                    "LLP 미래 창을 %.0f ms까지만 사용 (표본 %d/%d 이후 고정)",
+                    float(config.obs_horizon_ms), self._horizon_idx + 1, lay.obs_future_samples,
+                )
 
         # 검증용: True면 내부 HLP 갱신을 건너뛰고 set_chunk()로 받은 chunk를 쓴다
         self.external_chunk = False
@@ -239,6 +265,18 @@ class AssistController:
     # ------------------------------------------------------------------
     # chunk
     # ------------------------------------------------------------------
+    def _deliver_due_chunks(self) -> None:
+        """계산이 끝난(지연 시간이 지난) chunk를 실제 사용 버퍼로 옮긴다."""
+        if self._latency_steps == 0:
+            return
+        due = (self._pending_due >= 0) & (self._k >= self._pending_due)
+        ids = due.nonzero(as_tuple=False).flatten()
+        if ids.numel() == 0:
+            return
+        self._chunk[ids] = self._pending_chunk[ids]
+        self._chunk_t0[ids] = self._pending_chunk_t0[ids]
+        self._pending_due[ids] = -1
+
     def _refresh_chunk(self, env_ids: Tensor) -> None:
         t_now = self._k[env_ids].float() * self.dt
         if self.config.measure_timing:
@@ -249,8 +287,15 @@ class AssistController:
             torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None
             self.hlp_ms.append((time.perf_counter() - t_start) * 1e3)
         lay = self.layout
-        self._chunk[env_ids] = knots.clamp(lay.target_low, lay.target_high)
-        self._chunk_t0[env_ids] = t0
+        knots = knots.clamp(lay.target_low, lay.target_high)
+        if self._latency_steps > 0:
+            # 계산 중: 도착할 때까지 직전 chunk를 계속 쓴다
+            self._pending_chunk[env_ids] = knots
+            self._pending_chunk_t0[env_ids] = t0
+            self._pending_due[env_ids] = self._k[env_ids] + self._latency_steps
+        else:
+            self._chunk[env_ids] = knots
+            self._chunk_t0[env_ids] = t0
 
     def set_chunk(self, chunk_llp: Tensor, t0: Tensor, env_ids: Optional[Tensor] = None) -> None:
         """외부 chunk 주입 (LLP 규약, (m, K, d)) — 검증/재생용."""
@@ -300,10 +345,13 @@ class AssistController:
         self._pending_raw[ids] = 0.0
         self._tau_prev[ids] = 0.0
         self._pending_tau[ids] = 0.0
+        self._pending_due[ids] = -1
         self._k[ids] = 0
         self.hlp.reset(ids, q, self._trunk(trunk, ids.numel(), self.device))
         if not self.external_chunk:
+            lat, self._latency_steps = self._latency_steps, 0  # 첫 chunk는 즉시 (에피소드 시작)
             self._refresh_chunk(ids)
+            self._latency_steps = lat
 
     @torch.no_grad()
     def observe(self, hip_pos: Tensor, hip_vel: Tensor, trunk: Optional[Tensor] = None) -> None:
@@ -320,6 +368,7 @@ class AssistController:
         self._tau_prev = self._pending_tau
         self.hlp.observe(q, self._trunk(trunk, self.num_envs, self.device))
         if not self.external_chunk:
+            self._deliver_due_chunks()
             refresh = (self._k % self.layout.chunk_refresh_steps) == 0
             ids = refresh.nonzero(as_tuple=False).flatten()
             if ids.numel() > 0:
@@ -336,6 +385,13 @@ class AssistController:
         t = self._k.float() * self.dt
         tt = t.unsqueeze(1) + self._future_offsets.unsqueeze(0)  # (N, S)
         theta_d_future = self._interp_chunk(tt)  # (N, S, d)
+        if self._horizon_idx is not None:
+            # 창을 짧게 자르는 진단: 한계 너머 표본은 한계 시점 값으로 고정
+            k = self._horizon_idx
+            theta_d_future = torch.cat(
+                [theta_d_future[:, : k + 1], theta_d_future[:, k : k + 1].expand(-1, theta_d_future.shape[1] - k - 1, -1)],
+                dim=1,
+            )
         q = self._q[:, 0]
         qd = self._qd[:, 0]
         s = lay.dof_vel_scale
