@@ -58,8 +58,8 @@ for t in range(90, 181, 10):
     ax.text(t+0.6, 8.55, "τ", ha="center", fontsize=8, color=TEAL)
 
 # --- 3. HLP 주기 A/B ---
-lane(6.0, "HLP 연산", "20 ms마다 · 5 ms")
-for t0, col in ((100, ORANGE), (120, "#7c3aed"), (140, "#0369a1")):
+lane(6.0, "HLP 연산", "10 ms마다 · 5 ms")
+for t0, col in ((100, ORANGE), (110, "#7c3aed"), (120, "#0369a1")):
     ax.add_patch(Rectangle((t0, 5.7), 5, 0.6, facecolor=col, edgecolor="none", alpha=.85))
     ax.text(t0+2.5, 6.55, f"입력 마감 {t0}", ha="center", fontsize=8, color=col)
     ax.plot([t0, t0], [0.7, 5.7], color=col, lw=0.7, ls=":", alpha=.6)
@@ -69,7 +69,7 @@ for t0, col in ((100, ORANGE), (120, "#7c3aed"), (140, "#0369a1")):
 
 # --- 4. chunk 유효 구간 ---
 lane(3.6, "chunk 유효 범위", "기준시각 +0…+50 ms")
-for i, (t0, col, lbl) in enumerate(((100, ORANGE, "A"), (120, "#7c3aed", "B"), (140, "#0369a1", "C"))):
+for i, (t0, col, lbl) in enumerate(((100, ORANGE, "A"), (110, "#7c3aed", "B"), (120, "#0369a1", "C"))):
     y = 3.9 - i*0.75
     ax.add_patch(Rectangle((t0, y-0.22), 50, 0.44, facecolor=col, alpha=.18, edgecolor=col, lw=1))
     for k in range(6):
@@ -79,15 +79,13 @@ for i, (t0, col, lbl) in enumerate(((100, ORANGE, "A"), (120, "#7c3aed", "B"), (
     ax.text(t0+2.5, y+0.30, "연산중", fontsize=7, color=col, ha="center")
 
 # --- 5. 워스트 케이스 표시 ---
-ax.add_patch(Rectangle((120, 0.95), 5, 0.42, facecolor="#fde68a", edgecolor="#b45309", lw=1))
-ax.text(122.5, 1.16, "B 연산중", fontsize=7.5, ha="center", va="center", color="#b45309")
-ax.annotate("", xy=(140, 1.55), xytext=(120, 1.55),
+ax.annotate("", xy=(130, 1.55), xytext=(110, 1.55),
             arrowprops=dict(arrowstyle="<->", color="#b45309", lw=1.3))
-ax.text(130, 1.70, "가장 불리한 순간: t=120에서도 chunk A가 140까지 덮어야 한다",
+ax.text(120, 1.70, "가장 불리한 순간: t=110에서 chunk A로 130까지 봐야 한다 (B는 115에 도착)",
         ha="center", fontsize=9, color="#b45309")
 
 ax.text(T0, 10.1,
-        "예측 범위 ≥ 갱신 주기(20) + 연산 시간(5) + 원하는 선행(20) = 45 ms  →  10 ms 격자 6점 = 50 ms",
+        "예측 범위 ≥ 갱신 주기(10) + 연산 시간(5) + 원하는 선행(20) = 35 ms  →  10 ms 격자 6점 = 50 ms (여유 15 ms)",
         fontsize=11.5, color=INK, fontweight="bold")
 fig.tight_layout()
 out = "docs/hlp_llp_timing.png"

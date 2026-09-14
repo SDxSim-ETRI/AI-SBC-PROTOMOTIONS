@@ -76,8 +76,9 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                              "(150 ms 모델: 4×50 ms, 20 ms 모델: 2×10 ms)")
     parser.add_argument("--obs-future-dt", type=float, default=0.05,
                         help="미래 창 샘플 간격 [s]")
-    parser.add_argument("--chunk-refresh-steps", type=int, default=2,
-                        help="HLP 재예측 주기 (LLP step 단위; 10 ms step에서 2 = 20 ms)")
+    parser.add_argument("--chunk-refresh-steps", type=int, default=1,
+                        help="HLP 재예측 주기 (LLP step 단위; 10 ms step에서 1 = 10 ms). "
+                             "denoise 1에서 실측 4.9 ms라 10 ms 예산에 들어간다")
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
     parser.add_argument("--human-power-weight", type=float, default=-0.003)
