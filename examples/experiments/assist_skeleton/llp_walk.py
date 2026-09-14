@@ -71,13 +71,17 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="ManiFlow flexion ckpt (None = flexion40 run 자동 탐색)")
     parser.add_argument("--hlp-denoise", type=int, default=1,
                         help="HLP denoise 스텝 (실측: 정확도는 스텝 수와 무관, 지연만 스텝당 3 ms)")
-    parser.add_argument("--obs-future-samples", type=int, default=4,
-                        help="LLP가 보는 미래 창 샘플 수. HLP 예측 범위 안에 들어가야 한다 "
-                             "(150 ms 모델: 4×50 ms, 20 ms 모델: 2×10 ms)")
-    parser.add_argument("--obs-future-dt", type=float, default=0.05,
+    parser.add_argument("--decimation", type=int, default=2,
+                        help="물리 400 Hz 기준 LLP 주기 = decimation × 2.5 ms (2 = 5 ms, 4 = 10 ms). "
+                             "히스토리·이전 action·tracker 주기·HLP 갱신 주기는 시간 길이가 유지되도록 함께 맞춰진다")
+    parser.add_argument("--obs-future-samples", type=int, default=3,
+                        help="LLP가 보는 미래 창 샘플 수 (offset 0부터 obs_future_dt 간격). "
+                             "기본 3 = {0, 10, 20 ms}: 0은 예측과 현재 측정의 차이를 보는 기준점이고 "
+                             "실제 선행 정보는 10·20 ms 두 점. HLP 예측 범위(50 ms) 안이어야 한다")
+    parser.add_argument("--obs-future-dt", type=float, default=0.01,
                         help="미래 창 샘플 간격 [s]")
-    parser.add_argument("--chunk-refresh-steps", type=int, default=1,
-                        help="HLP 재예측 주기 (LLP step 단위; 10 ms step에서 1 = 10 ms). "
+    parser.add_argument("--chunk-refresh-steps", type=int, default=0,
+                        help="HLP 재예측 주기 (LLP step 단위). 0이면 decimation에서 10 ms가 되도록 자동. "
                              "denoise 1에서 실측 4.9 ms라 10 ms 예산에 들어간다")
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
@@ -112,10 +116,10 @@ def _tracker_resolved(args: argparse.Namespace):
 def configure_robot_and_simulator(
     robot_cfg: RobotConfig, simulator_cfg: SimulatorConfig, args: argparse.Namespace
 ):
-    """tracker와 같은 접촉 센서(발) + LLP 주기: 물리 400 Hz / decimation 4 (10 ms)."""
+    """tracker와 같은 접촉 센서(발) + LLP 주기: 물리 400 Hz / decimation (기본 2 = 5 ms)."""
     robot_cfg.update_fields(contact_bodies=["all_left_foot_bodies", "all_right_foot_bodies"])
     simulator_cfg.sim.fps = 400
-    simulator_cfg.sim.decimation = 4
+    simulator_cfg.sim.decimation = int(args.decimation)
 
 
 def terrain_config(args: argparse.Namespace):
@@ -131,6 +135,22 @@ def motion_lib_config(args: argparse.Namespace):
     cfg: MotionLibConfig = _tracker_resolved(args)["motion_lib"]
     cfg.motion_file = args.motion_file
     return cfg
+
+
+def _rate_steps(decimation: int):
+    """LLP 주기가 바뀌어도 **시간 길이**가 같도록 step 수를 환산한다 (물리 400 Hz 기준).
+
+    decimation 4 → LLP 10 ms: 히스토리 10(100 ms), 이전 action 5(50 ms),
+    tracker 5 step(50 ms), HLP 갱신 1 step(10 ms).
+    decimation 2 → LLP 5 ms: 각각 20 / 10 / 10 / 2 로 두 배.
+    """
+    assert 4 % decimation == 0 or decimation in (1, 2, 4), "decimation은 1·2·4 중 하나"
+    return {
+        "history": 40 // decimation,        # 100 ms
+        "prev_actions": 20 // decimation,   # 50 ms
+        "tracker_period": 20 // decimation,  # 50 ms (tracker 학습 주기)
+        "chunk_refresh": max(4 // decimation, 1),  # 10 ms (HLP 갱신)
+    }
 
 
 def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssistEnvConfig:
@@ -159,6 +179,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
 
     tracker_env = _tracker_resolved(args)["env"]
     tracker_mimic = tracker_env.control_components["mimic"]
+    rate = _rate_steps(int(args.decimation))
 
     control_components = {
         # 착용자 레퍼런스: tracker 학습 주기(50 ms) 간격의 미래 프레임
@@ -169,14 +190,14 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         ),
         "assist": SkeletonAssistControlConfig(
             tracker_checkpoint=str(args.tracker_checkpoint),
-            tracker_period_steps=5,
+            tracker_period_steps=rate["tracker_period"],
             maniflow_ckpt=args.hlp_checkpoint,
             maniflow_denoise_steps=args.hlp_denoise,
             hlp_calibration=str(args.hlp_calibration),
             motion_file_for_calibration=args.motion_file,
             obs_future_samples=int(args.obs_future_samples),
             obs_future_dt=float(args.obs_future_dt),
-            chunk_refresh_steps=int(args.chunk_refresh_steps),
+            chunk_refresh_steps=int(args.chunk_refresh_steps or rate["chunk_refresh"]),
         ),
     }
 
@@ -203,7 +224,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
                 "chunk_age": EnvContext.assist.chunk_age,
             },
         ),
-        "previous_actions": previous_actions_factory(history_steps=5),
+        "previous_actions": previous_actions_factory(history_steps=rate["prev_actions"]),
         # critic 전용
         "assist_privileged": MdpComponent(
             compute_func=compute_assist_privileged_obs,
@@ -265,7 +286,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
     return SkeletonAssistEnvConfig(
         max_episode_length=1000,  # 10 s @ 100 Hz
         reset_grace_period=5,
-        num_state_history_steps=10,
+        num_state_history_steps=rate["history"],
         motion_manager=tracker_env.motion_manager,
         ref_respawn_offset=tracker_env.ref_respawn_offset,
         ref_contact_smooth_window=tracker_env.ref_contact_smooth_window,
