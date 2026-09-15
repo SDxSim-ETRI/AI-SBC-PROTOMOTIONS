@@ -136,8 +136,8 @@
   <div class="scroll"><table>
     <thead><tr><th>약칭</th><th>이름</th><th>하는 일</th><th>학습 방식</th><th>실기기</th></tr></thead>
     <tbody>
-      <tr><td><b>HLP</b></td><td>ManiFlow flexion 예측기</td><td>지금까지의 고관절 각도·몸통 자세로 <b>앞으로 150 ms</b>의 고관절 움직임을 예측</td><td>사람 모션 데이터 지도학습</td><td>탑재</td></tr>
-      <tr><td><b>LLP</b></td><td>assist torque 정책</td><td>예측과 현재 관절 상태를 보고 <b>매 10 ms 보조 토크</b>를 낸다</td><td>시뮬 강화학습(PPO)</td><td>탑재</td></tr>
+      <tr><td><b>HLP</b></td><td>ManiFlow flexion 예측기</td><td>지금까지의 고관절 각도·몸통 자세로 <b>앞으로 50 ms</b>를 10 ms 격자로 예측 (10 ms마다 갱신)</td><td>사람 모션 데이터 지도학습</td><td>탑재</td></tr>
+      <tr><td><b>LLP</b></td><td>assist torque 정책</td><td>예측과 현재 관절 상태를 보고 <b>매 5 ms 보조 토크</b>를 낸다</td><td>시뮬 강화학습(PPO)</td><td>탑재</td></tr>
       <tr><td><b>tracker</b></td><td>mimic tracker</td><td>시뮬 안에서 <b>사람 역할</b> — mocap을 따라 걷는다</td><td>시뮬 강화학습(PPO)</td><td>불필요</td></tr>
     </tbody>
   </table></div>
@@ -156,15 +156,18 @@
     </tbody>
   </table></div>
   <ul>
-    <li>예측 범위는 <b>150 ms</b> — 25 ms 간격 7개 점. 그 이상은 관측 창과 어긋나 의미가 없다.</li>
-    <li>구간별 오차(오프라인): 25 ms 0.45° · 50 ms 1.18° · 100 ms 2.97° · 150 ms 4.90°.</li>
+    <li>예측 범위는 <b>50 ms</b> — 10 ms 간격 6개 점. 범위는 <b>갱신 주기(10) + 연산 시간(5) + 원하는 선행(20)</b>에서
+        나온다: 예측은 입력 창이 닫힌 시각 기준이라 도착 시 이미 낡아 있고, 다음 예측이 올 때까지 버텨야 한다.</li>
+    <li>구간별 오차(오프라인, denoise 1): 10 ms 0.27° · 20 ms 0.39° · 30 ms 0.56° · 50 ms 1.07°.</li>
+    <li><b>denoise 스텝은 1이면 된다.</b> 정확도가 스텝 수와 무관했고(25 ms 0.47/0.45/0.45/0.47° @1/2/3/6)
+        지연만 스텝당 3 ms 늘어난다(4.94 / 8.13 / 11.04 ms).</li>
     <li><b>영점 보정이 필요하다.</b> 학습 데이터와 우리 스켈레톤은 중립자세 각도 규약이 채널마다 10° 안팎 다르다.
         지금까지는 재생 클립 평균으로 맞췄는데, 착용자가 실제로 걷는 자세는 그 클립과 다르다 —
         v31 착용자의 hip 평균 9.5°/7.2° vs 클립 −1.9°/0.3°. 착용자 스트림을 직접 재면
         (<code>--calibration wearer</code>, 실기기의 착용 직후 영점조정과 같은 절차) 150 ms 오차가 8.4° → 6.9°로 준다.
         평균 자세는 동작마다 달라지므로(걷기 [0.5, 3.5] vs 달리기 [−8.0, −3.2] deg) 활동별이 아니라 <b>중립 자세에서 한 번</b> 재는 것이 맞다.</li>
     <li>약점: 계단·보행 전환에서 오차 2.3–2.6배(학습 데이터에 계단이 없음). tracker가 걷는 걸음에서는 150 ms 오차가
-        7–11°까지 커진다 — 사람 mocap에서는 2–6°.</li>
+        7–11°까지 커진다 — 사람 mocap에서는 2–6°. 착용자를 대칭 보행(v32)으로 바꾸면서 이 오차도 줄었다.</li>
   </ul>
 </section>
 
@@ -232,19 +235,19 @@
 <section id="perf">
   <div class="sec-head"><span class="num">06</span><h2>성능 한눈에</h2></div>
   <p class="cap">착용자 고관절 파워 절감 [%] · 같은 난수·같은 mocap으로 보조 없음(A)과 보조(B)를 나란히 돌려 |τ·ω| 평균 비교</p>
-  <svg class="chart" viewBox="0 0 720 300" role="img" aria-label="LLP 버전별 착용자 파워 절감 막대그래프">
+  <svg class="chart" viewBox="0 0 720 332" role="img" aria-label="LLP 버전별 착용자 파워 절감 막대그래프">
     <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
-      <line x1="210" y1="26" x2="210" y2="248" stroke="var(--rule-strong)"/>
-      <line x1="210" y1="248" x2="690" y2="248" stroke="var(--rule-strong)"/>
+      <line x1="210" y1="26" x2="210" y2="280" stroke="var(--rule-strong)"/>
+      <line x1="210" y1="280" x2="690" y2="280" stroke="var(--rule-strong)"/>
       <g fill="var(--ink-soft)" font-size="10.5">
-        <text x="210" y="266" text-anchor="middle">0</text>
-        <text x="330" y="266" text-anchor="middle">10</text>
-        <text x="450" y="266" text-anchor="middle">20</text>
-        <text x="570" y="266" text-anchor="middle">30</text>
-        <text x="690" y="266" text-anchor="middle">40</text>
-        <text x="450" y="286" text-anchor="middle">파워 절감 [%] — 클수록 좋다</text>
+        <text x="210" y="298" text-anchor="middle">0</text>
+        <text x="330" y="298" text-anchor="middle">10</text>
+        <text x="450" y="298" text-anchor="middle">20</text>
+        <text x="570" y="298" text-anchor="middle">30</text>
+        <text x="690" y="298" text-anchor="middle">40</text>
+        <text x="450" y="318" text-anchor="middle">파워 절감 [%] — 클수록 좋다</text>
       </g>
-      <g stroke="var(--rule)"><line x1="330" y1="26" x2="330" y2="248"/><line x1="450" y1="26" x2="450" y2="248"/><line x1="570" y1="26" x2="570" y2="248"/><line x1="690" y1="26" x2="690" y2="248"/></g>
+      <g stroke="var(--rule)"><line x1="330" y1="26" x2="330" y2="280"/><line x1="450" y1="26" x2="450" y2="280"/><line x1="570" y1="26" x2="570" y2="280"/><line x1="690" y1="26" x2="690" y2="280"/></g>
 
       <text x="150" y="40" text-anchor="end" fill="var(--ink-soft)">진자 v3 이식</text>
       <rect x="162" y="30" width="48" height="14" fill="var(--bad)" opacity="0.8"/>
@@ -274,7 +277,11 @@
       <rect x="210" y="222" width="324" height="14" fill="var(--bar)"/>
       <text x="544" y="233" fill="var(--ink)" font-size="11">27.0 (달리기 31.7)</text>
 
-      <line x1="522" y1="26" x2="522" y2="216" stroke="var(--accent)" stroke-dasharray="4 4"/>
+      <text x="150" y="264" text-anchor="end" fill="var(--ink)" font-weight="600">v10 · 5 ms 제어</text>
+      <rect x="210" y="254" width="305" height="14" fill="var(--bar)"/>
+      <text x="525" y="265" fill="var(--ink)" font-size="11">25.4 (달리기 14.6)</text>
+
+      <line x1="522" y1="26" x2="522" y2="248" stroke="var(--accent)" stroke-dasharray="4 4"/>
       <text x="528" y="24" fill="var(--accent)" font-size="10.5">오라클 상한 26 % (40 N·m)</text>
     </g>
   </svg>
