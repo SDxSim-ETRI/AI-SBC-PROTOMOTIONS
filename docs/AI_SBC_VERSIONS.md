@@ -219,3 +219,4 @@ robot config 이름의 `passive_cable`/`active_cable`은 **슈트 slide 관절 4
 | 2026-09-12 | 독립 제어기 `AssistController` 등가성 PASS, tracker v30·v31 재학습, LLP 재학습 시작 |
 | 2026-09-13 | LLP v3/v4/v5 보관, 뼈 메시 에셋 통합, 보행 전용 v6 학습 시작 |
 | 2026-09-14 | v6 보관(walk −27 %, run −32 %), 변화율 벌점 v7 실패 확인 → 구동기 필터를 플랜트에 넣은 v8 |
+| 2026-09-15 | 착용자 v32(대칭 보행) 보관 · HLP 100 fps/50 ms 재학습(전 구간 개선) · denoise 3→1 · 5 ms 제어 v10 보관 |

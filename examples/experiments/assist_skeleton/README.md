@@ -372,3 +372,65 @@ v8 = 보행 세트 + 학습 env의 주입 경로에 6 Hz 저역통과(`--assist-
 → 필터는 **실행 시 선택**으로 두면 된다: 정책은 v6 하나를 쓰고, 구동기 대역에 맞춰
 `--torque-lpf-hz`만 맞춘다. v8 체크포인트는 따로 보관하지 않는다(`results/llp_gait_lpf6_v8/`에만).
 6 Hz의 대가는 −27 → −22.5 %이고, 12 Hz면 −25.5 → −23.5 % 수준이다.
+
+---
+
+## 두 속도 구조로 개편 (2026-09-15)
+
+예측기와 제어기를 **다른 주기로** 돌리는 구성이 이 연구의 핵심 주장이라, 그에 맞게 셋을 바꿨다.
+
+| | 이전 | 지금 |
+|---|---|---|
+| 착용자 | v31 (좌우 가동범위 22° 비대칭) | **v32** — 관절각 추종 항 추가, 좌우 차이 3.1°(mocap 4.7°) |
+| HLP | 40 fps, 25 ms 격자, 미래 150 ms, denoise 3 (11 ms) | **100 fps, 10 ms 격자, 미래 50 ms, denoise 1 (4.9 ms)**, 갱신 10 ms |
+| LLP | 10 ms 제어, 미래 창 4×50 ms | **5 ms 제어**, 미래 창 {0, 10, 20 ms} |
+
+### 예측 범위를 정하는 부등식
+
+```
+예측 범위 ≥ 갱신 주기 + 연산 시간 + 원하는 선행 = 10 + 5 + 20 = 35 ms  → 50 ms로 잡음
+```
+
+예측은 **입력 창이 닫힌 시각**을 기준으로 만들어지므로 도착 시점엔 이미 연산 시간만큼 낡아 있고,
+다음 chunk가 올 때까지 버텨야 한다. 모자라면 주기 끝에서 미래 창이 마지막 knot로 눌린다
+(`_interp_chunk`의 clamp). 그림: `docs/hlp_llp_timing.png` (`plot_timing_diagram.py`).
+
+### denoise 스텝은 1이면 된다
+
+suit14 교차평가에서 **정확도가 스텝 수와 무관**했다 — 25 ms 오차 0.47/0.45/0.45/0.47° (1/2/3/6스텝).
+지연만 스텝당 약 3 ms 늘어난다(batch-1 median 4.94 / 8.13 / 11.04 ms). 기본값을 1로 바꿨다.
+
+### 새 HLP 정확도 (ETRI suit14 100 fps, denoise 1)
+
+| 선행 | 0 | 10 | 20 | 30 | 40 | 50 ms |
+|---|---|---|---|---|---|---|
+| MAE | 0.25° | 0.27° | 0.39° | 0.56° | 0.79° | 1.07° |
+
+옛 40 fps 모델(25 ms 0.45°, 50 ms 1.18°)보다 전 구간에서 낫다.
+
+### 결과 (v10, 40 s A/B, 착용자 v32)
+
+| 클립 | 파워 | 절감 | 토크 RMS | 변화율 | 낙상 |
+|---|---|---|---|---|---|
+| walk | 181 → 135 W | **−25.4 %** | 30.9 N·m | 1058 N·m/s | 0 |
+| run | 362 → 309 W | −14.6 % | 33.5 | 1013 | 0 |
+
+같은 착용자에서 v6(옛 HLP·10 ms 제어)은 −16.7 / −19.3 %였다 → **걷기는 개선, 달리기는 하락**.
+달리기는 학습 비중이 1/4이고 파워가 362 W라 40 N·m로 건드릴 수 있는 비율이 작다.
+영상: `results/assist_skeleton/2026-09-15_17-54-26_tracker_v10_walk_video/sim.mp4`.
+
+### 장시간 학습은 systemd로
+
+파이썬 세그폴트가 3일간 8회 났다(6회는 python3.11 안, 2회는 libc10_cuda.so). 주소가 매번 달라
+특정 코드 버그라기보다 네이티브 확장 쪽 메모리 문제로 보인다 — CUDA graph가 1순위 용의자다
+(이 레포는 이미 서브스텝 훅 시뮬레이터에서 같은 이유로 graph를 껐다).
+
+```bash
+systemd-run --user --unit=aisbc-llp --working-directory="$PWD" \
+  --property=Restart=on-failure --property=RestartSec=15 --property=StartLimitIntervalSec=0 \
+  --property=StandardOutput=append:$PWD/results/_pids/llp.log \
+  --property=StandardError=append:$PWD/results/_pids/llp.log \
+  ~/miniconda3/envs/sbc/bin/python protomotions/train_agent.py ...
+systemctl --user status aisbc-llp     # 상태·재시작 횟수
+```
+`nohup`·`setsid`로는 재시작이 안 되고, 죽은 걸 모른 채 밤을 보낼 수 있다(실제로 한 번 그랬다).
