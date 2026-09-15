@@ -54,6 +54,16 @@ from protomotions.maniflow.loader import (
     load_maniflow_policy,
 )
 
+# 현역 예측기 — 100 fps(10 ms 격자), 과거 100 ms → 미래 0~50 ms 6점.
+# 2026-09-15 교차평가(suit14): 10 ms 0.27° / 20 ms 0.39° / 50 ms 1.07°, denoise 1 기준
+# 4.9 ms. 이전 40 fps 판(FLEXION40_RUN_DIR)은 25 ms 격자·미래 150 ms.
+FLEXION100_RUN_DIR = (
+    DEFAULT_MANIFLOW_ROOT
+    / "data"
+    / "outputs"
+    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42"
+)
+
 FLEXION40_RUN_DIR = (
     DEFAULT_MANIFLOW_ROOT
     / "data"

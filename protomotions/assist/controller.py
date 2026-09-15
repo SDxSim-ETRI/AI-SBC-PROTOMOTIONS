@@ -139,9 +139,9 @@ class AssistController:
         hlp_ckpt = config.hlp_checkpoint
         if not hlp_ckpt:
             from protomotions.maniflow.loader import discover_best_checkpoint
-            from protomotions.maniflow.verify_angle_estimator import FLEXION40_RUN_DIR
+            from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
 
-            hlp_ckpt = str(discover_best_checkpoint(FLEXION40_RUN_DIR))
+            hlp_ckpt = str(discover_best_checkpoint(FLEXION100_RUN_DIR))
         self.hlp_checkpoint = hlp_ckpt
         estimator = ManiFlowAngleEstimator.from_checkpoint(
             hlp_ckpt,

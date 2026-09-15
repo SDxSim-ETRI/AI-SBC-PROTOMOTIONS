@@ -140,11 +140,11 @@ class ManiFlowChunkSource:
     ) -> "ManiFlowChunkSource":
         """`MotionAssistTargetControlConfig`에서 소스를 만든다 (체크포인트 자동 탐색)."""
         from protomotions.maniflow.loader import discover_best_checkpoint
-        from protomotions.maniflow.verify_angle_estimator import FLEXION40_RUN_DIR
+        from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
 
         ckpt = config.maniflow_ckpt
         if not ckpt:
-            ckpt = str(discover_best_checkpoint(FLEXION40_RUN_DIR))
+            ckpt = str(discover_best_checkpoint(FLEXION100_RUN_DIR))
         denoise = config.maniflow_denoise_steps or DEFAULT_DENOISE_STEPS
         estimator = ManiFlowAngleEstimator.from_checkpoint(
             ckpt,
