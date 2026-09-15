@@ -25,11 +25,13 @@
 
 | 역할 | 버전 | 경로 |
 |------|------|------|
-| HLP | flexion40 run01 | `ManiFlow_Policy` 레포의 flexion40 run (자동 탐색, 지정 불필요) |
-| LLP — 보행(걷기·달리기) | **llp_v6** | `checkpoints/llp_v6_gait_40Nm/last.ckpt` |
+| HLP | **flexion100-h15** (10 ms 격자, 미래 50 ms) | `ManiFlow_Policy` 레포 run (자동 탐색, 지정 불필요) |
+| LLP — 보행(걷기·달리기) | **llp_v10** (5 ms 제어) | `checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt` |
+| LLP — 이전 판(10 ms 제어) | llp_v6 | `checkpoints/llp_v6_gait_40Nm/last.ckpt` |
 | LLP — 착용자 두 명 모두 | llp_v5 (착용자 앙상블, walk만) | `checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt` |
 | LLP — 여러 동작 | llp_v4 | `checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt` |
-| 가상 착용자 — 걷기 | v30 | `checkpoints/v30_newton_suit_passive_walk/last.ckpt` |
+| 가상 착용자 — **보행(대칭)** | **v32** | `checkpoints/v32_newton_suit_gait_symmetric/last.ckpt` |
+| 가상 착용자 — 걷기(구) | v30 | `checkpoints/v30_newton_suit_passive_walk/last.ckpt` |
 | 가상 착용자 — 15모션 | v31 | `checkpoints/v31_newton_suit_passive_motions15/last.ckpt` |
 | 인체 모델 | `skeleton_torque_suit` | `protomotions/data/assets/mjcf/skeleton_torque_suit.xml` (뼈 메시 + 캡슐 충돌) |
 
@@ -78,12 +80,20 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker \
   보완은 별도 과제로 미뤄 둠, 2026-09-15),
   tracker가 걷는 걸음에서는 150 ms 오차가 7~11°까지 커진다(사람 mocap은 2~6°).
 
-### 시간 구조 — 얼마나 빨리, 얼마나 멀리
+### 시간 구조 — 얼마나 빨리, 얼마나 멀리 (2026-09-15 개편)
 
-| | 주기 | 1회 계산 시간 | 비고 |
+| | 주기 | 1회 계산 시간 | 예측 범위 |
 |---|---|---|---|
-| HLP | 20 ms | **7.1 ms** (p95 7.6) | 과제 목표 ≤20 ms |
-| LLP | 10 ms | **0.25 ms** (p95 0.36) | 물리 주기(2.5 ms)까지 올릴 여유 있음 |
+| HLP | **10 ms** | **4.9 ms** (denoise 1, p95 9.5) | 0~50 ms, 10 ms 격자 6점 |
+| LLP | **5 ms** | 0.25 ms | 미래 창은 {0, 10, 20 ms}만 읽는다 |
+
+범위를 정하는 부등식(그림 `hlp_llp_timing.png`):
+
+> **예측 범위 ≥ 갱신 주기 + 연산 시간 + 원하는 선행** = 10 + 5 + 20 = 35 ms → 여유를 둬 50 ms
+
+예측은 **입력 창이 닫힌 시각** 기준으로 만들어져서 도착했을 때 이미 연산 시간만큼 낡아 있고,
+다음 chunk가 올 때까지 버텨야 한다. 이 여유가 모자라면 주기 끝에서 미래 창이 마지막 knot로
+눌려 평평해진다.
 
 2026-09-14 실측(v6, walk 20 s): **미래 창을 50 ms로 잘라도 절감이 그대로**고(−27.4 vs −27.6 %),
 미래를 아예 없애도 −25.1 %다 → 150 ms 예측 범위는 과했다. **HLP 계산 지연은 15 ms까지 무해**하고
@@ -137,6 +147,7 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 | **v5** | walk | **{v30,v31} 무작위** | 40 N·m | 〃 | **−31.7 % / −25.6 %**(두 착용자 모두) | 📦 보관·권장 |
 | **v6** | **보행 계열만**(walk 0.75 + run 0.25) | v31 | 40 N·m | 〃 | walk **−27.0 %**, run **−31.7 %** (40 s, 낙상 0) | 📦 보관·권장 |
 | v7 | 〃 | v31 | 40 N·m | 〃 + 변화율 벌점 ×10 | **walk +21.3 % 악화** — 거의 일정한 36 N·m로 수렴 | ✗ 폐기 |
+| **v10** | 〃 | **v32**(대칭) | 40 N·m | 〃 · **5 ms 제어 + 50 ms 예측기** | walk **−25.4 %**, run −14.6 % (같은 착용자에서 v6: −16.7 / −19.3) | 📦 보관·권장 |
 | v8 | 〃 | v31 | 40 N·m | 〃 + **플랜트에 6 Hz 구동기 필터** | walk −22.3 % — v6 출력에 같은 필터를 건 것(−22.5 %)과 **차이 없음** | ✗ 보관 안 함 |
 
 **v1의 교훈**: 착용자가 mocap을 잘 따라가는 것을 *보상*하면, 정책은 최대 토크로 착용자를
