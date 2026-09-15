@@ -124,13 +124,76 @@ def compute_metrics(tr, meta):
         "hlp_ms_mean": meta["hlp_ms"]["mean"],
         "llp_ms_mean": meta["llp_ms"]["mean"],
     }
+    summary.update(_task_metrics(tr, meta, idx))
     lead = hlp_lead_errors(tr, B, meta["warmup"], meta["hlp_dt"], meta["num_knots"])
     return {
         "summary": summary,
         "per_env": per_env,
+        "phase_bins": phase_table(tr, meta),
         "hlp_lead_mae_deg": {f"{int(round(k*meta['hlp_dt']*1e3))}ms": (None if np.isnan(v) else float(v)) for k, v in enumerate(lead)},
         "n_samples": int(len(idx)),
     }
+
+
+def _task_metrics(tr, meta, idx):
+    """보조가 **과제 자체**를 바꿨는지 — 파워 절감이 "덜 걸어서" 온 것인지 가른다.
+
+    파워 |τ·ω|는 다리가 덜 흔들리기만 해도 내려간다. 그래서 같은 거리를
+    같은 시간에 갔는지(전진 속도), 착용자 몸체가 레퍼런스에서 얼마나 벗어났는지를
+    A/B로 같이 본다. 둘 다 유지되면서 파워가 내려가야 진짜 절감이다.
+    """
+    out = {}
+    if "root_xy" in tr and np.abs(tr["root_xy"]).max() > 0:
+        xy = tr["root_xy"]
+        seg = np.linalg.norm(np.diff(xy, axis=0), axis=-1)[idx[0] - 1 : idx[-1]]  # (n, 2env)
+        span = float(tr["t"][idx[-1]] - tr["t"][idx[0] - 1])
+        net = np.linalg.norm(xy[idx[-1]] - xy[idx[0] - 1], axis=-1)  # (2env,)
+        for env, name in ((A, "A"), (B, "B")):
+            out[f"path_len_m_{name}"] = float(seg[:, env].sum())
+            out[f"net_disp_m_{name}"] = float(net[env])
+            out[f"walk_speed_mps_{name}"] = float(net[env] / max(span, 1e-9))
+        out["walk_speed_change_pct"] = 100.0 * (
+            out["walk_speed_mps_B"] / max(out["walk_speed_mps_A"], 1e-9) - 1.0
+        )
+    if "body_err" in tr:
+        be, bt = tr["body_err"], tr["body_err_t"]
+        m = bt >= meta["warmup"]
+        for env, name in ((A, "A"), (B, "B")):
+            out[f"body_err_m_{name}"] = float(be[m, env].mean())
+            out[f"body_err_p95_m_{name}"] = float(np.percentile(be[m, env], 95))
+        out["body_err_change_pct"] = 100.0 * (
+            out["body_err_m_B"] / max(out["body_err_m_A"], 1e-9) - 1.0
+        )
+    return out
+
+
+def phase_table(tr, meta, bins=10):
+    """보행 위상 10 % 구간별 A/B 파워·토크 (오라클 창이 실제로 뭘 바꿨는지 읽는 표)."""
+    if "gait_phase" not in tr or not np.isfinite(tr["gait_phase"]).any():
+        return None
+    t = tr["t"]
+    idx = np.where(t >= meta["warmup"])[0]
+    idx = idx[idx >= 1]
+    vel = tr["hip_vel"]
+    w = 0.5 * (vel[idx - 1] + vel[idx])
+    tau = tr["tau_pd_prev"][idx] + tr["tau_ff_prev"][idx]
+    assist = tr["tau_assist"][idx - 1]
+    ph = tr["gait_phase"][idx]  # (n, 2legs)
+    rows = []
+    for b in range(bins):
+        sel = (ph >= b / bins) & (ph < (b + 1) / bins)  # (n, 2legs)
+        if not sel.any():
+            continue
+        pa = np.abs(tau[:, A] * w[:, A])[sel]
+        pb = np.abs(tau[:, B] * w[:, B])[sel]
+        rows.append({
+            "phase_pct": [100 * b / bins, 100 * (b + 1) / bins],
+            "power_A": float(pa.mean()), "power_B": float(pb.mean()),
+            "tau_A": float(tau[:, A][sel].mean()), "tau_B": float(tau[:, B][sel].mean()),
+            "assist": float(assist[:, B][sel].mean()),
+            "omega_A": float(np.abs(w[:, A])[sel].mean()), "omega_B": float(np.abs(w[:, B])[sel].mean()),
+        })
+    return rows
 
 
 def save_plots(tr, meta, out_path: Path, window_s=(2.0, 8.0)):

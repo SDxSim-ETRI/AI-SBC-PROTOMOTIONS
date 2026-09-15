@@ -112,6 +112,19 @@ def parse_args():
     p.add_argument("--seconds", type=float, default=30.0)
     p.add_argument("--warmup", type=float, default=1.0, help="지표에서 제외할 초반 구간 [s]")
     p.add_argument("--assist-scale", type=float, default=1.0, help="B에 주입하는 τ_assist 배율 (0 = 차단)")
+    # --- 오라클 진단: 학습된 정책 대신 정해진 규칙의 토크를 B에 강제 주입한다 (정책이 아니라 탐침) ---
+    p.add_argument("--oracle", choices=["off", "beta", "phase"], default="off",
+                   help="off: LLP 정책 / beta: τ = β·(착용자가 직전 창에 실제로 낸 토크) / "
+                        "phase: 보행 위상 창에서만 고정 토크. beta·phase 모두 실기기 불가능한 특권 정보를 쓴다")
+    p.add_argument("--oracle-beta", type=float, default=0.5, help="beta 오라클 계수")
+    p.add_argument("--oracle-window", default="0,10",
+                   help="phase 오라클을 켤 보행 주기 구간 [%%] 'lo,hi' (0 %% = 최대 굴곡). 다리별로 각자의 위상")
+    p.add_argument("--oracle-torque", type=float, default=-40.0,
+                   help="phase 오라클이 그 구간에 주입할 토크 [N·m] (−는 신전 = 착지 구간 착용자와 같은 방향)")
+    p.add_argument("--oracle-ramp", type=float, default=2.0,
+                   help="창 경계에서 코사인으로 올리고 내리는 폭 [%% 주기] — 계단 입력이 접촉을 때리지 않게")
+    p.add_argument("--oracle-limit", type=float, default=None,
+                   help="오라클 출력 한계 [N·m] (None = LLP 학습 한계). 상한을 보려면 크게 줄 것")
     p.add_argument("--torque-limit", type=float, default=None, help="assist 토크 한계 [N·m] (None = LLP 학습값)")
     p.add_argument("--hlp-latency-ms", type=float, default=0.0,
                    help="HLP 예측이 도착하기까지의 계산 지연 [ms] (실측 7 ms). 0 = 즉시(기존 가정)")
@@ -319,10 +332,72 @@ def resolve_calibration(args, dof_names):
 
 
 # ---------------------------------------------------------------------------
+# 오라클용 보행 위상 (mocap 클립에서 미리 뽑은 표 — 실기기에 없는 특권 정보)
+# ---------------------------------------------------------------------------
+def _peak_indices(x: np.ndarray, min_dist: int) -> np.ndarray:
+    """국소 최대 중 값이 큰 것부터 고르되 min_dist 이내는 눌러 버린다 (scipy 없이)."""
+    cand = np.where((x[1:-1] > x[:-2]) & (x[1:-1] >= x[2:]))[0] + 1
+    if len(cand) == 0:
+        return cand
+    blocked = np.zeros(len(x), dtype=bool)
+    keep = []
+    for i in cand[np.argsort(-x[cand])]:
+        if blocked[i]:
+            continue
+        keep.append(int(i))
+        blocked[max(i - min_dist, 0) : i + min_dist] = True
+    return np.array(sorted(keep))
+
+
+class MocapGaitPhase:
+    """mocap 클립의 hip flexion **최대 굴곡 = 위상 0 %** 로 잡은 다리별 위상 룩업.
+
+    `plot_torque_phase.py`가 오프라인에서 쓰는 위상 규약과 같다. 클립 시간으로
+    색인하므로 첫 step부터 유효하다. 이건 실기기에 없는 특권 정보이고, 오라클
+    탐침과 위상별 분석에만 쓴다 — 정책 관측에는 절대 들어가지 않는다.
+    """
+
+    def __init__(self, motion_lib, motion_id: int, hip_idx, device, dt: float = 0.005,
+                 max_time: float | None = None):
+        ids = torch.full((1,), int(motion_id), device=device, dtype=torch.long)
+        self.length = float(motion_lib.get_motion_length(ids).item())
+        self.span = self.length if max_time is None else min(self.length, float(max_time))
+        n = max(int(self.span / dt) + 1, 8)
+        times = (torch.arange(n, device=device, dtype=torch.float32) * dt).clamp(max=self.length)
+        state = motion_lib.get_motion_state(ids.expand(n), times)
+        q = state.dof_pos[:, list(hip_idx)].cpu().numpy()  # (n, 2)
+        min_dist = max(int(0.6 / dt), 2)
+        table = np.stack([self._sawtooth(q[:, d], min_dist, n) for d in range(q.shape[1])], axis=-1)
+        self.table = torch.as_tensor(table, device=device, dtype=torch.float32)  # (n, 2)
+        self.dt = dt
+        self.num_peaks = int(len(_peak_indices(q[:, 0], min_dist)))
+
+    @staticmethod
+    def _sawtooth(x: np.ndarray, min_dist: int, n: int) -> np.ndarray:
+        pk = _peak_indices(x, min_dist)
+        if len(pk) < 2:  # 주기가 안 잡히면 위상을 쓰지 않는다는 표시
+            return np.full(n, np.nan, dtype=np.float32)
+        ph = np.empty(n, dtype=np.float32)
+        period = float(np.mean(np.diff(pk)))
+        idx = np.arange(n, dtype=np.float32)
+        ph[: pk[0]] = ((idx[: pk[0]] - pk[0]) / period) % 1.0  # 첫 피크 이전은 평균 주기로 외삽
+        for a, b in zip(pk[:-1], pk[1:]):
+            ph[a:b] = (idx[a:b] - a) / (b - a)
+        ph[pk[-1] :] = ((idx[pk[-1] :] - pk[-1]) / period) % 1.0
+        return ph
+
+    def __call__(self, t: torch.Tensor) -> torch.Tensor:
+        """클립 시각 (E,) → 다리별 위상 (E, 2), 값은 [0, 1)."""
+        i = t.div(self.dt).round().long().clamp(0, self.table.shape[0] - 1)
+        return self.table[i]
+
+
+# ---------------------------------------------------------------------------
 # 서브스텝 훅: 착용자 목표(옵션) + HLP/LLP + qfrc 주입 + 기록
 # ---------------------------------------------------------------------------
 class SystemHook:
-    def __init__(self, env, ctrl: AssistController, override: JointTorqueOverride, args, n_calls: int):
+    def __init__(self, env, ctrl: AssistController, override: JointTorqueOverride, args, n_calls: int,
+                 gait_phase: "MocapGaitPhase | None" = None):
         self.env = env
         self.sim = env.simulator
         self.ctrl = ctrl
@@ -345,6 +420,15 @@ class SystemHook:
         self.use_ff = self.mocap_pd and not args.no_feedforward
         self.assist_scale = float(args.assist_scale)
         self.motion_ids = torch.full((2,), int(args.motion_id), device=dev, dtype=torch.long)
+        # 오라클 탐침
+        self.oracle = args.oracle
+        self.gait_phase = gait_phase
+        self.oracle_beta = float(args.oracle_beta)
+        self.oracle_torque = float(args.oracle_torque)
+        self.oracle_limit = float(args.oracle_limit) if args.oracle_limit is not None else float(ctrl.torque_limit)
+        lo, hi = (float(v) / 100.0 for v in args.oracle_window.split(","))
+        self.oracle_lo, self.oracle_hi = lo, hi
+        self.oracle_ramp = max(float(args.oracle_ramp) / 100.0, 1e-6)
         self.lock_idx = None
         if self.mocap_pd and args.lock_knee_ankle:
             self.lock_idx = torch.tensor(
@@ -372,9 +456,22 @@ class SystemHook:
             "hip_pos": z(2, 2), "hip_vel": z(2, 2), "trunk": z(2, 2), "ref_hip": z(2, 2),
             "tau_assist": z(2, 2), "tau_pd_prev": z(2, 2), "tau_ff_prev": z(2, 2),
             "raw_action": z(2, 2), "theta_d_future": z(2, S, 2), "chunk_age": z(2),
-            "chunk": z(2, K, 2), "chunk_t0": z(2), "root_z": z(2),
+            "chunk": z(2, K, 2), "chunk_t0": z(2), "root_z": z(2), "root_xy": z(2, 2),
+            # 오라클 진단용: 정책이 내려던 토크와 실제 보행 위상
+            "tau_policy": z(2, 2), "gait_phase": z(2),
         }
         self.t_sim = 0.0
+
+    def _oracle_gate(self, phase: torch.Tensor) -> torch.Tensor:
+        """위상 (2,) → 창 안이면 1, 경계에서 코사인으로 오르내리는 게이트 (2,)."""
+        width = (self.oracle_hi - self.oracle_lo) % 1.0
+        if self.oracle_hi - self.oracle_lo >= 1.0 or width == 0.0:
+            width = 1.0
+        d_in = torch.remainder(torch.nan_to_num(phase, nan=0.5) - self.oracle_lo, 1.0)
+        ramp = min(self.oracle_ramp, 0.5 * width)
+        g = torch.minimum((d_in / ramp).clamp(0, 1), ((width - d_in) / ramp).clamp(0, 1))
+        g = torch.where((d_in <= width) & ~torch.isnan(phase), g, torch.zeros_like(g))
+        return 0.5 * (1.0 - torch.cos(math.pi * g))
 
     @torch.no_grad()
     def __call__(self, sim, window: int) -> None:
@@ -409,10 +506,11 @@ class SystemHook:
 
         # 착용자 대역 목표 (mocap_pd) / 기록용 레퍼런스 (tracker)
         t_motion = env.motion_manager.motion_times
+        t_phase = t_motion + window * self.llp_dt  # 지금 이 순간의 클립 시각 (오라클 위상용)
         if self.mocap_pd:
             t_ref = t_motion + (window + 1) * self.llp_dt
         else:
-            t_ref = t_motion + window * self.llp_dt
+            t_ref = t_phase
         ref = env.motion_lib.get_motion_state(self.motion_ids, t_ref)
         if self.lock_idx is not None:
             ref.dof_pos[:, self.lock_idx] = 0.0
@@ -422,6 +520,20 @@ class SystemHook:
             sim._apply_simulator_pd_targets(ref.dof_pos[:, self.conv_to_sim])
             if self.use_ff:
                 tau_ff = self.kd * ref.dof_vel
+
+        # 오라클 탐침: 정책 출력을 규칙 토크로 갈아끼운다 (정책은 계속 돌려 비교용으로 기록)
+        tau_policy = tau
+        phase = torch.full((2,), float("nan"), device=tau.device)
+        if self.gait_phase is not None:
+            phase = self.gait_phase(t_phase)[ENV_B]
+        if self.oracle == "beta":
+            tau = (self.oracle_beta * sim.window_tau_pd_common[:, self.hip_idx_t]).clamp(
+                -self.oracle_limit, self.oracle_limit
+            )
+        elif self.oracle == "phase":
+            gate = self._oracle_gate(phase)
+            tau = torch.zeros_like(tau)
+            tau[ENV_B] = gate * max(-self.oracle_limit, min(self.oracle_limit, self.oracle_torque))
 
         inject = tau_ff.clone()
         inject[ENV_B, self.hip_idx_t] += self.assist_scale * tau[ENV_B]
@@ -443,8 +555,12 @@ class SystemHook:
         L["chunk_age"][i] = self.ctrl.chunk_age
         L["chunk"][i] = self.ctrl.chunk_joint()
         L["chunk_t0"][i] = self.ctrl._chunk_t0
+        L["tau_policy"][i] = tau_policy
+        L["gait_phase"][i] = phase
         if not self.mocap_pd:
-            L["root_z"][i] = sim._get_simulator_root_state().root_pos[:, 2]
+            root_pos = sim._get_simulator_root_state().root_pos
+            L["root_z"][i] = root_pos[:, 2]
+            L["root_xy"][i] = root_pos[:, :2]
         self.prev_tau_ff = tau_ff
         self.i += 1
         self.t_sim += self.llp_dt
@@ -513,7 +629,24 @@ def main():
         hip_kd = robot.control.control_info["hip_flexion_r"].damping * args.human_kd_scale
         print(f"[system] human PD (hip): Kp {hip_kp:.0f} Kd {hip_kd:.0f} (scale ×{args.human_kp_scale}/×{args.human_kd_scale})")
 
-    hook = SystemHook(env, ctrl, override, args, n_calls)
+    gait_phase = None
+    if args.human == "tracker":
+        gait_phase = MocapGaitPhase(
+            env.motion_lib, args.motion_id, hip_flexion_indices(dof_names), env.device,
+            max_time=args.start_time + args.seconds + 2.0,
+        )
+        valid = bool(torch.isfinite(gait_phase.table).all())
+        print(f"[phase] mocap 위상표: {gait_phase.span:.1f} s 구간, 최대굴곡 {gait_phase.num_peaks}회 "
+              f"(평균 주기 {gait_phase.span / max(gait_phase.num_peaks, 1):.3f} s), "
+              f"{'OK' if valid else '주기 검출 실패 → NaN'}")
+    if args.oracle == "phase":
+        print(f"[oracle] 창 {args.oracle_window} % 에 {args.oracle_torque:+.0f} N·m "
+              f"(ramp {args.oracle_ramp} %, 한계 {args.oracle_limit or ctrl.torque_limit} N·m)")
+    elif args.oracle == "beta":
+        print(f"[oracle] beta: τ_assist = {args.oracle_beta} × τ_착용자(직전 창), "
+              f"한계 {args.oracle_limit or ctrl.torque_limit} N·m")
+
+    hook = SystemHook(env, ctrl, override, args, n_calls, gait_phase=gait_phase)
     sim.substep_hook = hook
 
     # 동기 리셋: 같은 클립, 같은 시작 시각, 같은 위치
@@ -537,6 +670,7 @@ def main():
     # 루프 (env 주기)
     fall_steps = 0
     survived_s = None
+    body_err_log = []  # env step마다 (2,) — 착용자 몸체가 레퍼런스에서 벗어난 거리
     t_wall = time.perf_counter()
     for step in range(num_steps):
         if agent is not None:
@@ -547,6 +681,15 @@ def main():
         else:
             action = torch.zeros(2, robot.number_of_actions, device=env.device)
         obs, _rew, _done, _term, _extras = env.step(action)
+
+        if body_err_log is not None:
+            try:
+                ctx = env._current_context
+                err = (ctx.current.rigid_body_pos - ctx.mimic.ref_state.rigid_body_pos).norm(dim=-1).mean(dim=-1)
+                body_err_log.append(err.detach().cpu().numpy().copy())
+            except (AttributeError, KeyError, TypeError):
+                print("[system] 몸체 추종 오차를 읽을 수 없어 기록하지 않는다 (mimic 컨텍스트 없음)")
+                body_err_log = None
 
         if args.human == "tracker":
             root_z = sim._get_simulator_root_state().root_pos[:, 2]
@@ -573,6 +716,9 @@ def main():
                 print(f"[system] video → {out_dir / 'sim.mp4'}")
 
     traces = hook.traces()
+    if body_err_log:
+        traces["body_err"] = np.stack(body_err_log)                       # (num_steps, 2)
+        traces["body_err_t"] = (np.arange(len(body_err_log)) + 1) * args.env_dt
     meta = {
         "human": args.human,
         "robot": args.robot_name if args.human == "mocap_pd" else type(robot).__name__,
@@ -593,6 +739,12 @@ def main():
         "seconds": args.seconds,
         "warmup": args.warmup,
         "assist_scale": args.assist_scale,
+        "oracle": args.oracle if args.oracle != "off" else None,
+        "oracle_beta": args.oracle_beta if args.oracle == "beta" else None,
+        "oracle_window": args.oracle_window if args.oracle == "phase" else None,
+        "oracle_torque": args.oracle_torque if args.oracle == "phase" else None,
+        "oracle_ramp": args.oracle_ramp if args.oracle == "phase" else None,
+        "oracle_limit": args.oracle_limit,
         "torque_limit": ctrl.torque_limit,
         "hlp_latency_ms": args.hlp_latency_ms or None,
         "obs_horizon_ms": args.obs_horizon_ms,

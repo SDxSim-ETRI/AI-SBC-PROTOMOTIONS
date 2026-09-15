@@ -84,7 +84,15 @@ python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cab
 ```
 결과 요지: 진자 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
 않는다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 재학습해 walk −32 %(v3), 15모션
-−22 %(v4), 착용자 앙상블 −32/−26 %(v5). 보관: `checkpoints/llp_v{3,4,5}_*`, tracker
+−22 %(v4), 착용자 앙상블 −32/−26 %(v5).
+
+평가는 **여러 비용 지표를 한 표에** 올려 읽는다 (아래 gotcha 참고):
+```bash
+python examples/experiments/assist_skeleton/compare_runs.py --plot docs/oracle.png results/oracle/*
+# 오라클 탐침 (학습된 정책 대신 규칙 토크를 강제 주입 — 상한과 인과를 본다)
+python examples/experiments/assist_skeleton/run_system.py ... --oracle beta --oracle-beta 0.5
+python examples/experiments/assist_skeleton/run_system.py ... --oracle phase --oracle-window 0,10 --oracle-torque -40
+``` 보관: `checkpoints/llp_v{3,4,5}_*`, tracker
 `checkpoints/v30_newton_suit_passive_walk`·`v31_newton_suit_passive_motions15`.
 
 ### Tests / lint
@@ -118,6 +126,10 @@ These files carry the design docs; read the relevant one before changing that ar
 - Pre-existing F822 errors in `component_factories.py` `__all__` — leave them.
 - suit MJCF의 뼈 메시는 **그리기 전용**(contype=0)이고 headless에서는 로드되지 않는다.
   대규모 학습이 갑자기 4배 느려지면 `parse_visuals` 경로부터 볼 것.
+- **`|τ·ω|` 절감률만 보면 속는다.** 이 값은 착용자 다리가 덜 흔들리기만 해도 내려간다 —
+  v10의 "−25.4 %"는 대부분 각속도 감소였고, 근활성 프록시 τ²로 재면 +7 %로 나빠진다
+  (2026-09-15 오라클 진단, `docs/NEXT_SESSION.md` §2). 평가할 때 τ²·전진 속도·몸체
+  추종 오차를 **항상 같이** 볼 것 — `compare_runs.py`가 한 표로 찍어 준다.
 - Research-side pitfalls (RNG pairing, fps, zarr versions): framework doc §8.
 
 ## Code Standards

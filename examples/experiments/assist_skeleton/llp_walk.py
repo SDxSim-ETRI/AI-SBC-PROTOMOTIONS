@@ -85,7 +85,14 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                              "denoise 1에서 실측 4.9 ms라 10 ms 예산에 들어간다")
     parser.add_argument("--assist-limit", type=float, default=ASSIST_TORQUE_LIMIT,
                         help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
-    parser.add_argument("--human-power-weight", type=float, default=-0.003)
+    parser.add_argument("--human-power-weight", type=float, default=None,
+                        help="착용자 비용 항 weight (None = --human-cost에 맞춘 기본값). "
+                             "두 지표는 크기가 60배 달라서 같이 쓰면 안 된다")
+    parser.add_argument("--human-cost", choices=["work", "torque_sq"], default="work",
+                        help="착용자 비용을 무엇으로 재는가. "
+                             "work: |τ·ω| 기계적 파워 — **착용자 다리를 덜 움직이게 해도 내려간다** "
+                             "(v10이 그 해로 수렴: 착지 구간 |ω| −42 %, 근토크는 오히려 +2.9 %). "
+                             "torque_sq: τ² 근활성 프록시 — 속도로는 못 내리고 토크를 실제로 덜어야 내려간다")
     parser.add_argument("--reward-variant", choices=["hinge", "tracker"], default="hinge",
                         help="hinge: 몸체 오차가 margin 초과분만 벌점(권장) / tracker: tracker의 gt·rh 추종 보상(v1)")
     parser.add_argument("--body-err-margin", type=float, default=0.09, help="hinge 시작 몸체 오차 [m]")
@@ -251,7 +258,16 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
                 "tau_agent": EnvContext.assist.tau_agent,
                 "dof_vel": EnvContext.assist.dof_vel,
             },
-            static_params={"weight": float(args.human_power_weight)},
+            # 보행 실측 규모: |τ·ω| ≈ 180 W, τ² ≈ 11000 (N·m)² — 항 크기가 비슷해지도록
+            # 기본 weight를 지표별로 다르게 잡는다 (둘 다 step당 −0.5 안팎)
+            static_params={
+                "weight": float(
+                    args.human_power_weight
+                    if args.human_power_weight is not None
+                    else (-0.003 if args.human_cost == "work" else -5.0e-5)
+                ),
+                "use_torque_squared": args.human_cost == "torque_sq",
+            },
         ),
         "assist_effort": MdpComponent(
             compute_func=compute_assist_effort_rew,
