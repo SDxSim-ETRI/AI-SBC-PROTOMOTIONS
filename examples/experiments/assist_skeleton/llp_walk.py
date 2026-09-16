@@ -88,16 +88,20 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--human-power-weight", type=float, default=None,
                         help="착용자 비용 항 weight (None = --human-cost에 맞춘 기본값). "
                              "두 지표는 크기가 60배 달라서 같이 쓰면 안 된다")
-    parser.add_argument("--human-cost", choices=["work", "torque_sq"], default="work",
+    parser.add_argument("--human-cost", choices=["work", "torque_sq", "both"], default="work",
                         help="착용자 비용을 무엇으로 재는가. "
                              "work: |τ·ω| 기계적 파워 — **착용자 다리를 덜 움직이게 해도 내려간다** "
                              "(v10이 그 해로 수렴: 착지 구간 |ω| −42 %, 근토크는 오히려 +2.9 %). "
-                             "torque_sq: τ² 근활성 프록시 — 속도로는 못 내리고 토크를 실제로 덜어야 내려간다")
+                             "torque_sq: τ² 근활성 프록시 — 속도로는 못 내리고 토크를 실제로 덜어야 내려간다. "
+                             "both: 둘을 반씩 — τ²가 속도 꼼수를 막고, |τ·ω|가 브레이킹 일 절감을 계속 보상한다 "
+                             "(β 오라클은 두 지표 모두 좋았다: P −20.3 %, τ² −32.3 %)")
     parser.add_argument("--reward-variant", choices=["hinge", "tracker"], default="hinge",
                         help="hinge: 몸체 오차가 margin 초과분만 벌점(권장) / tracker: tracker의 gt·rh 추종 보상(v1)")
     parser.add_argument("--body-err-margin", type=float, default=0.09, help="hinge 시작 몸체 오차 [m]")
     parser.add_argument("--body-err-weight", type=float, default=10.0, help="hinge 벌점 weight (0.05 m 초과 → −0.5/step)")
-    parser.add_argument("--assist-effort-weight", type=float, default=-5.0e-5)
+    parser.add_argument("--assist-effort-weight", type=float, default=None,
+                        help="assist Στ² 벌점 weight (None = 토크 한계에 맞춰 자동 환산 — "
+                             "한계를 올려도 이 항이 몰래 한계로 작동하지 않게)")
     parser.add_argument("--hlp-calibration", type=str, default="motion",
                         help="HLP 영점: motion(재생 클립 평균) | none | 'p,q,r,s'(deg, 착용자 스트림 평균으로 잰 값). "
                              "착용자 자세는 mocap과 10° 가까이 다를 수 있다 — run_system.py --calibration wearer가 측정값을 찍어 준다")
@@ -142,6 +146,39 @@ def motion_lib_config(args: argparse.Namespace):
     cfg: MotionLibConfig = _tracker_resolved(args)["motion_lib"]
     cfg.motion_file = args.motion_file
     return cfg
+
+
+def _human_cost_components(args: argparse.Namespace):
+    """착용자 비용 보상 항 — 지표마다 크기가 60배 달라 weight를 따로 잡는다.
+
+    보행 실측 규모(무보조 A, 양다리 합): |τ·ω| ≈ 180 W, τ² ≈ 11,300 (N·m)².
+    각 항이 step당 −0.5 안팎(both는 반씩 −0.27)이 되도록 기본 weight를 고른다.
+    `--human-power-weight`를 주면 그 값이 **work 항**에 그대로 들어간다.
+    """
+    from protomotions.envs.context_views import EnvContext
+    from protomotions.envs.mdp_component import MdpComponent
+    from protomotions.envs.rewards.assist import compute_human_power_rew
+
+    both = args.human_cost == "both"
+    w_work = args.human_power_weight if args.human_power_weight is not None else (-0.0015 if both else -0.003)
+    w_sq = -2.5e-5 if both else -5.0e-5
+
+    def term(weight: float, torque_squared: bool):
+        return MdpComponent(
+            compute_func=compute_human_power_rew,
+            dynamic_vars={
+                "tau_agent": EnvContext.assist.tau_agent,
+                "dof_vel": EnvContext.assist.dof_vel,
+            },
+            static_params={"weight": float(weight), "use_torque_squared": torque_squared},
+        )
+
+    out = {}
+    if args.human_cost in ("work", "both"):
+        out["human_power"] = term(w_work, False)
+    if args.human_cost in ("torque_sq", "both"):
+        out["human_torque_sq"] = term(w_sq, True)
+    return out
 
 
 def _rate_steps(decimation: int):
@@ -252,27 +289,20 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
     #            정책이 최대 토크로 착용자를 mocap 쪽으로 끌어 "추종 개선"만 얻고 파워는 못 줄였다.
     #   tracker — tracker 자신의 gt/rh 추종 보상 (v1 재현용)
     reward_components = {
-        "human_power": MdpComponent(
-            compute_func=compute_human_power_rew,
-            dynamic_vars={
-                "tau_agent": EnvContext.assist.tau_agent,
-                "dof_vel": EnvContext.assist.dof_vel,
-            },
-            # 보행 실측 규모: |τ·ω| ≈ 180 W, τ² ≈ 11000 (N·m)² — 항 크기가 비슷해지도록
-            # 기본 weight를 지표별로 다르게 잡는다 (둘 다 step당 −0.5 안팎)
-            static_params={
-                "weight": float(
-                    args.human_power_weight
-                    if args.human_power_weight is not None
-                    else (-0.003 if args.human_cost == "work" else -5.0e-5)
-                ),
-                "use_torque_squared": args.human_cost == "torque_sq",
-            },
-        ),
+        **_human_cost_components(args),
         "assist_effort": MdpComponent(
             compute_func=compute_assist_effort_rew,
             dynamic_vars={"tau_assist": EnvContext.assist.tau_assist},
-            static_params={"weight": float(args.assist_effort_weight)},
+            # Στ²_assist는 한계의 제곱으로 커진다 — weight를 고정해 두면 한계를 올릴수록
+            # 이 항이 몰래 한계 노릇을 한다. **포화했을 때의 벌점 크기가 같도록** 환산한다
+            # (40 N·m·−5e-5 기준: 양다리 포화 시 −0.16/step).
+            static_params={
+                "weight": float(
+                    args.assist_effort_weight
+                    if args.assist_effort_weight is not None
+                    else -5.0e-5 * (ASSIST_TORQUE_LIMIT / float(args.assist_limit)) ** 2
+                )
+            },
         ),
         "action_rate": action_smoothness_factory(weight=float(args.action_rate_weight)),
     }

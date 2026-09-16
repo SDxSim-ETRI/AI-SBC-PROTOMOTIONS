@@ -130,6 +130,7 @@ These files carry the design docs; read the relevant one before changing that ar
   v10의 "−25.4 %"는 대부분 각속도 감소였고, 근활성 프록시 τ²로 재면 +7 %로 나빠진다
   (2026-09-15 오라클 진단, `docs/NEXT_SESSION.md` §2). 평가할 때 τ²·전진 속도·몸체
   추종 오차를 **항상 같이** 볼 것 — `compare_runs.py`가 한 표로 찍어 준다.
+  비교 수치는 백분율점(pt) 대신 두 값을 그대로 적거나 절대 단위로 쓴다 (사용자 지시).
 - Research-side pitfalls (RNG pairing, fps, zarr versions): framework doc §8.
 
 ## Code Standards
