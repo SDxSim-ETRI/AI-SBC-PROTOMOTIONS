@@ -884,6 +884,10 @@ class NewtonSimulator(Simulator):
         """
         if self.terrain is None:
             return
+        if self.robot_view.shape_count == 0:
+            # 충돌 형상이 없는 로봇 (예: hip_pendulum — 모든 geom이 시각 전용이라
+            # headless의 parse_visuals=False에서 shape 0개). 마찰을 줄 대상이 없다.
+            return
 
         terrain_friction = self.terrain.sim_config.static_friction
         terrain_restitution = self.terrain.sim_config.restitution
