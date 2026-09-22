@@ -371,6 +371,12 @@ effort −2e-5 + action rate −0.005 / 종료 = 오차 1 rad·각속도 25 rad/
 2. 외부 하중 상한이 0.8×effort_limit = 120 N·m(1.3 N·m/kg)에 묶인다 — 사람 범위는 덮고
    tracker의 332 N·m(3.7 N·m/kg)는 못 덮는다. 덮으려면 진자 effort_limit 150→300~400.
 3. 비용 weight를 v3의 −0.01에서 −0.0016/−3e-5로 낮췄다 (무보조 규모가 12 W → 87 W라).
+4. **HLP chunk 형식이 v3 것(25 ms × 7점, 창 4 × 50 ms = 0~150 ms)이다.** 지금 배포 HLP는
+   flexion100(10 ms × 6점, 0~50 ms)이라 `AssistController`가 경고 후 HLP 격자를 쓰고
+   50 ms 밖 창은 마지막 점을 늘려(ZOH) 채운다 — 스켈레톤 시험에서 관측 창의 2/3가 가짜
+   상수가 된다. v10처럼 창을 {0, 10, 20 ms}·chunk 10 ms × 6으로 맞춰 다시 거는 것이 맞아
+   보인다 (`--obs-future-samples 3 --obs-future-dt 0.01`, chunk 격자 인자 추가 필요).
+   학습 시작 뒤 발견 — 답에 따라 재시작.
 
 ### 실행
 ```bash
