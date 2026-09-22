@@ -69,6 +69,24 @@ class AssistEnvConfig(EnvConfig):
     # False면 순수 위치 PD (v1 동작).
     human_velocity_feedforward: bool = False
 
+    # ---- v4 플랜트 랜덤화 (기본값 = 꺼짐, 옛 pickle과 호환) ----
+    # 대퇴 body의 **질량중심 관성(body_inertia)** 배율 범위 (env·dof별 1회 샘플). (1,1)이면 비활성.
+    # 질량은 그대로 둔다 — 질량을 키우면 중력 모멘트(13 → 107 N·m)가 상시 하중이 되어 정책이
+    # "중력 받치기"로 비용을 깎는 법을 배운다. 관성만 키우면 τ→각도 응답만 무거워진다
+    # (입각기: 몸은 무겁고 hip 중력 모멘트는 작다). hip 축 관성 I = m·d² + r·I_com이라
+    # r=25에서 0.29 + 25×0.13 = 3.6 kg·m² (스켈레톤 다리 3.5).
+    inertia_scale_range: tuple = (1.0, 1.0)
+    inertia_body_keyword: str = "thigh"
+    # 착용자 임피던스: "gain_scale" = ke/kd × U[min,max] (v2/v3) |
+    # "natural_freq" = ω_n∈omega_n_range, ζ∈zeta_range에서 Kp=ω_n²·I, Kd=2ζ√(Kp·I)
+    # (I = hip 축 유효 관성). 진자 26.4 rad/s·0.66, 스켈레톤 착용자 7.5·0.38.
+    impedance_mode: str = "gain_scale"
+    omega_n_range: tuple = (26.4, 26.4)
+    zeta_range: tuple = (0.66, 0.66)
+    hip_inertia_base: float = 0.418  # (하위 호환) 대퇴 hip 축 관성 [kg·m²]
+    hip_inertia_com: float = 0.1316  # 대퇴 질량중심 관성 (hip_pendulum.xml, MuJoCo 계산)
+    hip_inertia_parallel: float = 0.2863  # m·d² 평행축 항 — 질량을 안 바꾸므로 고정
+
 
 class AssistEnv(BaseEnv):
     """사람 PD(BUILT_IN_PD) 위에 RL assist torque를 additive 주입하는 환경."""
@@ -98,18 +116,135 @@ class AssistEnv(BaseEnv):
         )
         # gain_scale=1.0: 사람 PD는 그대로 두고 additive 주입만 활성화
         self._torque_override.engage(gain_scale=1.0)
-        self._randomize_human_gains()
 
-        # 속도 피드포워드용 env별 Kd (게인 랜덤화 배율 반영)
-        kd_base = torch.tensor(
-            [
-                self.robot_config.control.control_info[name].damping
-                for name in self.robot_config.kinematic_info.dof_names
-            ],
-            device=self.device,
-            dtype=torch.float32,
+        n_dofs = self.robot_config.number_of_actions
+        sim = self.simulator
+        self._dof_sim_idx = sim.data_conversion.dof_convert_to_common[
+            torch.arange(n_dofs, device=self.device, dtype=torch.long)
+        ]
+        self._ke_wp = sim.robot_view.get_attribute("joint_target_ke", sim.model)
+        self._kd_wp = sim.robot_view.get_attribute("joint_target_kd", sim.model)
+
+        self._inertia_scale = self._randomize_inertia()  # (n, d), 1.0이면 비활성
+        if getattr(self.config, "impedance_mode", "gain_scale") == "natural_freq":
+            self._randomize_impedance_natural_freq()
+        else:
+            self._randomize_human_gains()
+
+        # 랜덤화가 끝난 뒤의 게인을 COMMON 순서로 기억 (매 step 스케줄의 기준)
+        import warp as wp
+
+        ke = wp.to_torch(self._ke_wp).view(self.num_envs, -1)
+        kd = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
+        self._ke_base = ke[:, self._dof_sim_idx].clone()
+        self._kd_base = kd[:, self._dof_sim_idx].clone()
+        self._human_kd = self._kd_base.clone()
+        self._gain_scheduled = hasattr(self.assist_component, "gain_schedule")
+        # 착용자 토크 한계 (COMMON 순서, (n, d)). built-in PD는 솔버가 이 값으로 clamp하지만
+        # 피드포워드는 qfrc 경로라 여기서 직접 clamp해야 한다 — 안 그러면 Kd 150 × θ̇_g 7 rad/s
+        # = 1000 N·m 같은 비인간적 토크가 "착용자 토크"로 집계된다 (v4 점검에서 실측).
+        self._effort_limit = torch.tensor(
+            [self.robot_config.control.control_info[n].effort_limit
+             for n in self.robot_config.kinematic_info.dof_names],
+            device=self.device, dtype=torch.float32,
+        ).unsqueeze(0).expand(self.num_envs, -1).clone()
+        if hasattr(self.assist_component, "set_wearer_gains"):
+            self.assist_component.set_wearer_gains(
+                self._ke_base, self._kd_base, self._effort_limit, self.hip_inertia_eff()
+            )
+
+    def _randomize_inertia(self) -> Tensor:
+        """대퇴 body 질량·관성을 env·dof별 배율로 바꾼다 (Newton body_* 속성, 1회).
+
+        배율은 dof(hip)마다 뽑고, 같은 쪽("right"/"left")의 대퇴 body에 건다.
+        """
+        cfg = self.config
+        n_dofs = self.robot_config.number_of_actions
+        lo, hi = getattr(cfg, "inertia_scale_range", (1.0, 1.0))
+        scale = lo + (hi - lo) * torch.rand(self.num_envs, n_dofs, device=self.device)
+        if hi <= lo and abs(lo - 1.0) < 1e-9:
+            return torch.ones(self.num_envs, n_dofs, device=self.device)
+
+        import warp as wp
+        from newton.solvers import SolverNotifyFlags
+
+        sim = self.simulator
+        keyword = getattr(cfg, "inertia_body_keyword", "thigh")
+        link_names = list(sim.robot_view.body_names)
+        dof_names = list(self.robot_config.kinematic_info.dof_names)
+        # dof ↔ body 매칭: 같은 쪽 키워드가 들어간 대퇴 body
+        body_for_dof = []
+        for dn in dof_names:
+            side = "right" if "right" in dn or dn.endswith("_r") else ("left" if "left" in dn or dn.endswith("_l") else None)
+            cand = [i for i, ln in enumerate(link_names) if keyword in ln and (side is None or side in ln)]
+            body_for_dof.append(cand[0] if cand else None)
+        assert all(b is not None for b in body_for_dof), f"inertia bodies not found: {link_names}"
+
+        I_wp = sim.robot_view.get_attribute("body_inertia", sim.model)
+        iI_wp = sim.robot_view.get_attribute("body_inv_inertia", sim.model)
+        I = wp.to_torch(I_wp).view(self.num_envs, -1, 3, 3)
+        iI = wp.to_torch(iI_wp).view(self.num_envs, -1, 3, 3)
+        for d, b in enumerate(body_for_dof):
+            r = scale[:, d]
+            I[:, b] = I[:, b] * r.view(-1, 1, 1)
+            iI[:, b] = iI[:, b] / r.view(-1, 1, 1)
+        sim.robot_view.set_attribute("body_inertia", sim.model, I_wp)
+        sim.robot_view.set_attribute("body_inv_inertia", sim.model, iI_wp)
+        sim.solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
+        return scale
+
+    def hip_inertia_eff(self) -> Tensor:
+        """env·dof별 hip 축 유효 관성 [kg·m²] = m·d² + 배율 × I_com."""
+        cfg = self.config
+        com = float(getattr(cfg, "hip_inertia_com", 0.1316))
+        par = float(getattr(cfg, "hip_inertia_parallel", 0.2863))
+        return par + com * self._inertia_scale
+
+    def _randomize_impedance_natural_freq(self):
+        """Kp = ω_n²·I, Kd = 2ζ√(Kp·I) — 관성이 바뀌어도 동역학 영역(ω_n, ζ)을 직접 뽑는다."""
+        import warp as wp
+        from newton.solvers import SolverNotifyFlags
+
+        cfg = self.config
+        n_dofs = self.robot_config.number_of_actions
+        I_eff = self.hip_inertia_eff()
+        wlo, whi = cfg.omega_n_range
+        zlo, zhi = cfg.zeta_range
+        wn = wlo + (whi - wlo) * torch.rand(self.num_envs, n_dofs, device=self.device)
+        ze = zlo + (zhi - zlo) * torch.rand(self.num_envs, n_dofs, device=self.device)
+        kp = wn * wn * I_eff
+        kd = 2.0 * ze * torch.sqrt(kp * I_eff)
+        ke_t = wp.to_torch(self._ke_wp).view(self.num_envs, -1)
+        kd_t = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
+        ke_t[:, self._dof_sim_idx] = kp
+        kd_t[:, self._dof_sim_idx] = kd
+        sim = self.simulator
+        sim.robot_view.set_attribute("joint_target_ke", sim.model, self._ke_wp)
+        sim.robot_view.set_attribute("joint_target_kd", sim.model, self._kd_wp)
+        sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+        # critic privileged 관측이 쓰는 gain_scale에는 진자 기본(300)에 대한 비율을 남긴다
+        base_kp = torch.tensor(
+            [self.robot_config.control.control_info[n].stiffness for n in self.robot_config.kinematic_info.dof_names],
+            device=self.device, dtype=torch.float32,
         )
-        self._human_kd = kd_base.unsqueeze(0) * self.assist_component._gain_scale
+        self.assist_component._gain_scale[:] = kp / base_kp.unsqueeze(0)
+
+    def _apply_gain_schedule(self):
+        """컴포넌트가 주는 (Kp 배율, Kd 배율)로 built-in PD 게인을 이번 step에 맞게 갱신."""
+        import warp as wp
+        from newton.solvers import SolverNotifyFlags
+
+        s_kp, s_kd = self.assist_component.gain_schedule()
+        ke_t = wp.to_torch(self._ke_wp).view(self.num_envs, -1)
+        kd_t = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
+        ke_t[:, self._dof_sim_idx] = self._ke_base * s_kp
+        kd_now = self._kd_base * s_kd
+        kd_t[:, self._dof_sim_idx] = kd_now
+        self._human_kd = kd_now
+        sim = self.simulator
+        sim.robot_view.set_attribute("joint_target_ke", sim.model, self._ke_wp)
+        sim.robot_view.set_attribute("joint_target_kd", sim.model, self._kd_wp)
+        sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
     def _randomize_human_gains(self):
         """env별 사람 PD 게인(ke/kd) 배율 랜덤화 (초기화 시 1회)."""
@@ -163,18 +298,24 @@ class AssistEnv(BaseEnv):
         self._current_processed_action[:] = tau_assist
 
         comp = self.assist_component
+        if getattr(self, "_gain_scheduled", False):
+            self._apply_gain_schedule()  # 입각 사건의 착용자 굳힘 (컴포넌트 step은 post_physics에서 갱신됨)
 
         # 사람 PD 목표 = 깨끗한 의도 궤적 θ_g (사람은 자기 의도를 정확히 앎)
         use_ffwd = getattr(self.config, "human_velocity_feedforward", False)
         if use_ffwd:
             pd_targets, target_vel = comp.get_pd_targets_and_vel()
             tau_ff = self._human_kd * target_vel  # 사람 몫의 피드포워드
+            if getattr(self, "_effort_limit", None) is not None:
+                tau_ff = torch.clamp(tau_ff, -self._effort_limit, self._effort_limit)
         else:
             pd_targets = comp.get_pd_targets()
             tau_ff = None
 
-        # qfrc 주입 = τ_assist (+ 사람 피드포워드 τ_ff)
+        # qfrc 주입 = τ_assist (+ 사람 피드포워드 τ_ff) (+ 외부 하중 τ_ext — 착용자 토크 아님)
         inject = tau_assist if tau_ff is None else tau_assist + tau_ff
+        if hasattr(comp, "external_torque"):
+            inject = inject + comp.external_torque()
         self._torque_override.set_torques(inject)
         comp._tau_assist[:] = tau_assist
 

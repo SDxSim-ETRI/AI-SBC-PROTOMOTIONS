@@ -334,6 +334,53 @@ effort −2e-5 + action rate −0.005 / 종료 = 오차 1 rad·각속도 25 rad/
 
 검증은 스켈레톤과 같은 잣대로: `compare_runs.py`의 위상표에서 착지 구간 τ²가 내려가는지.
 
+## 2-F. 진자 v4 — 랜덤화된 플랜트에서 LLP 재학습 (2026-09-22 착수)
+
+방향 전환: **랜덤화된 진자가 학습 플랜트, 스켈레톤은 한 번도 안 본 시험장.** 09-12의
+"통합 env에서 학습" 결정을 뒤집는다 — 스켈레톤에서 학습한 v10·v11이 tracker의 bang-bang
+특성에 맞춰 버린 것이 근거고, 사용자 목표("어떤 입력이 와도 옳은 보조")에 맞는 구조는
+도메인 랜덤화다. 진자 v3의 실패는 보상·관측이 아니라 **분포**였다(§2-D: 그네 밀어주기만 봄).
+
+### 무엇이 학습이고 무엇이 아닌가
+환경 코드(`DisturbedAssistTargetControl`, `AssistEnv` v4 필드, `mlp_v4.py`)를 짜는 것은
+엔지니어링이고, `train_agent.py`로 PPO를 돌리는 것만 LLP 학습이다. 아래 5축은 **학습되지
+않고 환경이 에피소드마다 던지는 조건**이며 정책은 그 값을 관측하지 못한다.
+
+| 축 | v3 | v4 (`mlp_v4.py` 기본값) | 구현 |
+|---|---|---|---|
+| 하중 | 없음 | 입각 사건: 외부 모멘트 0~2 N·m/kg(×90 kg) + 착용자 Kp×2~8·Kd×1.5~4 굳힘, 0.08~0.45 s, 간격 0.4~1.6 s, 부호 무작위; 작은 섭동 0~0.3 N·m/kg | `assist_disturbance_control.py` (qfrc 채널, 착용자 토크 미포함) |
+| 관성 | 0.42 | 질량중심 관성 ×1~25 → hip 축 0.43~3.51 kg·m² (질량·중력 고정) | `AssistEnv._randomize_inertia` (Newton `body_inertia`) |
+| 임피던스 | 게인 ±30 % | ω_n 12~24 rad/s, ζ 0.3~0.8 → Kp 89~1929, Kd 4.6~107 | `_randomize_impedance_natural_freq` + 매 step 게인 스케줄 |
+| θ_g | sine+hold, 블렌드 0.4~1.2 s | 블렌드 0.25~2.5 s, hold 30 %, **진폭을 착용자 능력(0.5×한계/I)에 묶음** | 부모 config + `_clamp_intent_amplitude` |
+| 관측·비용 | 히스토리 100 ms, \|τ·ω\| | 히스토리 250 ms, 이전 action 100 ms; \|τ·ω\|(−0.0016) + τ²(−3e-5), 추종 exp(w 1) 유지, 한계 40 N·m | `mlp_v4.py` |
+
+### 점검(`check_env_v4.py`, 무보조 64 env × 15 s)에서 잡은 것
+* **피드포워드 폭주**: PD 몫은 effort_limit 150에 정확히 걸리지만 피드포워드 Kd·θ̇_g는 qfrc라
+  한계 없이 1086 N·m까지 나갔다(Kd 150 × 초당 640° 의도). → 피드포워드를 ±한계로 clamp,
+  블렌드 하한 0.05→0.25 s, ω_n 하한 6→12(6은 중력도 못 버텨 종료).
+* **질량 vs 관성**: 질량 ×8이면 중력 107 N·m가 상시 하중이 되어 "중력 받치기"를 배울 위험 →
+  관성만 키운다 (사용자 확인 대기, §고려사항 1).
+* **실현 불가능한 의도**: 3.5 kg·m²에 2 Hz·0.6 rad은 330 N·m 필요 → 추종 실패 종료가
+  15 s × 64 env에서 87회. 진폭을 능력에 묶자 6회.
+* 최종 파형: τ_agent RMS 48 N·m, 범위 ±300, 피크/RMS 6.3, \|θ̈\| RMS 21 rad/s² — 스켈레톤
+  보행 착용자(78 / −332~+176 / 4.3 / 48)와 같은 등급. 그림 `docs/pendulum_v4_env_check.png`.
+  step 비용 v3 8.6 → v4 12.3 ms @4096 env.
+
+### 사용자 확인 대기 중인 고려사항
+1. 관성만 키우고 질량·중력은 고정 (위). 되돌리기 한 줄.
+2. 외부 하중 상한이 0.8×effort_limit = 120 N·m(1.3 N·m/kg)에 묶인다 — 사람 범위는 덮고
+   tracker의 332 N·m(3.7 N·m/kg)는 못 덮는다. 덮으려면 진자 effort_limit 150→300~400.
+3. 비용 weight를 v3의 −0.01에서 −0.0016/−3e-5로 낮췄다 (무보조 규모가 12 W → 87 W라).
+
+### 실행
+```bash
+python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --steps 1500   # 학습 전 점검
+# 학습 (systemd): results/assist_pendulum_v4, unit aisbc-pend-v4
+# 평가: 진자 A/B + 스켈레톤 run_system.py --llp-checkpoint results/assist_pendulum_v4/last.ckpt --llp-dt 0.01
+```
+평가 잣대: `compare_runs.py` 위상표에서 **착지 구간(0~20 %) τ²**가 내려가는가 — v10은
++19, β 오라클은 −23 (절대 (N·m)² 기여, §2-B). \|ω\|가 유지되는가.
+
 ## 3. 토크 한계 40 N·m의 출처 — 스펙이 아니라 우리가 고른 값
 
 - 진자 단계에서 25 N·m로 시작(내가 "착용 장치 현실 범위"로 가정한 값, 근거 문서 없음).
