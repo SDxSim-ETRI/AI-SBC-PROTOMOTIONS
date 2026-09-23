@@ -481,6 +481,12 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
   ```
 - 파이썬 세그폴트가 3일간 8회 났다(6회 python3.11 내부, 2회 libc10_cuda.so). 주소가 매번 달라
   특정 버그라기보다 네이티브 확장 메모리 문제로 보이고, CUDA graph가 1순위 용의자다.
+  **2026-09-23 첫 스택 확보** (`PYTHONFAULTHANDLER=1`, 진자 v4 학습 epoch 3,144): 크래시 스레드가
+  `assist_env._apply_gain_schedule` → `newton notify_model_changed(JOINT_DOF_PROPERTIES)` →
+  `mujoco_warp io.set_const_0` → `smooth._solve_LD_dense`. 즉 **매 step 게인 통지가 모델 상수
+  재계산(밀집 LDL)을 돌리다 죽었다.** v4 전용 경로라 스켈레톤 run들의 세그폴트와 같은 원인인지는
+  미확정(그쪽은 게인 통지가 없다). 게인은 모델 상수와 무관하므로 통지 대신 actuator 파라미터를
+  직접 써서 `set_const_0`를 피하는 것이 수정 방향 — step당 +3.7 ms의 정체이기도 하다.
 - `pkill -f <실험이름>`은 **명령을 친 셸까지 죽인다**. PID 파일이나 systemd로 끌 것.
 - 평가할 때 LLP 학습 주기와 `--llp-dt`를 반드시 맞출 것(v10은 0.005).
 - 학습 중 산출물은 `results/<exp>/`(git 미추적), 보관본은 `checkpoints/<버전>/` + `INFO.md`(LFS).
