@@ -207,7 +207,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--walk", nargs="+", required=True, help="이름=경로glob (걷기 실행)")
     p.add_argument("--run", nargs="*", default=[], help="이름=경로glob (달리기 실행)")
-    p.add_argument("--chart", default=None, help="위상 그림에 올릴 걷기 실행 이름들 (쉼표, 최대 4)")
+    p.add_argument("--chart", default=None, help="위상 그림에 올릴 걷기 실행 이름들 (';' 구분, 최대 4; 이름에 쉼표 가능)")
     p.add_argument("--title", default="진자 v4 → 스켈레톤 전이 시험")
     p.add_argument("--verdict", default="", help="맨 위 한 줄 판정 (HTML 가능)")
     p.add_argument("--notes", default="", help="맨 아래 각주 (HTML 가능)")
@@ -227,9 +227,11 @@ def main():
     run = resolve(args.run)
     walk_m = {n: metrics(r) for n, r in walk.items()}
     run_m = {n: metrics(r) for n, r in run.items()}
-    chart_names = [s.strip() for s in (args.chart.split(",") if args.chart else list(walk)[:4])][:4]
+    chart_names = [s.strip() for s in (args.chart.split(";") if args.chart else list(walk)[:4])][:4]
     phase = {n: phase_rows(walk[n]) for n in walk}
     chart_series = {n: [r["contrib"] for r in phase[n]] for n in chart_names if phase.get(n)}
+    missing = [n for n in chart_names if n not in walk]
+    assert chart_series, f"--chart 이름이 --walk 이름과 맞지 않음: {missing}"
     colors = [f"var(--s{i+1})" for i in range(len(chart_series))]
 
     legend = "".join(
