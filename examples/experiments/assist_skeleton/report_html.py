@@ -239,7 +239,9 @@ def main():
     )
     walk_tbl = table_html(walk_m, "걷기 (motion 0, 40 s, 착용자 v32)",
                           "무보조 A 대비 보조 B의 변화 [%]. <b>음수가 좋다.</b> τ²는 다리를 덜 움직여서는 못 내리는 지표라 기준 지표로 쓴다. 굵은 칸 = 열에서 가장 낮은 값.")
-    run_tbl = table_html(run_m, "달리기 (motion 1, 40 s)", "같은 잣대. 어떤 버전도 달리기에서 착용자 근토크를 덜어 준 적이 없다.") if run_m else ""
+    run_tbl = table_html(run_m, "달리기 (motion 1, 40 s)",
+                         "같은 잣대. 스켈레톤에서 학습한 버전(v10·v12)은 달리기에서 착용자 근토크(τ²)를 오히려 늘렸다 — "
+                         "|τ·ω| 파워가 내려간 것은 각속도 감소분이다. 진자에서 학습한 v4 새 형식이 τ²를 줄인 첫 버전.") if run_m else ""
 
     page = f"""<title>{html.escape(args.title)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
