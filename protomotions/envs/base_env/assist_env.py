@@ -244,7 +244,14 @@ class AssistEnv(BaseEnv):
         sim = self.simulator
         sim.robot_view.set_attribute("joint_target_ke", sim.model, self._ke_wp)
         sim.robot_view.set_attribute("joint_target_kd", sim.model, self._kd_wp)
-        sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
+        # notify_model_changed(JOINT_DOF_PROPERTIES)는 게인 복사 뒤에 mujoco_warp.set_const_0
+        # (qpos0 상수 재계산: DOF마다 밀집 LDL 풀이)를 매번 다시 돌린다 — 게인과 무관한 계산이고,
+        # 매 step 호출에서 세그폴트가 났다(2026-09-23, faulthandler 스택). 게인 복사 커널만 돌린다.
+        upd = getattr(sim.solver, "_update_joint_dof_properties", None)
+        if upd is not None:
+            upd()
+        else:
+            sim.solver.notify_model_changed(SolverNotifyFlags.JOINT_DOF_PROPERTIES)
 
     def _randomize_human_gains(self):
         """env별 사람 PD 게인(ke/kd) 배율 랜덤화 (초기화 시 1회)."""
