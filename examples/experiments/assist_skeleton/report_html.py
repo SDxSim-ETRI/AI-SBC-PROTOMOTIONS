@@ -64,6 +64,18 @@ def metrics(run: Path):
         "corr": float(np.mean([np.corrcoef(assist[:, B, d], tau[:, A, d])[0, 1] for d in range(2)])),
         "survived": meta.get("survived_s"),
     }
+    try:
+        from scipy.signal import find_peaks
+        dt = meta["llp_dt"]
+        def amp(x):
+            pk, _ = find_peaks(x, distance=int(0.7 / dt)); tr_, _ = find_peaks(-x, distance=int(0.7 / dt))
+            return float(np.degrees(x[pk].mean() - x[tr_].mean()))
+        q, ref = tr["hip_pos"][idx], tr["ref_hip"][idx]
+        out["amp_A"] = np.mean([amp(q[:, A, d]) for d in range(2)])
+        out["amp_B"] = np.mean([amp(q[:, B, d]) for d in range(2)])
+        out["amp_ref"] = np.mean([amp(ref[:, A, d]) for d in range(2)])
+    except Exception:
+        pass
     if "root_xy" in tr and np.abs(tr["root_xy"]).max() > 0:
         xy = tr["root_xy"]
         net = np.linalg.norm(xy[idx[-1]] - xy[idx[0] - 1], axis=-1)
@@ -88,10 +100,12 @@ def phase_rows(run: Path, bins=10):
         sel = (ph >= b / bins) & (ph < (b + 1) / bins)
         a2 = (tau[:, A][sel] ** 2).mean()
         b2 = (tau[:, B][sel] ** 2).mean()
+        w = 0.5 * (tr["hip_vel"][idx - 1] + tr["hip_vel"][idx])
         rows.append({
             "contrib": float((b2 - a2) * sel.mean() * 2),   # 전체 τ² 평균에 대한 절대 기여 (N·m)²
             "tauA": float(tau[:, A][sel].mean()), "tauB": float(tau[:, B][sel].mean()),
             "assist": float(assist[:, B][sel].mean()),
+            "omegaA": float(np.abs(w[:, A])[sel].mean()), "omegaB": float(np.abs(w[:, B])[sel].mean()),
         })
     return rows
 
@@ -116,14 +130,16 @@ def table_html(rows: dict, title: str, note: str, running=False):
             cls = ' class="best"' if v is not None and best[k] is not None and abs(v - best[k]) < 1e-9 else ""
             cells.append(f"<td{cls}>{fmt(v)}</td>")
         surv = f"{m['survived']:.1f} s 낙상" if m.get("survived") else "40 s 완주"
-        extra = f"<td>{m['assist_rms']:.1f}</td><td>{fmt(m['corr'], 2)}</td><td class=\"txt\">{surv}</td>"
+        ampc = (f"<td class=\"txt\">{m['amp_A']:.1f}° → {m['amp_B']:.1f}° <span class=\"dim\">(mocap {m['amp_ref']:.1f}°)</span></td>"
+                if "amp_A" in m else "<td>—</td>")
+        extra = f"{ampc}<td>{m['assist_rms']:.1f}</td><td>{fmt(m['corr'], 2)}</td><td class=\"txt\">{surv}</td>"
         body.append(f"<tr><th scope=\"row\">{html.escape(name)}</th>{''.join(cells)}{extra}</tr>")
     return f"""
 <section>
   <h2>{html.escape(title)}</h2>
   <p class="note">{note}</p>
   <div class="scroll"><table>
-    <thead><tr><th>실행</th>{head}<th>보조 RMS [N·m]</th><th>보조↔착용자 토크 상관</th><th>결과</th></tr></thead>
+    <thead><tr><th>실행</th>{head}<th>hip 스윙 진폭 A → B</th><th>보조 RMS [N·m]</th><th>보조↔착용자 토크 상관</th><th>결과</th></tr></thead>
     <tbody>{''.join(body)}</tbody>
   </table></div>
 </section>"""
@@ -203,6 +219,25 @@ def phase_table_html(series_rows: dict):
 </table></div>"""
 
 
+def omega_table_html(series_rows: dict):
+    """위상 구간별 |ω| A → B 변화 [%] — 보조가 다리를 덜 움직이게 하는 구간이 어디인가."""
+    names = list(series_rows)
+    head = "".join(f"<th>{10*b}–{10*b+10}</th>" for b in range(10))
+    body = []
+    first = series_rows[names[0]]
+    body.append("<tr class=\"ref\"><th scope=\"row\">무보조 |ω| [rad/s] (참고)</th>" + "".join(f"<td>{r['omegaA']:.2f}</td>" for r in first) + "<td></td></tr>")
+    for name in names:
+        rows = series_rows[name]
+        cells = "".join(f"<td>{100*(r['omegaB']/max(r['omegaA'],1e-9)-1):+.0f}</td>" for r in rows)
+        tot = 100 * (sum(r["omegaB"] for r in rows) / max(sum(r["omegaA"] for r in rows), 1e-9) - 1)
+        body.append(f"<tr><th scope=\"row\">{html.escape(name)}</th>{cells}<td class=\"sum\">{tot:+.0f}</td></tr>")
+    return f"""
+<div class="scroll"><table class="phase">
+  <thead><tr><th>위상 [%]</th>{head}<th>전체</th></tr></thead>
+  <tbody>{''.join(body)}</tbody>
+</table></div>"""
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--walk", nargs="+", required=True, help="이름=경로glob (걷기 실행)")
@@ -268,6 +303,7 @@ td.best{{background:var(--best);font-weight:500}}
 td.txt{{text-align:left;font-family:"IBM Plex Sans KR",sans-serif}}
 td.sum{{font-weight:500;border-left:1px solid var(--rule)}}
 tr.ref td,tr.ref th{{color:var(--ink2);font-weight:400}}
+.dim{{color:var(--ink2)}}
 .legend{{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;margin:0 0 8px}}
 .lg i{{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}}
 svg .grid{{stroke:var(--grid);stroke-width:1}} svg .zero{{stroke:var(--zero);stroke-width:1.2}}
@@ -293,6 +329,9 @@ svg .bar:hover{{opacity:.75}}
     {phase_chart_svg(chart_series, colors)}
     <h2 style="margin-top:18px">위상표 (같은 수치 + 구간별 보조 토크 평균 [N·m])</h2>
     {phase_table_html({n: phase[n] for n in walk if phase.get(n)})}
+    <h2 style="margin-top:22px">위상별 hip 각속도 |ω| 변화 (A → B, %)</h2>
+    <p class="note">보조가 착용자의 다리를 어디서 덜(또는 더) 움직이게 하는가. 음수 = 보조 켤 때 그 구간에서 다리가 느리다. β 오라클(착용자 토크와 같은 방향으로만 미는 상한)은 거의 0이다.</p>
+    {omega_table_html({n: phase[n] for n in walk if phase.get(n)})}
   </section>
   <p class="foot">{args.notes}</p>
 </main>
