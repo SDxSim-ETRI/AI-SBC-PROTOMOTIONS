@@ -29,8 +29,10 @@ v3 그대로 두고 **플랜트와 외란의 분포**를 넓힌다 — 정책은
 | 히스토리 | 100 ms / 이전 action 50 ms | 250 ms / 100 ms (관성 10배 범위의 암묵적 식별용) |
 | 비용 | \\|τ·ω\\| | \\|τ·ω\\| + τ² (속도로 못 내리는 항) |
 
-HLP chunk는 v3와 같은 에뮬레이션(θ_g 미래 + 실측 오차 통계) — chunk는 의도이고 하중은
-외란이라, 정책이 배우는 원리는 "예측에서 밀려나는 만큼 예측 쪽으로 밀어라".
+HLP chunk는 v3와 같은 에뮬레이션(θ_g 미래 + 실측 오차 통계)이되 **형식은 배포 HLP
+flexion100에 맞춘다** (10 ms × 6점 = 0~50 ms, 10 ms 갱신, 관측 창 {0, 10, 20 ms} — v10과
+동일). chunk는 의도이고 하중은 외란이라, 정책이 배우는 원리는 "예측에서 밀려나는 만큼
+예측 쪽으로 밀어라".
 
 학습 (sbc env):
     python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \\
@@ -54,7 +56,6 @@ from mlp import (  # noqa: E402, F401
     scene_lib_config,
     terrain_config,
 )
-from mlp_v3 import HLP_CHUNK_KNOTS, HLP_KNOT_DT  # noqa: E402
 from mlp_v3 import env_config as _v3_env_config  # noqa: E402
 
 from protomotions.robot_configs.base import RobotConfig  # noqa: E402
@@ -85,6 +86,13 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g.add_argument("--work-weight", type=float, default=-0.0016, help="|τ·ω| 항 weight (무보조 ≈126 W → −0.2/step; v3는 12 W에 −0.01)")
     g.add_argument("--torque-sq-weight", type=float, default=-3.0e-5, help="τ² 항 weight (무보조 ≈6,200 → −0.19/step)")
     g.add_argument("--tracking-weight", type=float, default=1.0, help="θ_g 추종 exp 보상 weight (퇴화 해 차단)")
+    # HLP 예측 형식 — 배포 HLP(flexion100: 10 ms × 6점 = 0~50 ms, 10 ms마다 갱신)와 맞춘다.
+    # v3 형식(25 ms × 7점, 창 0~150 ms)으로 학습하면 스켈레톤 시험에서 50 ms 밖 창이 ZOH 상수가 된다.
+    g.add_argument("--hlp-dt", type=float, default=0.01, help="chunk 예측 시점 간격 [s]")
+    g.add_argument("--chunk-knots", type=int, default=6, help="chunk 예측 시점 수 (0부터)")
+    g.add_argument("--chunk-refresh-steps", type=int, default=1, help="chunk 갱신 주기 [policy step] (1 = 10 ms)")
+    g.add_argument("--obs-future-samples", type=int, default=3, help="LLP 관측 미래 창 샘플 수 (v10: 3 = {0,10,20 ms})")
+    g.add_argument("--obs-future-dt", type=float, default=0.01, help="관측 미래 창 간격 [s]")
 
 
 def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
@@ -101,16 +109,18 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
     v3 = cfg.control_components["assist"]
 
     # --- 의도·chunk는 v3 그대로, 외란 컴포넌트로 교체 + θ_g 다양화 ---
+    assert (args.chunk_knots - 1) * args.hlp_dt >= (args.obs_future_samples - 1) * args.obs_future_dt, \
+        "관측 미래 창이 chunk 예측 범위를 넘으면 ZOH 허구값이 된다"
     cfg.control_components["assist"] = DisturbedAssistTargetControlConfig(
-        hlp_dt=HLP_KNOT_DT,
-        chunk_knots=HLP_CHUNK_KNOTS,
-        chunk_refresh_steps=v3.chunk_refresh_steps,
+        hlp_dt=float(args.hlp_dt),
+        chunk_knots=int(args.chunk_knots),
+        chunk_refresh_steps=int(args.chunk_refresh_steps),
         chunk_noise_std=v3.chunk_noise_std,
         chunk_bias_std=v3.chunk_bias_std,
         chunk_drift_std=v3.chunk_drift_std,
         chunk_delay_max=v3.chunk_delay_max,
-        obs_future_samples=v3.obs_future_samples,
-        obs_future_dt=v3.obs_future_dt,
+        obs_future_samples=int(args.obs_future_samples),
+        obs_future_dt=float(args.obs_future_dt),
         freq_range=v3.freq_range,
         amp_range=v3.amp_range,
         offset_range=v3.offset_range,
