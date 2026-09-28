@@ -93,7 +93,11 @@ python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cab
 −30.5 %, 달리기 −25.5 %** (epoch 6,000 = `checkpoints/llp_v13_pendulum_dr`, 평가는
 `--llp-dt 0.01`). 지금 구조는 **랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장**이다.
 착용자 v32는 사람보다 세고(hip 피크 1.7~3.7 N·m/kg) 스윙이 8° 커서 |ω| −12 %는 정책과 무관한
-착용자 산물 — 근본 해결은 v33 tracker(관절각 추종 ↑, hip 한계 600 → ~200, pow_rew ↑).
+착용자 산물이었다. **2026-09-28 착용자 v33(`checkpoints/v33_newton_suit_human`, 로봇 config
+`skeleton_torque_suit_human` = hip 한계 200, 레시피 `tracker_human.py`)로 교체** — 주기 피크 0.95 N·m/kg,
+스윙 mocap ±2°. **v33에서 v13은 `--assist-scale 0.5`(≈20 N·m)로만**: 걷기 τ² −19.3 / 달리기 −23.9 %,
+40 N·m 그대로는 걷기 무효·달리기 4.4 s 낙상(β 오라클 상한 −35 / −41). 착용자 잣대 `eval_wearer.py`.
+LLP 평가는 v33에서, 영점은 `--calibration wearer`.
 
 평가는 **여러 비용 지표를 한 표에** 올려 읽는다 (아래 gotcha 참고):
 ```bash

@@ -1,0 +1,22 @@
+{
+  "robot_name": "skeleton_torque_suit_human",
+  "simulator": "newton",
+  "num_envs": 4096,
+  "batch_size": 16384,
+  "motion_file": "data/motion_for_trackers/skeleton_torque_suit_gait.pt",
+  "experiment_path": "examples/experiments/assist_skeleton/tracker_human.py",
+  "experiment_name": "mimic_suit_human",
+  "scenes_file": null,
+  "checkpoint": "checkpoints/v32_newton_suit_gait_symmetric/last.ckpt",
+  "use_wandb": false,
+  "use_slurm": false,
+  "ngpu": 1,
+  "nodes": 1,
+  "headless": true,
+  "seed": 0,
+  "torch_deterministic": false,
+  "training_max_steps": 10000000000000,
+  "overrides": [],
+  "create_config_only": false,
+  "wandb_id": null
+}

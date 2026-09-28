@@ -1,4 +1,4 @@
-# 다음 세션 인계 메모 (2026-09-28 저녁 기준 — llp_v13 보관, 진자 v5 학습 중, 그다음 착용자 v33)
+# 다음 세션 인계 메모 (2026-09-28 밤 기준 — 착용자 v33 보관, llp_v13은 v33에서 ×0.5로만, 다음 = 진자 v6 결정)
 
 새 세션에서 이 파일 + `AI_SBC_VERSIONS.md`만 읽으면 이어서 할 수 있게 정리한 것.
 설계 배경은 `AI_SBC_FRAMEWORK.md`, 통합 시스템 사용법은
@@ -7,11 +7,12 @@
 ## 1. 지금 시스템 (전부 보관 완료)
 
 ```
-착용자(시뮬 속 사람)  checkpoints/v32_newton_suit_gait_symmetric   ← 대칭 보행 (사람보다 셈 — §2-E)
+착용자(시뮬 속 사람)  checkpoints/v33_newton_suit_human            ← 사람 범위 근력 (hip 한계 200), §2-H
+                      (v32_newton_suit_gait_symmetric = 사람보다 1.7~3.7배 센 이전 착용자, 기준선으로만)
 예측기 HLP            ManiFlow flexion100-h15 (자동 탐색, 지정 불필요)
 보조 정책 LLP         checkpoints/llp_v13_pendulum_dr              ← 랜덤화 진자 v4 epoch 6,000 (§2-F)
-                      (이전 llp_v10_gait_5ms_40Nm는 τ²로는 악화 — 기준선으로만)
-인체 모델             mjcf/skeleton_torque_suit.xml (뼈 메시 + 캡슐 충돌)
+                      **v33에서는 --assist-scale 0.5(≈20 N·m)로만** — 40 N·m 그대로는 걷기 무효·달리기 낙상
+인체 모델             mjcf/skeleton_torque_suit.xml (뼈 메시 + 캡슐 충돌), 로봇 config skeleton_torque_suit_human
 ```
 
 | | 주기 | 연산 시간 | 비고 |
@@ -20,20 +21,22 @@
 | LLP | **10 ms** | 0.36 ms | 미래 창은 {0, 10, 20 ms}만 읽음, 히스토리 250 ms, 이전 action 100 ms |
 | 물리 | 2.5 ms | — | Newton 400 Hz, decimation 4 |
 
-성능(40 s A/B, 착용자 v32, 낙상 0, **τ² 기준**): 걷기 **−30.5 %**, 달리기 **−25.5 %**, 몸체 오차 +0.9 / +10 %,
-보조 RMS 33 / 36 N·m, 착용자 토크와 상관 0.66 / 0.72. 보고서 `docs/llp_v13_report.html`
-(`report_checkpoint_html.py`), 여러 체크포인트 비교 `docs/transfer_report.html`.
+성능(40 s A/B, **τ² 기준**, 낙상 0):
+* 착용자 **v33**(사람 범위) + v13 × 0.5: 걷기 **−19.3 %**, 달리기 **−23.9 %**, 보조 RMS 17 / 19 N·m. β 오라클 상한 −35 / −41.
+* 착용자 v32(이전) + v13 그대로: 걷기 −30.5 %, 달리기 −25.5 % — v32의 과한 근력이 받아 준 숫자.
+보고서 `docs/llp_v13_report.html`(v32 기준), 여러 체크포인트 비교 `docs/transfer_report.html`.
 LLP는 스켈레톤·mocap·걷기·달리기를 학습에서 한 번도 보지 않았다 — 랜덤화 진자가 학습 플랜트다.
 
 ### 재현 명령 (sbc env)
 
 ```bash
-# 평가 — 학습과 같은 10 ms 제어 (--llp-dt 0.01; v10을 돌릴 때만 0.005)
+# 평가 — 착용자 v33, 영점은 착용자 스트림에서(--calibration wearer), v13은 ×0.5. (v32면 --calibration "5.70,2.63,-14.43,0.84")
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v32_newton_suit_gait_symmetric/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 \
+    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
+    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
-    --calibration "5.70,2.63,-14.43,0.84"        # motion-id 1 = 달리기, --record = 영상
+    --calibration wearer                          # motion-id 1 = 달리기, --record = 영상
+python examples/experiments/assist_skeleton/eval_wearer.py <run_dir>   # 착용자가 얼마나 사람 같은가
 # 여러 실행 한 표: compare_runs.py / report_html.py ; 체크포인트 하나 깊게: report_checkpoint_html.py
 python examples/experiments/assist_skeleton/plot_torque_phase.py <run_dir>
 ```
@@ -617,6 +620,12 @@ v33이 수렴한 뒤(≈ epoch 11,200) 같은 표를 다시 찍고 결정.
 
 세 스냅샷 종합(9,410 / 10,422 / 11,234): v13×0.5 걷기 −16 / −19 / −20, 달리기 −18 / −26 / −25; β −36 / −38 / −36,
 −35 / −40 / −39. **40 N·m 그대로는 걷기 무효, 달리기는 안전하지도 않다**(v32에선 600 N·m 근력이 받아 줬다).
+
+### 보관 — epoch 12,218 → `checkpoints/v33_newton_suit_human/` (22:50, 학습 중단)
+11,200 이후 학습 지표 평탄(몸체 0.060, 관절각 보상 0.666, 파워 658 W). 12,218 스냅샷: 걷기 스윙 48.1°, RMS 39,
+피크 −150(1.65 N·m/kg), 주기 평균 −86 / +34, 몸체 0.060; 달리기 스윙 57.2 / 58.9, RMS 56, 피크 −127, 몸체 0.061.
+v13×0.5 걷기 −19.3 / 달리기 −23.9 %, β −35.1 / −40.8. INFO.md에 잣대 표·사용법. 남은 과제: 피크/RMS 3.9 —
+200 안에서 슬램은 남아 있다(τ² 벌점 −1e-6이 약함).
   `run_system.py`·`llp_walk.py`는 착용자 robot config를 tracker 체크포인트의 resolved config에서 읽으므로
   `--robot-name`을 따로 줄 필요가 없다.
 
@@ -643,8 +652,7 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
 
 ## 4. 다음 단계 후보 (우선순위 순, 2026-09-28 밤)
 
-1. **착용자 v33 보관** (§2-H) — epoch 12,200 확인 뒤 `checkpoints/v33_newton_suit_human/` + INFO.md. 이후 모든 LLP
-   평가는 v33에서. v32 수치는 기준선으로만.
+1. ~~착용자 v33 보관~~ — 완료(`checkpoints/v33_newton_suit_human`, epoch 12,218). 이후 모든 LLP 평가는 v33에서.
 2. **LLP 방향 결정 (사용자)** — v33에서 v13 그대로는 걷기 무효·달리기 낙상, ×0.5는 −20/−25, β 상한 −36/−39.
    * (i) v13×0.5를 실기기 후보로 두고 끝내기 — 한계 20 N·m 상당.
    * (ii) **진자 v6 재학습 (추천)** — 바꿀 것 세 가지:

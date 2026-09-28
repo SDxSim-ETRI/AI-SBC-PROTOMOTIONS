@@ -26,12 +26,13 @@
 | 역할 | 버전 | 경로 |
 |------|------|------|
 | HLP | **flexion100-h15** (10 ms 격자, 미래 50 ms) | `ManiFlow_Policy` 레포 run (자동 탐색, 지정 불필요) |
-| LLP — 보행(걷기·달리기) | **llp_v13** (랜덤화 진자 학습, 10 ms 제어, τ² 걷기 −30.5 / 달리기 −25.5 %) | `checkpoints/llp_v13_pendulum_dr/last.ckpt` |
+| LLP — 보행(걷기·달리기) | **llp_v13** (랜덤화 진자 학습, 10 ms 제어) — **v33에서는 `--assist-scale 0.5`로만**: τ² 걷기 −19.3 / 달리기 −23.9 % (v32에 40 N·m 그대로면 −30.5 / −25.5) | `checkpoints/llp_v13_pendulum_dr/last.ckpt` |
 | LLP — 이전 판(스켈레톤 학습, 5 ms 제어) | llp_v10 — ⚠️ τ²로는 악화, 기준선용 | `checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt` |
 | LLP — 이전 판(10 ms 제어) | llp_v6 | `checkpoints/llp_v6_gait_40Nm/last.ckpt` |
 | LLP — 착용자 두 명 모두 | llp_v5 (착용자 앙상블, walk만) | `checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt` |
 | LLP — 여러 동작 | llp_v4 | `checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt` |
-| 가상 착용자 — **보행(대칭)** | **v32** | `checkpoints/v32_newton_suit_gait_symmetric/last.ckpt` |
+| 가상 착용자 — **사람 범위 근력** | **v33** (hip 한계 200 N·m, 주기 피크 0.95 N·m/kg, 스윙 mocap ±2°) | `checkpoints/v33_newton_suit_human/last.ckpt` |
+| 가상 착용자 — 보행(대칭, 이전) | v32 — 사람보다 1.7~3.7배 셈, 기준선으로만 | `checkpoints/v32_newton_suit_gait_symmetric/last.ckpt` |
 | 가상 착용자 — 걷기(구) | v30 | `checkpoints/v30_newton_suit_passive_walk/last.ckpt` |
 | 가상 착용자 — 15모션 | v31 | `checkpoints/v31_newton_suit_passive_motions15/last.ckpt` |
 | 인체 모델 | `skeleton_torque_suit` | `protomotions/data/assets/mjcf/skeleton_torque_suit.xml` (뼈 메시 + 캡슐 충돌) |
@@ -39,10 +40,11 @@
 ```bash
 # 폐루프 A/B 평가 한 방 (walk = motion-id 0, run = 1)
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v32_newton_suit_gait_symmetric/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 \
+    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
+    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
-    --calibration "5.70,2.63,-14.43,0.84"
+    --calibration wearer       # v32 착용자면 --calibration "5.70,2.63,-14.43,0.84", --assist-scale 1
+python examples/experiments/assist_skeleton/eval_wearer.py <run_dir>   # 착용자가 얼마나 사람 같은가
 # 보고서: 여러 실행 비교 report_html.py / 체크포인트 하나 깊게 report_checkpoint_html.py (docs/llp_v13_report.html)
 ```
 
@@ -114,10 +116,13 @@ LLP 학습·평가 중에는 가중치를 얼려 쓴다.
 | v18 / v18_2 | 15모션 | 1230 / 5000 | 성공률 100 % | 2026-09-03에 가중치 삭제(기록만 남음) |
 | **v30** | walk 1클립 | 4440 | 성공률 1.0, 몸체 오차 7.6 cm | 걸음이 큼: hip 오차 16.8°, 단독 파워 226 W |
 | **v31** | 15모션 | 6440 | 성공률 1.0(전 모션), 몸체 오차 8.4 cm | 걸음이 작음: hip 오차 9.6°, 단독 파워 175 W |
+| **v32** | 보행(walk+run) | 8816 | 성공률 1.0, 몸체 오차 6.8 cm, 관절 오차 8.6° | 관절각 추종 항으로 좌우 대칭 3.1°. **사람보다 셈**: hip 한계 600, 착지 피크 2.8~3.7 N·m/kg, 스윙 mocap +8° |
+| **v33** | 보행(walk+run) | 12218 | 성공률 1.0, 몸체 오차 **6.0 cm** | **사람 범위 근력**: 로봇 config `skeleton_torque_suit_human`(hip 한계 200), `dof_pos_rew` 1.0, 파워·τ² 벌점. 주기 피크 0.95 N·m/kg, 스윙 mocap ±2°, hip 파워 걷기 77 W(v32 179) |
 
-⚠️ mimic 보상은 **몸체 위치**만 맞춘다 — 관절 각도는 mocap에서 10~17° 벗어나도
-성공으로 친다. 그래서 tracker의 걸음은 사람 mocap만큼 자연스럽지 않고, HLP 예측
-오차도 그만큼 커진다. 관절각 추종을 강화한 tracker가 다음 개선 후보.
+⚠️ mimic 보상은 **몸체 위치**만 맞춘다 — 관절 각도는 mocap에서 벗어나도 성공으로 치고, 토크
+크기에는 아무 제약이 없다. v32까지의 tracker는 PD 목표각을 토크 손잡이로 써서 사람보다 3배 센
+착지 슬램을 냈고, 그 착용자에서 잰 LLP 절감률은 사람 기준이 아니었다. **v33부터 hip 한계 200 N·m +
+관절각 추종 + 파워 벌점**으로 사람 범위에 맞췄다(잣대 `eval_wearer.py`). 남은 것: 200 안의 슬램(피크/RMS 3.9).
 
 ---
 
@@ -252,4 +257,4 @@ robot config 이름의 `passive_cable`/`active_cable`은 **슈트 slide 관절 4
 | 2026-09-16 | v11(τ² 목적, 한계 해제)·v12(80 N·m) — 걷기 τ²는 크게 내려가나 달리기는 아무도 못 도움 |
 | 2026-09-22 | 착용자 토크 스파이크의 정체 규명(tracker가 PD 목표를 토크 손잡이로 씀) → 랜덤화 진자 v4 착수 |
 | 2026-09-23 | 진자 v4가 스켈레톤에 전이됨(걷기 −27 %, 달리기 −26 %) — 달리기를 도운 첫 버전. HLP 형식 일치가 조건 |
-| 2026-09-28 | v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · **epoch 6,000을 llp_v13으로 보관** · 보고서 `docs/llp_v13_report.html` |
+| 2026-09-28 | v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · **epoch 6,000을 llp_v13으로 보관** · 보고서 `docs/llp_v13_report.html` · 진자 v5(절약 항 축소)는 정점 유지 못 함 · **착용자 v33(사람 범위 근력) 학습·보관** — v33에선 v13이 ×0.5로만 유효(−19 / −24 %), 40 N·m는 달리기 낙상 |
