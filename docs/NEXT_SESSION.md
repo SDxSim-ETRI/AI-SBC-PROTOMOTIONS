@@ -1,4 +1,4 @@
-# 다음 세션 인계 메모 (2026-09-28 기준 — 진자 v4 → llp_v13 보관, 다음 run 선택 대기)
+# 다음 세션 인계 메모 (2026-09-28 저녁 기준 — llp_v13 보관, 진자 v5 학습 중, 그다음 착용자 v33)
 
 새 세션에서 이 파일 + `AI_SBC_VERSIONS.md`만 읽으면 이어서 할 수 있게 정리한 것.
 설계 배경은 `AI_SBC_FRAMEWORK.md`, 통합 시스템 사용법은
@@ -483,6 +483,35 @@ mocap(사람)은 46.1°다. 학습된 정책 셋(v10·v12·v4) 모두 보조를 
   진자의 120 N·m 안에 들어와 (b)가 필요 없어진다. 대가: tracker 재학습 반나절 + 모든 A/B 수치 재측정
   (지금의 −30.5 %와 직접 비교 불가).
 * 추천 순서: (a) → (c). (b)는 (c)가 되면 필요 없다.
+* **사용자 결정 (2026-09-28 18시)**: (a)를 걸고, 끝나면 (c). `results/assist_pendulum_v4`는 epoch 1,000~10,000만 남기고 삭제(661개, 3.5 GB).
+
+## 2-G. 진자 v5 — 토크 절약 항 축소 (2026-09-28 18:06 시작, 진행 중)
+
+run `results/assist_pendulum_v5`, unit `aisbc-pend-v5`, 로그 `results/_pids/pend_v5.log`. `mlp_v4.py` 그대로에
+`--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`(v4: −2e-5 / −0.005; 새 CLI 인자, 값은 `=` 꼴로).
+epoch당 약 2.7 s(4096 env). 판정: v13(v4@6000)의 걷기 τ² −30.5 / 달리기 −25.5 %를 **정점 뒤에도 유지**하는가,
+보조 RMS·한계 도달이 33 N·m·39 %에서 안 내려가는가. 유지되면 그 체크포인트가 배포 후보(v14).
+
+자동 평가: `eval_when_ready.sh <ckpt> <tag> [unit]` — 체크포인트가 생기면 걷기·달리기 40 s A/B를 돌리고
+`compare_runs.py` 표(v10·β·v13과 나란히)를 찍는다. 2,000부터 2,000 간격으로 걸어 둘 것(한 번에 하나, 백그라운드).
+```bash
+bash examples/experiments/assist_skeleton/eval_when_ready.sh results/assist_pendulum_v5/epoch_2000.ckpt v5e2k aisbc-pend-v5
+```
+
+## 2-H. 착용자 v33 — 사람 범위 근력 (준비 완료, v5가 끝나면 시작)
+
+코드는 다 있다. GPU를 v5와 나눠 쓰지 않으려고 v5 판정 뒤에 건다.
+* 로봇 config `skeleton_torque_suit_human` (`protomotions/robot_configs/skeleton_torque_suit_human.py`):
+  passive_cable과 같되 hip(굴곡·내전·회전) effort_limit 600 → **200 N·m**. factory·inference 메시 표에 등록.
+* 레시피 `tracker_human.py`: v32 레시피 + `dof_pos_rew` 0.5 → 1.0, `pow_rew` −1e-5 → −1e-4, `torque_sq_rew` −1e-6 추가.
+* 실행 `bash examples/experiments/assist_skeleton/train_tracker_human.sh` (unit `aisbc-tracker-v33`, v32 warm start,
+  run `results/mimic_suit_human`). v32는 v31에서 약 2,400 epoch 추가로 수렴했다 — 비슷한 규모로 예상.
+* 판정: 성공률 ≥ 0.95, 몸체 오차 ≤ 8 cm, 무보조 hip 스윙 진폭 mocap ±3°(v32 54.5° vs 46°), hip 토크 피크 ≤ 200,
+  스트라이드 피크/RMS < 3 (v32 4.3). 재는 법: `run_system.py --human tracker --tracker-checkpoint <v33> --assist-scale 0`
+  으로 무보조 trace → `report_checkpoint_html.py`/`compare_runs.py`, 스윙 진폭은 `report_html.metrics()`의 amp_A.
+* v33이 되면 **모든 A/B 수치를 다시 잰다**(v13·v5를 v33 착용자에 올려 τ²·|ω|). 지금의 −30.5 %와 직접 비교 불가.
+  `run_system.py`·`llp_walk.py`는 착용자 robot config를 tracker 체크포인트의 resolved config에서 읽으므로
+  `--robot-name`을 따로 줄 필요가 없다.
 
 ### 실행
 ```bash
@@ -507,9 +536,8 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
 
 ## 4. 다음 단계 후보 (우선순위 순, 2026-09-28)
 
-1. **다음 run 선택** — §2-F "다음 run 후보" (a)/(b)/(c). 사용자 답 대기. GPU는 비어 있다.
-2. **착용자 v33 tracker** — 사람 범위 근력·관절각 추종. 지금 시험대는 사람보다 1.7~3.7배 센 착용자라
-   τ² 절감률의 절대값은 사람 기준이 아니다.
+1. **진자 v5 판정** (§2-G, 진행 중) — 2,000 간격 스켈레톤 평가로 정점 유지 여부. 유지되면 v14로 보관.
+2. **착용자 v33 tracker** (§2-H, 준비 완료) — v5 판정 뒤 `train_tracker_human.sh`. 끝나면 v13·v5를 v33에 올려 재측정.
 3. **`verify_controller` 복구** — 배포 HLP(10 ms × 6점)와 v3 제어기 형식 불일치로 실패 중. v13은 형식이
    맞으니 `--hlp-checkpoint` 인자를 붙여 v13 기준으로 다시 PASS시키고, 스켈레톤 env ↔ `AssistController`
    등가성 검사도 하나 만들 것(지금은 없다).

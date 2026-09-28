@@ -39,6 +39,9 @@ flexion100에 맞춘다** (10 ms × 6점 = 0~50 ms, 10 ms 갱신, 관측 창 {0,
         --experiment-path examples/experiments/assist_pendulum/mlp_v4.py \\
         --experiment-name assist_pendulum_v4 --motion-file none --num-envs 4096 --batch-size 16384
 점검 (학습 전, 무보조 롤아웃 파형): examples/experiments/assist_pendulum/check_env_v4.py
+v5 (2026-09-28, run assist_pendulum_v5): 같은 파일에 `--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`.
+    v4는 epoch 6,000 정점(걷기 τ² −30.5 %, 달리기 −25.5 %) 뒤 두 절약 항이 이끄는 "덜 밀기"를 배워
+    물러났다(보조 RMS 33 → 26, 한계 도달 39 → 11 %). 보관본 v4@6000 = checkpoints/llp_v13_pendulum_dr.
 평가: 진자 A/B(`eval_abc.py`) + **스켈레톤(안 본 플랜트)** `assist_skeleton/run_system.py --llp-checkpoint ...`
 """
 
@@ -86,6 +89,10 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g.add_argument("--work-weight", type=float, default=-0.0016, help="|τ·ω| 항 weight (무보조 ≈126 W → −0.2/step; v3는 12 W에 −0.01)")
     g.add_argument("--torque-sq-weight", type=float, default=-3.0e-5, help="τ² 항 weight (무보조 ≈6,200 → −0.19/step)")
     g.add_argument("--tracking-weight", type=float, default=1.0, help="θ_g 추종 exp 보상 weight (퇴화 해 차단)")
+    # v5 (2026-09-28): v4는 epoch 6,000 정점 뒤 이 두 항이 이끄는 "덜 밀기"를 배워 스켈레톤에서 물러났다
+    # (진자 안 착용자 τ²는 제자리, assist_effort·action_rate만 계속 하락). 값은 '=-5e-6' 꼴로 넘길 것.
+    g.add_argument("--assist-effort-weight", type=float, default=-2e-5, help="보조 토크 절약 항 Στ²_assist weight (v4 −2e-5, v5 −5e-6)")
+    g.add_argument("--action-rate-weight", type=float, default=-0.005, help="action 변화율 항 weight (v4 −0.005, v5 −0.002)")
     # HLP 예측 형식 — 배포 HLP(flexion100: 10 ms × 6점 = 0~50 ms, 10 ms마다 갱신)와 맞춘다.
     # v3 형식(25 ms × 7점, 창 0~150 ms)으로 학습하면 스켈레톤 시험에서 50 ms 밖 창이 ZOH 상수가 된다.
     g.add_argument("--hlp-dt", type=float, default=0.01, help="chunk 예측 시점 간격 [s]")
@@ -96,7 +103,7 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
 
 
 def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
-    from protomotions.envs.component_factories import previous_actions_factory
+    from protomotions.envs.component_factories import action_smoothness_factory, previous_actions_factory
     from protomotions.envs.context_views import EnvContext
     from protomotions.envs.control.assist_disturbance_control import (
         DisturbedAssistTargetControlConfig,
@@ -176,6 +183,8 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
     if args.human_cost in ("torque_sq", "both"):
         cfg.reward_components["human_torque_sq"] = cost(args.torque_sq_weight, True)
     cfg.reward_components["tracking"].static_params["weight"] = float(args.tracking_weight)
+    cfg.reward_components["assist_effort"].static_params["weight"] = float(args.assist_effort_weight)
+    cfg.reward_components["action_rate"] = action_smoothness_factory(weight=float(args.action_rate_weight))
 
     # --- 토크 한계 ---
     cfg.action_config = make_torque_action_config(torque_scale=float(args.assist_limit), action_transform="tanh")

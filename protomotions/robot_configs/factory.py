@@ -73,6 +73,10 @@ def robot_config(robot_name: str, **updates) -> RobotConfig:
         from protomotions.robot_configs.skeleton_torque_suit_passive_cable import SkeletonTorqueSuitPassiveCableRobotConfig
 
         config = SkeletonTorqueSuitPassiveCableRobotConfig()
+    elif robot_name == "skeleton_torque_suit_human":
+        from protomotions.robot_configs.skeleton_torque_suit_human import SkeletonTorqueSuitHumanRobotConfig
+
+        config = SkeletonTorqueSuitHumanRobotConfig()
     elif robot_name == "skeleton_torque_suit_active_cable":
         from protomotions.robot_configs.skeleton_torque_suit_active_cable import SkeletonTorqueSuitActiveCableRobotConfig
 

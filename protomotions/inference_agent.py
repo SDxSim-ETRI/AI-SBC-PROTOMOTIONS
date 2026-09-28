@@ -711,6 +711,7 @@ _SKIN_ASSET = {
     "skeleton_torque":                    ("mjcf/skeleton_torque_mesh.xml",             False),
     "skeleton_torque_suit":               ("mjcf/skeleton_torque_suit_mesh.xml",        False),
     "skeleton_torque_suit_passive_cable": ("mjcf/skeleton_torque_suit_mesh.xml",        True),
+    "skeleton_torque_suit_human":         ("mjcf/skeleton_torque_suit_mesh.xml",        True),
     "skeleton_torque_suit_active_cable":  ("mjcf/skeleton_torque_suit_muscle_mesh.xml", True),
     "skeleton_torque_suit_muscle":        ("mjcf/skeleton_torque_suit_muscle_mesh.xml", True),
 }
@@ -771,7 +772,7 @@ def _sync_skin_viewer(skin, dof_pos, root_pos, root_rot_xyzw, robot_name: str,
     skin_ndof = model.nq - 7               # free-joint takes qpos[0:7]
 
     if robot_name in ("skeleton_torque_suit_active_cable",
-                      "skeleton_torque_suit_passive_cable") and skin_ndof == 31:
+                      "skeleton_torque_suit_passive_cable", "skeleton_torque_suit_human") and skin_ndof == 31:
         # Remap 27 → 31 DOFs
         qpos_dof = np.zeros(31, dtype=np.float64)
         for skin_idx, src_idx in enumerate(_ACTIVE_TO_MUSCLE_DOF_MAP):
