@@ -204,17 +204,17 @@ def phase_table_html(series_rows: dict):
         rows = series_rows[name]
         cells = "".join(f"<td>{r['contrib']:+.0f}</td>" for r in rows)
         land = sum(r["contrib"] for r in rows[:2]); swing = sum(r["contrib"] for r in rows[3:7]); tot = sum(r["contrib"] for r in rows)
-        body.append(f"<tr><th scope=\"row\">{html.escape(name)}</th>{cells}<td class=\"sum\">{land:+.0f}</td><td class=\"sum\">{swing:+.0f}</td><td class=\"sum\">{tot:+.0f}</td></tr>")
+        body.append(f"<tr><th scope=\"row\">착용자 τ² 변화 [(N·m)²] — {html.escape(name)}</th>{cells}<td class=\"sum\">{land:+.0f}</td><td class=\"sum\">{swing:+.0f}</td><td class=\"sum\">{tot:+.0f}</td></tr>")
     body2 = []
     for name in names:
         rows = series_rows[name]
-        body2.append(f"<tr><th scope=\"row\">{html.escape(name)} · 보조 τ</th>" + "".join(f"<td>{r['assist']:+.0f}</td>" for r in rows) + "<td></td><td></td><td></td></tr>")
+        body2.append(f"<tr><th scope=\"row\">보조 토크 평균 [N·m] — {html.escape(name)}</th>" + "".join(f"<td>{r['assist']:+.0f}</td>" for r in rows) + "<td></td><td></td><td></td></tr>")
     base_row = ""
     first = series_rows[names[0]]
-    base_row = "<tr class=\"ref\"><th scope=\"row\">무보조 착용자 τ (참고)</th>" + "".join(f"<td>{r['tauA']:+.0f}</td>" for r in first) + "<td></td><td></td><td></td></tr>"
+    base_row = "<tr class=\"ref\"><th scope=\"row\">무보조 착용자 토크 평균 [N·m] (참고)</th>" + "".join(f"<td>{r['tauA']:+.0f}</td>" for r in first) + "<td></td><td></td><td></td></tr>"
     return f"""
 <div class="scroll"><table class="phase">
-  <thead><tr><th>위상 [%]</th>{head}<th>착지 0–20</th><th>유각 30–70</th><th>합계</th></tr></thead>
+  <thead><tr><th>행 ＼ 보행 위상 [%]</th>{head}<th>착지 0–20 [(N·m)²]</th><th>유각 30–70 [(N·m)²]</th><th>합계 [(N·m)²]</th></tr></thead>
   <tbody>{''.join(body)}{base_row}{''.join(body2)}</tbody>
 </table></div>"""
 
@@ -225,15 +225,15 @@ def omega_table_html(series_rows: dict):
     head = "".join(f"<th>{10*b}–{10*b+10}</th>" for b in range(10))
     body = []
     first = series_rows[names[0]]
-    body.append("<tr class=\"ref\"><th scope=\"row\">무보조 |ω| [rad/s] (참고)</th>" + "".join(f"<td>{r['omegaA']:.2f}</td>" for r in first) + "<td></td></tr>")
+    body.append("<tr class=\"ref\"><th scope=\"row\">무보조 hip 각속도 |ω| 평균 [rad/s] (참고)</th>" + "".join(f"<td>{r['omegaA']:.2f}</td>" for r in first) + "<td></td></tr>")
     for name in names:
         rows = series_rows[name]
         cells = "".join(f"<td>{100*(r['omegaB']/max(r['omegaA'],1e-9)-1):+.0f}</td>" for r in rows)
         tot = 100 * (sum(r["omegaB"] for r in rows) / max(sum(r["omegaA"] for r in rows), 1e-9) - 1)
-        body.append(f"<tr><th scope=\"row\">{html.escape(name)}</th>{cells}<td class=\"sum\">{tot:+.0f}</td></tr>")
+        body.append(f"<tr><th scope=\"row\">|ω| 변화 A → B [%] — {html.escape(name)}</th>{cells}<td class=\"sum\">{tot:+.0f}</td></tr>")
     return f"""
 <div class="scroll"><table class="phase">
-  <thead><tr><th>위상 [%]</th>{head}<th>전체</th></tr></thead>
+  <thead><tr><th>행 ＼ 보행 위상 [%]</th>{head}<th>전체 [%]</th></tr></thead>
   <tbody>{''.join(body)}</tbody>
 </table></div>"""
 
