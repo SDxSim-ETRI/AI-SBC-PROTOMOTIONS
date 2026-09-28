@@ -113,7 +113,8 @@
   <div class="now-panel">
     <div class="now-grid">
       <div><dt>HLP (각도 예측)</dt><dd>flexion100-h15 · 10 ms 격자</dd><span class="path">미래 50 ms · 자동 탐색</span></div>
-      <div><dt>LLP — 보행(걷기·달리기)</dt><dd>llp_v10 · 5 ms 제어</dd><span class="path">checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt</span></div>
+      <div><dt>LLP — 보행(걷기·달리기)</dt><dd>llp_v13 · 랜덤화 진자 학습 · 10 ms 제어</dd><span class="path">checkpoints/llp_v13_pendulum_dr/last.ckpt</span></div>
+      <div><dt>LLP — 이전 판(스켈레톤 학습)</dt><dd>llp_v10 · 5 ms 제어 · τ²로는 악화</dd><span class="path">checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt</span></div>
       <div><dt>LLP — 착용자 두 명 모두</dt><dd>llp_v5 · 앙상블(walk)</dd><span class="path">checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt</span></div>
       <div><dt>LLP — 여러 동작</dt><dd>llp_v4 · 15모션</dd><span class="path">checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt</span></div>
       <div><dt>가상 착용자 — 보행(대칭)</dt><dd>v32</dd><span class="path">checkpoints/v32_newton_suit_gait_symmetric/last.ckpt</span></div>
@@ -122,7 +123,7 @@
     </div>
     <pre><code>python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --tracker-checkpoint checkpoints/v32_newton_suit_gait_symmetric/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt --llp-dt 0.005 \
+    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration "5.70,2.63,-14.43,0.84"</code></pre>
   </div>
@@ -195,14 +196,19 @@
     <tbody>
       <tr><td class="mono">v1</td><td>위치 추종 보상만</td><td class="flat">참고용</td></tr>
       <tr><td class="mono">v2</td><td>추종 + 파워 + 토크 + 변화율</td><td>진자에서 사람 파워 <span class="good">−76.6 %</span></td></tr>
-      <tr><td class="mono">v3</td><td>v2 + 실제 HLP chunk 형식(150 ms 7점)</td><td>실 HLP 연결 시 <span class="good">−39 %</span>(학습 외 데이터) / <span class="good">−34 %</span>(자체 14모션)</td></tr>
+      <tr><td class="mono">v3</td><td>v2 + 실제 HLP chunk 형식(150 ms 7점)</td><td>실 HLP 연결 시 <span class="good">−39 %</span>(학습 외 데이터) / <span class="good">−34 %</span>(자체 14모션) — 스켈레톤 이식은 실패</td></tr>
+      <tr class="now"><td class="mono">v4 → <b>llp_v13</b></td><td><b>랜덤화 플랜트</b>(입각 하중 ≤120 N·m + 굳힘, 관성 ×1~25, ω_n 12~24, 의도 다양화) + 배포 HLP 형식(10 ms × 6점) + |τ·ω|+τ²</td><td>스켈레톤(안 본 플랜트)에서 걷기 τ² <span class="good">−30.5 %</span> / 달리기 <span class="good">−25.5 %</span> @ epoch 6,000 — 달리기를 도운 첫 버전</td></tr>
     </tbody>
   </table></div>
   <p class="note">진자는 “골반 고정 + 대퇴 2개”뿐인 모델이다. 이 정책을 실제 스켈레톤에 올려 보니 <b>강체 다리에서만</b> 방향이 맞았다(상관 0.80).
   무릎이 움직이면 0.19, 실제 보행에서는 거의 0 — 무릎 결합·지면 반력·8배 큰 관성이 진자에 없던 성분이었다.
-  그래서 <b>통합 시스템 자체를 학습 환경으로</b> 쓰기로 했다.</p>
+  그래서 <b>통합 시스템 자체를 학습 환경으로</b> 쓰기로 했다(2단계).<br>
+  <b>2026-09-23 반전.</b> 문제는 진자의 <i>분포</i>였다 — 매끈한 sine을 매끈한 PD가 따라가는 세상만 보고 “그네 밀어주기”만 배운 것.
+  하중·관성·임피던스·의도를 넓게 던진 v4는 스켈레톤을 한 번도 안 보고도 걷기·달리기 모두 돕는다. 지금은
+  <b>랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장</b>이다. 뒤 체크포인트(10k·14k)는 진자 보상의 토크 절약 항 때문에 물러나
+  epoch 6,000을 보관했다 — 보고서 <a href="llp_v13_report.html">llp_v13_report.html</a>.</p>
 
-  <h3>2단계 · 통합 시스템에서 재학습</h3>
+  <h3>2단계 · 통합 시스템에서 재학습 (2026-09-12~16 · 지금은 시험장으로만)</h3>
   <div class="scroll"><table>
     <thead><tr><th>버전</th><th>학습 모션</th><th>착용자</th><th class="num">한계</th><th>보상</th><th>결과</th></tr></thead>
     <tbody>
@@ -215,6 +221,7 @@
       <tr><td class="mono">v7</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + 변화율 벌점 ×10</td><td><span class="bad">+21.3 % 악화</span> — 거의 일정한 36 N·m로 수렴</td></tr>
       <tr class="now"><td class="mono">v10</td><td>〃</td><td><b>v32</b> 대칭</td><td class="num">40 N·m</td><td>〃 · <b>5 ms 제어 + 50 ms 예측기</b></td><td>−25.4 % 걷기 / −14.6 % 달리기 — <b>둘 다 각속도 착시</b>, τ²로는 +7.0 / +20.6 %</td></tr>
       <tr><td class="mono">v8</td><td>〃</td><td>v31</td><td class="num">40 N·m</td><td>〃 + <b>플랜트에 6 Hz 구동기 필터</b></td><td>−22.3 % — v6 출력에 같은 필터를 건 것(−22.5 %)과 <b>차이 없음</b> · 보관 안 함</td></tr>
+      <tr><td class="mono">v11 / v12</td><td>〃</td><td>v32</td><td class="num">무제한 / 80 N·m</td><td>〃 + <b>τ² 항</b></td><td>걷기 τ² −80 % / −43 %지만 달리기 τ² <span class="bad">+230 %</span>(2 s 낙상) / <span class="bad">+9 %</span> — 달리기는 못 도움 · 보관 안 함</td></tr>
     </tbody>
   </table></div>
   <ul>
@@ -285,7 +292,9 @@
       <text x="528" y="24" fill="var(--accent)" font-size="10.5">오라클 상한 26 % (40 N·m)</text>
     </g>
   </svg>
-  <p class="cap">낙상은 모든 조건에서 0건. 오라클 = 착용자가 실제로 내는 토크를 그대로 되먹이는 진단용 기준선.</p>
+  <p class="cap">낙상은 모든 조건에서 0건. 오라클 = 착용자가 실제로 내는 토크를 그대로 되먹이는 진단용 기준선.
+  이 그림은 |τ·ω| 파워 기준이라 각속도 감소를 절감으로 센다(2026-09-15 오라클 진단). <b>τ² 기준</b>의 최신 비교(v10 +7 %, v13 −30.5 %)는
+  <a href="llp_v13_report.html">llp_v13_report.html</a>.</p>
 </section>
 
 <section id="smooth">
@@ -344,7 +353,11 @@
       <tr><td class="num">09-12</td><td>독립 제어기 등가성 PASS · tracker v30·v31 재학습 · LLP 재학습 시작</td></tr>
       <tr><td class="num">09-13</td><td>LLP v3·v4·v5 보관 · 뼈 메시 에셋 통합 · 보행 전용 v6 학습 시작</td></tr>
       <tr><td class="num">09-14</td><td>v6 보관(걷기 −27 %, 달리기 −32 %) · v7(변화율 벌점)·v8(구동기 필터 학습) 모두 이득 없음 확인 · 예측 범위 50 ms면 충분·지연 15 ms까지 무해 측정 · 착용자 비대칭(22°) 원인 규명 후 관절각 추종 항으로 재학습(→3.0°)</td></tr>
-      <tr><td class="num">09-15</td><td>착용자 v32 보관 · HLP를 100 fps·미래 50 ms로 재학습(전 구간 개선) · denoise 3→1 · <b>HLP 10 ms / LLP 5 ms 두 속도 구조</b>로 v10 학습·보관</td></tr>
+      <tr><td class="num">09-15</td><td>착용자 v32 보관 · HLP를 100 fps·미래 50 ms로 재학습(전 구간 개선) · denoise 3→1 · <b>HLP 10 ms / LLP 5 ms 두 속도 구조</b>로 v10 학습·보관 · 오라클 진단: v10의 절감은 각속도 착시(τ² +7 %)</td></tr>
+      <tr><td class="num">09-16</td><td>v11(τ² 목적, 한계 해제)·v12(80 N·m) — 걷기 τ²는 크게 내려가나 달리기는 아무도 못 도움</td></tr>
+      <tr><td class="num">09-22</td><td>착용자 토크 스파이크의 정체 규명(tracker가 PD 목표를 토크 손잡이로 씀) → 랜덤화 진자 v4 착수</td></tr>
+      <tr><td class="num">09-23</td><td>진자 v4가 스켈레톤에 전이됨(걷기 −27 %, 달리기 −26 %) — 달리기를 도운 첫 버전. HLP 형식 일치가 조건</td></tr>
+      <tr><td class="num">09-28</td><td>v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · <b>epoch 6,000을 llp_v13으로 보관</b> · 보고서 llp_v13_report.html</td></tr>
     </tbody>
   </table></div>
 </section>

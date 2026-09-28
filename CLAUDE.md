@@ -63,6 +63,9 @@ python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/l
 ```
 LLP v3(실 HLP 150 ms chunk 형식) = `results/assist_pendulum_v3/`, 실험 파일 `mlp_v3.py`,
 A/B/C 평가 `eval_abc.py` (framework doc §6 Phase C).
+**LLP v4 = 랜덤화 플랜트**(`mlp_v4.py` + `protomotions/envs/control/assist_disturbance_control.py`:
+입각 하중·굳힘, 관성 ×1~25, ω_n 12~24, 의도 다양화, 배포 HLP 형식 10 ms × 6점, 비용 |τ·ω|+τ²).
+학습 전 점검 `check_env_v4.py`. **epoch 6,000 보관본 = `checkpoints/llp_v13_pendulum_dr` (현재 권장)**.
 
 ### AI-SBC 통합 시스템 — HLP + LLP → 스켈레톤 (framework doc §3.5, 버전 표 `docs/AI_SBC_VERSIONS.md`)
 독립 제어기 `protomotions/assist/AssistController`(env 비의존, 실기기 후보) + 서브스텝 훅
@@ -82,13 +85,21 @@ python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cab
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 4096 --batch-size 16384 \
     --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt --assist-limit 40
 ```
-결과 요지: 진자 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
-않는다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 재학습해 walk −32 %(v3), 15모션
-−22 %(v4), 착용자 앙상블 −32/−26 %(v5).
+결과 요지: 진자 v3 LLP는 강체 다리에서만 방향이 맞고(corr 0.80) 관절 다리·보행에서는 맞지
+않았다(0.19/≈0) → 통합 env(`SkeletonAssistEnv`)에서 재학습해 walk −32 %(v3), 15모션
+−22 %(v4), 착용자 앙상블 −32/−26 %(v5) — 단, 이 숫자들은 |τ·ω| 기준이고 τ²로 재면 스켈레톤
+학습 정책은 달리기를 한 번도 못 도왔다(v10 +21 %, v11 +230 %, v12 +9 %).
+**2026-09-23 반전: 랜덤화 진자 v4에서 학습한 정책이 스켈레톤을 한 번도 안 보고도 걷기 τ²
+−30.5 %, 달리기 −25.5 %** (epoch 6,000 = `checkpoints/llp_v13_pendulum_dr`, 평가는
+`--llp-dt 0.01`). 지금 구조는 **랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장**이다.
+착용자 v32는 사람보다 세고(hip 피크 1.7~3.7 N·m/kg) 스윙이 8° 커서 |ω| −12 %는 정책과 무관한
+착용자 산물 — 근본 해결은 v33 tracker(관절각 추종 ↑, hip 한계 600 → ~200, pow_rew ↑).
 
 평가는 **여러 비용 지표를 한 표에** 올려 읽는다 (아래 gotcha 참고):
 ```bash
 python examples/experiments/assist_skeleton/compare_runs.py --plot docs/oracle.png results/oracle/*
+python examples/experiments/assist_skeleton/report_html.py --out docs/transfer_report.html --walk ... --run ...   # 여러 실행 HTML 비교
+python examples/experiments/assist_skeleton/report_checkpoint_html.py --out docs/llp_v13_report.html --walk ... --run ...  # 체크포인트 하나 깊게
 # 오라클 탐침 (학습된 정책 대신 규칙 토크를 강제 주입 — 상한과 인과를 본다)
 python examples/experiments/assist_skeleton/run_system.py ... --oracle beta --oracle-beta 0.5
 python examples/experiments/assist_skeleton/run_system.py ... --oracle phase --oracle-window 0,10 --oracle-torque -40

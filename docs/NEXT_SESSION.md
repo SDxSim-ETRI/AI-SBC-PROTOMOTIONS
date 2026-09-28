@@ -1,38 +1,40 @@
-# 다음 세션 인계 메모 (2026-09-15 밤 기준 — 오라클 진단 완료)
+# 다음 세션 인계 메모 (2026-09-28 기준 — 진자 v4 → llp_v13 보관, 다음 run 선택 대기)
 
 새 세션에서 이 파일 + `AI_SBC_VERSIONS.md`만 읽으면 이어서 할 수 있게 정리한 것.
 설계 배경은 `AI_SBC_FRAMEWORK.md`, 통합 시스템 사용법은
 `../examples/experiments/assist_skeleton/README.md`.
 
-## 1. 지금 시스템 (전부 보관 완료, 작업 트리 깨끗)
+## 1. 지금 시스템 (전부 보관 완료)
 
 ```
-착용자(시뮬 속 사람)  checkpoints/v32_newton_suit_gait_symmetric   ← 대칭 보행
+착용자(시뮬 속 사람)  checkpoints/v32_newton_suit_gait_symmetric   ← 대칭 보행 (사람보다 셈 — §2-E)
 예측기 HLP            ManiFlow flexion100-h15 (자동 탐색, 지정 불필요)
-보조 정책 LLP         checkpoints/llp_v10_gait_5ms_40Nm
+보조 정책 LLP         checkpoints/llp_v13_pendulum_dr              ← 랜덤화 진자 v4 epoch 6,000 (§2-F)
+                      (이전 llp_v10_gait_5ms_40Nm는 τ²로는 악화 — 기준선으로만)
 인체 모델             mjcf/skeleton_torque_suit.xml (뼈 메시 + 캡슐 충돌)
 ```
 
 | | 주기 | 연산 시간 | 비고 |
 |---|---|---|---|
-| HLP | 10 ms | 4.9 ms (denoise 1) | 과거 100 ms → 미래 0~50 ms, 10 ms 격자 6점 |
-| LLP | **5 ms** | 0.25 ms | 미래 창은 {0, 10, 20 ms}만 읽음 |
-| 물리 | 2.5 ms | — | Newton 400 Hz, decimation 2 |
+| HLP | 10 ms | 3.2~4.9 ms (denoise 1) | 과거 100 ms → 미래 0~50 ms, 10 ms 격자 6점 |
+| LLP | **10 ms** | 0.36 ms | 미래 창은 {0, 10, 20 ms}만 읽음, 히스토리 250 ms, 이전 action 100 ms |
+| 물리 | 2.5 ms | — | Newton 400 Hz, decimation 4 |
 
-성능(40 s A/B, 착용자 v32, 낙상 0): 걷기 181 → 135 W (−25.4 %), 달리기 362 → 308 W (−14.6 %).
-⚠️ **두 숫자 다 각속도 착시다** — 근활성 프록시 τ²로는 걷기 +7.0 %, 달리기 +20.6 %로 오히려
-나쁘다 (§2). v10은 보관용 기준선일 뿐 권장 버전이 아니다.
+성능(40 s A/B, 착용자 v32, 낙상 0, **τ² 기준**): 걷기 **−30.5 %**, 달리기 **−25.5 %**, 몸체 오차 +0.9 / +10 %,
+보조 RMS 33 / 36 N·m, 착용자 토크와 상관 0.66 / 0.72. 보고서 `docs/llp_v13_report.html`
+(`report_checkpoint_html.py`), 여러 체크포인트 비교 `docs/transfer_report.html`.
+LLP는 스켈레톤·mocap·걷기·달리기를 학습에서 한 번도 보지 않았다 — 랜덤화 진자가 학습 플랜트다.
 
 ### 재현 명령 (sbc env)
 
 ```bash
-# 평가 — 학습과 같은 5 ms 제어로 돌려야 한다 (--llp-dt 0.005 빠뜨리면 다른 시스템이 된다)
+# 평가 — 학습과 같은 10 ms 제어 (--llp-dt 0.01; v10을 돌릴 때만 0.005)
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --tracker-checkpoint checkpoints/v32_newton_suit_gait_symmetric/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt --llp-dt 0.005 \
+    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration "5.70,2.63,-14.43,0.84"        # motion-id 1 = 달리기, --record = 영상
-# 주기 평균 토크·파워 그림
+# 여러 실행 한 표: compare_runs.py / report_html.py ; 체크포인트 하나 깊게: report_checkpoint_html.py
 python examples/experiments/assist_skeleton/plot_torque_phase.py <run_dir>
 ```
 
@@ -456,6 +458,32 @@ mocap(사람)은 46.1°다. 학습된 정책 셋(v10·v12·v4) 모두 보조를 
 했던 것도 사라졌다(−0.22) → 형식 불일치가 원인이었음이 확인됨. 아직 epoch 2,000이고 수렴은
 1만 근처(옛 run 기준)이니 더 좋아질 여지가 있다. 포화 52 %는 40 N·m 한계가 병목이라는 뜻.
 
+### 종료·보관 (2026-09-28)
+* 학습은 09-23부터 09-28까지 돌아 **epoch 670,000**에서 `systemctl --user stop aisbc-pend-v4`로 중단.
+  14,000 이후는 평가하지 않았다(10k·14k에서 평탄 확정). `results/assist_pendulum_v4/`에 1,000 epoch마다
+  체크포인트 670개(5.4 GB)가 남아 있다 — 지울지는 사용자 결정.
+* **epoch 6,000 → `checkpoints/llp_v13_pendulum_dr/`** (last.ckpt + resolved config + INFO.md).
+* 보고서 `docs/llp_v13_report.html` — 새 스크립트 `report_checkpoint_html.py`(핵심 숫자, 비교표, 걷기·달리기
+  위상 그림·표, 3 스트라이드 시계열, 주기 평균 토크, 학습 궤적 + 진자 안 보상 항 tensorboard).
+* 시계열에서 읽히는 것: 걷기 보조는 착지 직전~착지(위상 75~20 %)에 −38 N·m(신전)로 붙고 유각(28~58 %)에 +35로 뒤집힌다; 달리기는 78~38 %가 −40, 48~78 %가 +40 —
+  β 오라클과 같은 모양. 달리기는 한계 도달 64 %로 40 N·m가 병목.
+
+### 다음 run 후보 (사용자 선택 대기, 2026-09-28)
+* **(a) 보조 토크 절약 항 축소** — `assist_effort` −2e-5 → −5e-6, `action_rate` −0.005 → −0.002. 정점 뒤
+  물러남의 직접 원인을 건드리는 가장 작은 변경. 정점이 유지되면 그게 곧 배포 후보.
+* **(b) 진자 착용자 effort_limit 150 → 300** — 외부 하중 상한이 `0.8 × effort_limit`에 묶여 있어(착용자 PD가
+  못 버티는 하중은 종료만 만든다) 지금은 ≤120 N·m(1.3 N·m/kg)다. 스켈레톤 착용자 v32는 착지에서 −332 N·m
+  (3.7 N·m/kg)를 내므로 정책이 학습에서 본 하중의 3배를 시험에서 만난다. 300이면 ≤240 N·m(2.7 N·m/kg)로
+  그 영역을 대부분 덮는다. 대가: 진자 착용자가 사람(문헌 피크 ≈1 N·m/kg)보다 세져 학습 분포가 tracker의
+  산물 쪽으로 움직인다. 09-23에 사용자는 "150 유지(사람 범위)"를 골랐다.
+* **(c) 착용자 v33 tracker 먼저** — (b)의 반대 방향: 시험대를 사람 쪽으로 옮긴다. v32의 두 산물
+  (① hip 한계 600 N·m + PD 목표를 토크 손잡이로 쓰는 −300 N·m 스파이크, ② 무보조 hip 스윙 54.5° vs mocap
+  46°라 보조를 켜면 정책과 무관하게 |ω| −12 %)을 `dof_pos_rew` 가중 ↑, hip effort_limit 600 → ~200,
+  `pow_rew` ↑로 없앤다. 그러면 |ω|가 "보조가 다리를 억누르는가"의 의미 있는 잣대가 되고, 하중 영역이
+  진자의 120 N·m 안에 들어와 (b)가 필요 없어진다. 대가: tracker 재학습 반나절 + 모든 A/B 수치 재측정
+  (지금의 −30.5 %와 직접 비교 불가).
+* 추천 순서: (a) → (c). (b)는 (c)가 되면 필요 없다.
+
 ### 실행
 ```bash
 python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --steps 1500   # 학습 전 점검
@@ -477,20 +505,19 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
   대역폭이 정해지면 `--torque-lpf-hz`에 넣고 그 조건에서 성능을 다시 읽어야 한다
   (측정: 12 Hz 거의 무손실, 6 Hz −4~5 포인트, 3 Hz 붕괴).
 
-## 4. 다음 단계 후보 (우선순위 순)
+## 4. 다음 단계 후보 (우선순위 순, 2026-09-28)
 
-1. **LLP v12** — τ² 목적 + 한계 80 N·m, 진행 중 (§2-B). v11(한계 없음)은 걷기는 크게
-   좋아졌지만 달리기가 죽어서 중단했다.
-2. **비용 함수 확정** — τ² 단독 vs τ²+양의 일 vs \|τ\|. v11이 나오면 같은 기록에서
-   `compare_runs.py`로 전부 다시 재면 되므로 추가 실행 없이 비교 가능.
-3. **달리기는 아직 아무도 못 풀었다.** τ²로 재면 v10 +20.6 %, v12@1000 +9.3 % —
-   **어떤 버전도 달리기에서 착용자 근토크를 덜어 준 적이 없다**(v10의 "−14.6 %"는 걷기와
-   같은 각속도 착시). v12는 최소한 넘어지지는 않는다(40 s 완주). 후보: 학습 비중을
-   0.5/0.5로 올리기, 관측에 보행 맥락 주기(§2-B의 2번).
-4. **구동기 스펙 반영** — 피크·연속 토크·대역폭 받으면 한계와 필터를 실제 값으로.
-   (오라클은 80 N·m까지 보행에 무해하다고 말한다 — 스펙 협의 때 근거로 쓸 것.)
+1. **다음 run 선택** — §2-F "다음 run 후보" (a)/(b)/(c). 사용자 답 대기. GPU는 비어 있다.
+2. **착용자 v33 tracker** — 사람 범위 근력·관절각 추종. 지금 시험대는 사람보다 1.7~3.7배 센 착용자라
+   τ² 절감률의 절대값은 사람 기준이 아니다.
+3. **`verify_controller` 복구** — 배포 HLP(10 ms × 6점)와 v3 제어기 형식 불일치로 실패 중. v13은 형식이
+   맞으니 `--hlp-checkpoint` 인자를 붙여 v13 기준으로 다시 PASS시키고, 스켈레톤 env ↔ `AssistController`
+   등가성 검사도 하나 만들 것(지금은 없다).
+4. **구동기 스펙 반영** — 피크·연속 토크·대역폭 받으면 한계와 필터를 실제 값으로. 달리기는 40 N·m에서
+   한계 도달 64 %라 한계가 병목이다(오라클: 80 N·m까지 보행에 무해).
 5. **계단 데이터 보완** — HLP 학습셋 74,488클립 중 계단이 98개뿐이라 계단·전환에서 오차 2.3~2.6배.
-6. **세그폴트 원인 규명** — 다음 학습부터 `PYTHONFAULTHANDLER=1`을 켜고, CUDA graph를 끈 판과 비교.
+6. **세그폴트** — v4 전용 경로(게인 통지)는 408f0b6으로 고쳤고 그 뒤 5일간 재시작 없이 돌았다. 스켈레톤
+   run들의 세그폴트는 원인 미확정(CUDA graph 1순위 용의자).
 
 ## 5. 반드시 지킬 운영 규칙
 

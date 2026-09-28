@@ -1,0 +1,66 @@
+{
+  "robot_name": "hip_pendulum",
+  "simulator": "newton",
+  "num_envs": 4096,
+  "batch_size": 16384,
+  "motion_file": "none",
+  "experiment_path": "examples/experiments/assist_pendulum/mlp_v4.py",
+  "experiment_name": "assist_pendulum_v4",
+  "scenes_file": null,
+  "checkpoint": null,
+  "use_wandb": false,
+  "use_slurm": false,
+  "ngpu": 1,
+  "nodes": 1,
+  "headless": true,
+  "seed": 0,
+  "torch_deterministic": false,
+  "training_max_steps": 10000000000000,
+  "overrides": [],
+  "create_config_only": false,
+  "assist_limit": 40.0,
+  "inertia_range": [
+    1.0,
+    25.0
+  ],
+  "omega_n_range": [
+    12.0,
+    24.0
+  ],
+  "zeta_range": [
+    0.3,
+    0.8
+  ],
+  "stance_load_per_kg": 2.0,
+  "stance_kp_mult": [
+    2.0,
+    8.0
+  ],
+  "stance_gap": [
+    0.4,
+    1.6
+  ],
+  "stance_dur": [
+    0.08,
+    0.45
+  ],
+  "perturb_amp_per_kg": 0.3,
+  "no_disturbance": false,
+  "blend_range": [
+    0.25,
+    2.5
+  ],
+  "hold_prob": 0.3,
+  "history_steps": 25,
+  "prev_actions": 10,
+  "human_cost": "both",
+  "work_weight": -0.0016,
+  "torque_sq_weight": -3e-05,
+  "tracking_weight": 1.0,
+  "hlp_dt": 0.01,
+  "chunk_knots": 6,
+  "chunk_refresh_steps": 1,
+  "obs_future_samples": 3,
+  "obs_future_dt": 0.01,
+  "wandb_id": null
+}
