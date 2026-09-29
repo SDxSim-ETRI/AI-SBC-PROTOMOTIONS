@@ -1,4 +1,6 @@
-# Checkpoint Info — 착용자 v33 (mimic tracker), 사람 범위 근력
+# Checkpoint Info — 가상 착용자 **W1** (옛 이름 v33; mimic tracker, 사람 범위 근력)
+
+버전 체계(2026-09-29): H = HLP, L = LLP, W = 가상 착용자, 현재 계보는 1부터. `docs/AI_SBC_VERSIONS.md` §0.
 
 | 항목 | 내용 |
 |------|------|
@@ -33,8 +35,8 @@ v32(hip 한계 600)는 PD 목표각을 토크 손잡이로 써서 착지마다 �
 
 | v33 위에 | 걷기 τ² | 달리기 τ² | 몸체 오차 | 보조 RMS |
 |---|---|---|---|---|
-| llp_v13 그대로 (40 N·m) | −0.1 % | **4.4 s 낙상** | — | 33 / 35 N·m |
-| **llp_v13 × 0.5** (`--assist-scale 0.5`) | **−19.3 %** | **−23.9 %** | −1.6 / −0.3 % | 17 / 19 |
+| L1 (옛 llp_v13) 그대로 (40 N·m) | −0.1 % | **4.4 s 낙상** | — | 33 / 35 N·m |
+| **L1 × 0.5** (`--assist-scale 0.5`) | **−19.3 %** | **−23.9 %** | −1.6 / −0.3 % | 17 / 19 |
 | β 오라클 0.5 (특권 상한) | −35.1 % | −40.8 % | −1.9 / −0.1 % | 14 / 20 |
 
 **40 N·m 그대로는 쓰지 말 것.** 사람 범위 착용자에겐 ~20 N·m가 맞고, 정책은 착용자 근력을 관측하지 못해 크기를
@@ -44,8 +46,8 @@ v32(hip 한계 600)는 PD 목표각을 토크 손잡이로 써서 착지마다 �
 ```bash
 # 통합 시스템 A/B (walk = motion-id 0, run = 1). 영점은 착용자 스트림에서 잰다(--calibration wearer).
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
+    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration wearer
 python examples/experiments/assist_skeleton/eval_wearer.py results/oracle/<run>   # 착용자 잣대

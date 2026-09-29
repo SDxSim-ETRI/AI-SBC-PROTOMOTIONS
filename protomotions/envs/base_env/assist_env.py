@@ -85,7 +85,17 @@ class AssistEnvConfig(EnvConfig):
     zeta_range: tuple = (0.66, 0.66)
     hip_inertia_base: float = 0.418  # (하위 호환) 대퇴 hip 축 관성 [kg·m²]
     hip_inertia_com: float = 0.1316  # 대퇴 질량중심 관성 (hip_pendulum.xml, MuJoCo 계산)
-    hip_inertia_parallel: float = 0.2863  # m·d² 평행축 항 — 질량을 안 바꾸므로 고정
+    hip_inertia_parallel: float = 0.2863  # m·d² 평행축 항 (질량 배율에 비례)
+
+    # ---- L2 (2026-09-29) ----
+    # 질량을 관성 배율 r과 함께 r^p 로 키운다 (p=0이면 v4처럼 질량 고정). v4는 관성만 ×1~25라 중력/관성 비
+    # m·g·d/I 가 실제 다리(≈15 s⁻²)의 1/4까지 떨어졌고, 그래서 진자 다리는 유각 말기에 스스로 감속하지 않아
+    # 정책이 "감속 = 브레이크 도움"을 배웠다(사람 범위 착용자 W1에서 유각 말기 오방향의 원인). p=0.43이면
+    # r=25에서 질량 ×4, 중력 모멘트 13 → 53 N·m, 비 ≈ 15 s⁻².
+    mass_scale_exponent: float = 0.0
+    # 보조 토크 한계를 env마다 U[lo, hi]로 뽑아 clamp 한다 (정책은 관측 못 함 — 자기 토크의 효과를 히스토리로
+    # 봐야 한다). (0, 0)이면 비활성 = assist_torque_limit 하나. 배포 때는 하드웨어 한계로 clamp (controller).
+    assist_limit_range: tuple = (0.0, 0.0)
 
 
 class AssistEnv(BaseEnv):
@@ -126,6 +136,11 @@ class AssistEnv(BaseEnv):
         self._kd_wp = sim.robot_view.get_attribute("joint_target_kd", sim.model)
 
         self._inertia_scale = self._randomize_inertia()  # (n, d), 1.0이면 비활성
+        lo, hi = (float(v) for v in getattr(self.config, "assist_limit_range", (0.0, 0.0)))
+        if hi > 0:
+            self._assist_limit = lo + (hi - lo) * torch.rand(self.num_envs, 1, device=self.device)
+        else:
+            self._assist_limit = None
         if getattr(self.config, "impedance_mode", "gain_scale") == "natural_freq":
             self._randomize_impedance_natural_freq()
         else:
@@ -184,12 +199,28 @@ class AssistEnv(BaseEnv):
         iI_wp = sim.robot_view.get_attribute("body_inv_inertia", sim.model)
         I = wp.to_torch(I_wp).view(self.num_envs, -1, 3, 3)
         iI = wp.to_torch(iI_wp).view(self.num_envs, -1, 3, 3)
+        p_mass = float(getattr(cfg, "mass_scale_exponent", 0.0))
+        mscale = scale ** p_mass if p_mass > 0 else torch.ones_like(scale)
+        self._mass_scale = mscale
+        if p_mass > 0:
+            m_wp = sim.robot_view.get_attribute("body_mass", sim.model)
+            im_wp = sim.robot_view.get_attribute("body_inv_mass", sim.model)
+            m = wp.to_torch(m_wp).view(self.num_envs, -1)
+            im = wp.to_torch(im_wp).view(self.num_envs, -1)
         for d, b in enumerate(body_for_dof):
             r = scale[:, d]
+            # 질량중심 관성은 r배; 질량은 r^p배 (질량중심 관성도 질량에 비례하므로 총 r^(1+p)... 가 아니라
+            # 관성 배율 r 자체를 "hip 축 관성 목표"로 두고 질량은 별도 배율로 취급한다)
             I[:, b] = I[:, b] * r.view(-1, 1, 1)
             iI[:, b] = iI[:, b] / r.view(-1, 1, 1)
+            if p_mass > 0:
+                m[:, b] = m[:, b] * mscale[:, d]
+                im[:, b] = im[:, b] / mscale[:, d]
         sim.robot_view.set_attribute("body_inertia", sim.model, I_wp)
         sim.robot_view.set_attribute("body_inv_inertia", sim.model, iI_wp)
+        if p_mass > 0:
+            sim.robot_view.set_attribute("body_mass", sim.model, m_wp)
+            sim.robot_view.set_attribute("body_inv_mass", sim.model, im_wp)
         sim.solver.notify_model_changed(SolverNotifyFlags.BODY_INERTIAL_PROPERTIES)
         return scale
 
@@ -198,7 +229,10 @@ class AssistEnv(BaseEnv):
         cfg = self.config
         com = float(getattr(cfg, "hip_inertia_com", 0.1316))
         par = float(getattr(cfg, "hip_inertia_parallel", 0.2863))
-        return par + com * self._inertia_scale
+        mscale = getattr(self, "_mass_scale", None)
+        if mscale is None:
+            mscale = torch.ones_like(self._inertia_scale)
+        return par * mscale + com * self._inertia_scale
 
     def _randomize_impedance_natural_freq(self):
         """Kp = ω_n²·I, Kd = 2ζ√(Kp·I) — 관성이 바뀌어도 동역학 영역(ω_n, ζ)을 직접 뽑는다."""
@@ -297,11 +331,15 @@ class AssistEnv(BaseEnv):
 
         # policy action -> assist torque [N·m]
         action_dict = self._process_action(action, self.context)
-        tau_assist = torch.clamp(
-            action_dict["processed_action"],
-            -self.config.assist_torque_limit,
-            self.config.assist_torque_limit,
-        )
+        lim = getattr(self, "_assist_limit", None)
+        if lim is not None:  # env마다 다른 한계 (L2)
+            tau_assist = torch.maximum(torch.minimum(action_dict["processed_action"], lim), -lim)
+        else:
+            tau_assist = torch.clamp(
+                action_dict["processed_action"],
+                -self.config.assist_torque_limit,
+                self.config.assist_torque_limit,
+            )
         self._current_processed_action[:] = tau_assist
 
         comp = self.assist_component

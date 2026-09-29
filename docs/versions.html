@@ -98,6 +98,7 @@
 
 <nav class="toc">
   <a href="#now">지금 쓸 것</a>
+  <a href="#scheme">버전 체계·용어</a>
   <a href="#models">세 모델</a>
   <a href="#hlp">HLP</a>
   <a href="#wearer">착용자</a>
@@ -108,23 +109,38 @@
   <a href="#time">타임라인</a>
 </nav>
 
+<section id="scheme">
+  <div class="sec-head"><span class="num">00</span><h2>버전 체계와 용어 (2026-09-29 재정비)</h2></div>
+  <p class="note">세 모델의 번호가 따로 커져(v33·v13·스켈레톤 v3~v12) 헷갈렸으므로 <b>구성 요소 접두어 + 번호</b>로 바꾸고 <b>현재 계보는 1부터</b> 다시 센다. 옛 번호는 기록용.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>접두어</th><th>뜻</th><th>현재</th><th>옛 이름</th><th>위치</th></tr></thead>
+    <tbody>
+      <tr class="now"><td class="mono">H</td><td>HLP · 각도 예측기</td><td class="mono">H1</td><td>flexion100-h15</td><td>ManiFlow 레포 run(자동 탐색) · H0 = flexion40</td></tr>
+      <tr class="now"><td class="mono">L</td><td>LLP · 보조 토크 정책</td><td class="mono">L1</td><td>llp_v13 = 진자 v4 @6,000</td><td class="mono">checkpoints/L1_llp_pendulum/ · 다음 = L2(학습 중)</td></tr>
+      <tr class="now"><td class="mono">W</td><td>가상 착용자 · tracker</td><td class="mono">W1</td><td>tracker v33</td><td class="mono">checkpoints/W1_wearer_human/ · W0 = v32</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">시스템 조합은 <b>H1+L1 @ W1</b>처럼 쓴다. <b>통합</b> = HLP·LLP를 각각 따로 학습한 뒤 그대로 붙여 평가·배포하는 것(기본 목표; 스켈레톤 A/B가 곧 통합 평가).
+  <b>개인화</b> = 통합 뒤 특정 착용자 위에서 LLP를 추가 학습하는 것(옛 v3~v12; 지금은 안 씀).</p>
+</section>
+
 <section id="now">
   <div class="sec-head"><span class="num">01</span><h2>지금 쓸 것</h2></div>
   <div class="now-panel">
     <div class="now-grid">
-      <div><dt>HLP (각도 예측)</dt><dd>flexion100-h15 · 10 ms 격자</dd><span class="path">미래 50 ms · 자동 탐색</span></div>
-      <div><dt>LLP — 보행(걷기·달리기)</dt><dd>llp_v13 · 랜덤화 진자 학습 · 10 ms 제어 · <b>v33에선 ×0.5로만</b></dd><span class="path">checkpoints/llp_v13_pendulum_dr/last.ckpt</span></div>
+      <div><dt>HLP (각도 예측)</dt><dd>H1 · flexion100-h15 · 10 ms 격자</dd><span class="path">미래 50 ms · 자동 탐색</span></div>
+      <div><dt>LLP — 보행(걷기·달리기)</dt><dd>L1 (옛 llp_v13) · 랜덤화 진자 학습 · 10 ms 제어 · <b>W1에선 ×0.5로만</b> · L2 학습 중</dd><span class="path">checkpoints/L1_llp_pendulum/last.ckpt</span></div>
       <div><dt>LLP — 이전 판(스켈레톤 학습)</dt><dd>llp_v10 · 5 ms 제어 · τ²로는 악화</dd><span class="path">checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt</span></div>
       <div><dt>LLP — 착용자 두 명 모두</dt><dd>llp_v5 · 앙상블(walk)</dd><span class="path">checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt</span></div>
       <div><dt>LLP — 여러 동작</dt><dd>llp_v4 · 15모션</dd><span class="path">checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt</span></div>
-      <div><dt>가상 착용자 — 사람 범위 근력</dt><dd>v33 · hip 한계 200 N·m</dd><span class="path">checkpoints/v33_newton_suit_human/last.ckpt</span></div>
-      <div><dt>가상 착용자 — 이전(사람보다 셈)</dt><dd>v32 · 기준선으로만</dd><span class="path">checkpoints/v32_newton_suit_gait_symmetric/last.ckpt</span></div>
+      <div><dt>가상 착용자 — 사람 범위 근력</dt><dd>W1 (옛 v33) · hip 한계 200 N·m</dd><span class="path">checkpoints/W1_wearer_human/last.ckpt</span></div>
+      <div><dt>가상 착용자 — 이전(사람보다 셈)</dt><dd>W0 = v32 · 기준선으로만</dd><span class="path">checkpoints/v32_newton_suit_gait_symmetric/last.ckpt</span></div>
       <div><dt>가상 착용자 — 15모션</dt><dd>v31</dd><span class="path">checkpoints/v31_newton_suit_passive_motions15/last.ckpt</span></div>
       <div><dt>인체 모델</dt><dd>skeleton_torque_suit</dd><span class="path">뼈 메시 + 캡슐 충돌, 27 DOF</span></div>
     </div>
     <pre><code>python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
+    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration wearer</code></pre>
   </div>
@@ -199,7 +215,7 @@
       <tr><td class="mono">v1</td><td>위치 추종 보상만</td><td class="flat">참고용</td></tr>
       <tr><td class="mono">v2</td><td>추종 + 파워 + 토크 + 변화율</td><td>진자에서 사람 파워 <span class="good">−76.6 %</span></td></tr>
       <tr><td class="mono">v3</td><td>v2 + 실제 HLP chunk 형식(150 ms 7점)</td><td>실 HLP 연결 시 <span class="good">−39 %</span>(학습 외 데이터) / <span class="good">−34 %</span>(자체 14모션) — 스켈레톤 이식은 실패</td></tr>
-      <tr class="now"><td class="mono">v4 → <b>llp_v13</b></td><td><b>랜덤화 플랜트</b>(입각 하중 ≤120 N·m + 굳힘, 관성 ×1~25, ω_n 12~24, 의도 다양화) + 배포 HLP 형식(10 ms × 6점) + |τ·ω|+τ²</td><td>스켈레톤(안 본 플랜트)에서 걷기 τ² <span class="good">−30.5 %</span> / 달리기 <span class="good">−25.5 %</span> @ epoch 6,000 — 달리기를 도운 첫 버전</td></tr>
+      <tr class="now"><td class="mono">v4 → <b>L1</b> (옛 llp_v13)</td><td><b>랜덤화 플랜트</b>(입각 하중 ≤120 N·m + 굳힘, 관성 ×1~25, ω_n 12~24, 의도 다양화) + 배포 HLP 형식(10 ms × 6점) + |τ·ω|+τ²</td><td>스켈레톤(안 본 플랜트)에서 걷기 τ² <span class="good">−30.5 %</span> / 달리기 <span class="good">−25.5 %</span> @ epoch 6,000 — 달리기를 도운 첫 버전</td></tr>
     </tbody>
   </table></div>
   <p class="note">진자는 “골반 고정 + 대퇴 2개”뿐인 모델이다. 이 정책을 실제 스켈레톤에 올려 보니 <b>강체 다리에서만</b> 방향이 맞았다(상관 0.80).
@@ -210,7 +226,7 @@
   <b>랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장</b>이다. 뒤 체크포인트(10k·14k)는 진자 보상의 토크 절약 항 때문에 물러나
   epoch 6,000을 보관했다 — 보고서 <a href="llp_v13_report.html">llp_v13_report.html</a>.</p>
 
-  <h3>2단계 · 통합 시스템에서 재학습 (2026-09-12~16 · 지금은 시험장으로만)</h3>
+  <h3>2단계 · 착용자 위에서 추가 학습 = <b>개인화</b> 실험 (2026-09-12~16 · 지금은 안 씀)</h3>
   <div class="scroll"><table>
     <thead><tr><th>버전</th><th>학습 모션</th><th>착용자</th><th class="num">한계</th><th>보상</th><th>결과</th></tr></thead>
     <tbody>
@@ -359,7 +375,8 @@
       <tr><td class="num">09-16</td><td>v11(τ² 목적, 한계 해제)·v12(80 N·m) — 걷기 τ²는 크게 내려가나 달리기는 아무도 못 도움</td></tr>
       <tr><td class="num">09-22</td><td>착용자 토크 스파이크의 정체 규명(tracker가 PD 목표를 토크 손잡이로 씀) → 랜덤화 진자 v4 착수</td></tr>
       <tr><td class="num">09-23</td><td>진자 v4가 스켈레톤에 전이됨(걷기 −27 %, 달리기 −26 %) — 달리기를 도운 첫 버전. HLP 형식 일치가 조건</td></tr>
-      <tr><td class="num">09-28</td><td>v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · <b>epoch 6,000을 llp_v13으로 보관</b> · 보고서 llp_v13_report.html · 진자 v5(절약 항 축소)는 정점 유지 못 함 · <b>착용자 v33(사람 범위 근력) 학습·보관</b> — v33에선 v13이 ×0.5로만 유효(−19 / −24 %), 40 N·m는 달리기 낙상</td></tr>
+      <tr><td class="num">09-28</td><td>v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · <b>epoch 6,000을 llp_v13(=L1)으로 보관</b> · 보고서 llp_v13_report.html · 진자 v5(절약 항 축소)는 정점 유지 못 함 · <b>착용자 v33(=W1, 사람 범위 근력) 학습·보관</b> — W1에선 L1이 ×0.5로만 유효(−19 / −24 %), 40 N·m는 달리기 낙상</td></tr>
+      <tr><td class="num">09-29</td><td><b>버전 체계 H/L/W로 재정비, 용어 통합·개인화 확정</b> · <b>L2</b> 학습 시작(질량을 관성과 함께, 보조 한계 env별 U[10,50] N·m)</td></tr>
     </tbody>
   </table></div>
 </section>

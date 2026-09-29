@@ -1,4 +1,9 @@
-# 다음 세션 인계 메모 (2026-09-28 밤 기준 — 착용자 v33 보관, llp_v13은 v33에서 ×0.5로만, 다음 = 진자 v6 결정)
+# 다음 세션 인계 메모 (2026-09-29 저녁 기준 — H1+L1 @ W1, L2 학습 중)
+
+**버전 체계 (09-29 재정비)**: H = HLP, L = LLP, W = 가상 착용자, 현재 계보 1부터 — H1 = flexion100-h15,
+**L1** = `checkpoints/L1_llp_pendulum`(옛 llp_v13), **W1** = `checkpoints/W1_wearer_human`(옛 tracker v33), W0 = v32.
+**용어**: 통합 = 따로 학습한 HLP·LLP를 그대로 붙여 평가·배포(스켈레톤 A/B가 곧 통합 평가); 개인화 = 착용자 위 LLP 추가 학습(옛 v3~v12).
+아래 본문의 옛 이름(v13, v33, v32)은 L1, W1, W0으로 읽을 것.
 
 새 세션에서 이 파일 + `AI_SBC_VERSIONS.md`만 읽으면 이어서 할 수 있게 정리한 것.
 설계 배경은 `AI_SBC_FRAMEWORK.md`, 통합 시스템 사용법은
@@ -7,11 +12,12 @@
 ## 1. 지금 시스템 (전부 보관 완료)
 
 ```
-착용자(시뮬 속 사람)  checkpoints/v33_newton_suit_human            ← 사람 범위 근력 (hip 한계 200), §2-H
-                      (v32_newton_suit_gait_symmetric = 사람보다 1.7~3.7배 센 이전 착용자, 기준선으로만)
-예측기 HLP            ManiFlow flexion100-h15 (자동 탐색, 지정 불필요)
-보조 정책 LLP         checkpoints/llp_v13_pendulum_dr              ← 랜덤화 진자 v4 epoch 6,000 (§2-F)
-                      **v33에서는 --assist-scale 0.5(≈20 N·m)로만** — 40 N·m 그대로는 걷기 무효·달리기 낙상
+착용자(시뮬 속 사람)  W1 = checkpoints/W1_wearer_human        ← 사람 범위 근력 (hip 한계 200), §2-H
+                      (W0 = v32_newton_suit_gait_symmetric = 사람보다 1.7~3.7배 센 이전 착용자, 기준선으로만)
+예측기 HLP            H1 = ManiFlow flexion100-h15 (자동 탐색, 지정 불필요)
+보조 정책 LLP         L1 = checkpoints/L1_llp_pendulum          ← 랜덤화 진자 v4 epoch 6,000 (§2-F)
+                      **W1에서는 --assist-scale 0.5(≈20 N·m)로만** — 40 N·m 그대로는 걷기 무효·달리기 낙상
+                      **L2 학습 중** (§2-I)
 인체 모델             mjcf/skeleton_torque_suit.xml (뼈 메시 + 캡슐 충돌), 로봇 config skeleton_torque_suit_human
 ```
 
@@ -32,8 +38,8 @@ LLP는 스켈레톤·mocap·걷기·달리기를 학습에서 한 번도 보지 
 ```bash
 # 평가 — 착용자 v33, 영점은 착용자 스트림에서(--calibration wearer), v13은 ×0.5. (v32면 --calibration "5.70,2.63,-14.43,0.84")
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
+    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration wearer                          # motion-id 1 = 달리기, --record = 영상
 python examples/experiments/assist_skeleton/eval_wearer.py <run_dir>   # 착용자가 얼마나 사람 같은가
@@ -465,7 +471,7 @@ mocap(사람)은 46.1°다. 학습된 정책 셋(v10·v12·v4) 모두 보조를 
 * 학습은 09-23부터 09-28까지 돌아 **epoch 670,000**에서 `systemctl --user stop aisbc-pend-v4`로 중단.
   14,000 이후는 평가하지 않았다(10k·14k에서 평탄 확정). `results/assist_pendulum_v4/`에 1,000 epoch마다
   체크포인트 670개(5.4 GB)가 남아 있다 — 지울지는 사용자 결정.
-* **epoch 6,000 → `checkpoints/llp_v13_pendulum_dr/`** (last.ckpt + resolved config + INFO.md).
+* **epoch 6,000 → `checkpoints/L1_llp_pendulum/`** (last.ckpt + resolved config + INFO.md).
 * 보고서 `docs/llp_v13_report.html` — 새 스크립트 `report_checkpoint_html.py`(핵심 숫자, 비교표, 걷기·달리기
   위상 그림·표, 3 스트라이드 시계열, 주기 평균 토크, 학습 궤적 + 진자 안 보상 항 tensorboard).
 * 시계열에서 읽히는 것: 걷기 보조는 착지 직전~착지(위상 75~20 %)에 −38 N·m(신전)로 붙고 유각(28~58 %)에 +35로 뒤집힌다; 달리기는 78~38 %가 −40, 48~78 %가 +40 —
@@ -621,7 +627,7 @@ v33이 수렴한 뒤(≈ epoch 11,200) 같은 표를 다시 찍고 결정.
 세 스냅샷 종합(9,410 / 10,422 / 11,234): v13×0.5 걷기 −16 / −19 / −20, 달리기 −18 / −26 / −25; β −36 / −38 / −36,
 −35 / −40 / −39. **40 N·m 그대로는 걷기 무효, 달리기는 안전하지도 않다**(v32에선 600 N·m 근력이 받아 줬다).
 
-### 보관 — epoch 12,218 → `checkpoints/v33_newton_suit_human/` (22:50, 학습 중단)
+### 보관 — epoch 12,218 → `checkpoints/W1_wearer_human/` (22:50, 학습 중단)
 11,200 이후 학습 지표 평탄(몸체 0.060, 관절각 보상 0.666, 파워 658 W). 12,218 스냅샷: 걷기 스윙 48.1°, RMS 39,
 피크 −150(1.65 N·m/kg), 주기 평균 −86 / +34, 몸체 0.060; 달리기 스윙 57.2 / 58.9, RMS 56, 피크 −127, 몸체 0.061.
 v13×0.5 걷기 −19.3 / 달리기 −23.9 %, β −35.1 / −40.8. INFO.md에 잣대 표·사용법. 남은 과제: 피크/RMS 3.9 —
@@ -638,6 +644,22 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
 평가 잣대: `compare_runs.py` 위상표에서 **착지 구간(0~20 %) τ²**가 내려가는가 — v10은
 +19, β 오라클은 −23 (절대 (N·m)² 기여, §2-B). \|ω\|가 유지되는가.
 
+## 2-I. L2 — 질량을 관성과 함께, 보조 한계를 env마다 (2026-09-29 18:42 시작, unit `aisbc-llp-L2`, run `results/llp_L2_pendulum`)
+
+사용자 판단(09-29): "한계를 절반으로 줄여 좋아진 게 이해 안 된다 — 한계를 정해 둘 게 아니라 학습 때 범위 안에서
+다양하게 바꿔 가며 실험하는 게 낫지 않나. 20 N·m 고정만 빼면 나머지(§4의 진자 v6 설계)는 괜찮다."
+→ `mlp_v4.py` 그대로에 두 가지 추가 (v4 보상 weight 그대로):
+* `--mass-exponent 0.43`: 질량 배율 = 관성 배율^0.43 (×25에서 질량 ×4, 6.5 → 26 kg). 중력/관성 비가 실제 다리(≈15 s⁻²)
+  수준이 되어 유각 말기에 다리가 스스로 감속한다 → "감속 = 브레이크 도움"을 배우지 않게. `AssistEnv._randomize_inertia`가
+  `body_mass`·`body_inv_mass`도 같이 바꾸고, `hip_inertia_eff`의 평행축 항이 질량에 비례.
+* `--assist-limit 50 --assist-limit-range 10,50`: env마다 보조 한계를 U[10, 50] N·m로 뽑아 clamp(`AssistEnv.step`).
+  정책은 한계를 **관측하지 못한다** — 자기 토크의 효과를 250 ms 히스토리로 보고 크기를 맞춰야 한다. action 의미 =
+  "요청 토크(±50)", 실제 = 한계로 잘린 값 — 배포 controller의 `--torque-limit` clamp와 같은 구조.
+* 점검(`check_env_v4.py`, 64 env × 8 s): 질량 6.7~25.7 kg, hip 관성 0.44~4.36, ω_n 12~24, 조기 종료 1회, τ_agent RMS 44.
+* 평가: `eval_when_ready.sh`가 이제 **W1 + `--calibration wearer` + 한계 20·40 각각**으로 돌린다(`LIMITS`). 기준 행 = W1 위의
+  L1×0.5, β 오라클. 판정: 한계 20에서 걷기 τ² −20 / 달리기 −25보다 낫고 몸체 오차 유지, 한계 40에서도 넘어지지 않는가;
+  위상 70~90 % 보조 토크가 β처럼 ≈0으로 가는가. 잘 되면 그것이 곧 **통합 평가**(실 H1 + L2 @ W1) — 추가 학습 없음.
+
 ## 3. 토크 한계 40 N·m의 출처 — 스펙이 아니라 우리가 고른 값
 
 - 진자 단계에서 25 N·m로 시작(내가 "착용 장치 현실 범위"로 가정한 값, 근거 문서 없음).
@@ -652,8 +674,9 @@ python examples/experiments/assist_pendulum/check_env_v4.py --num-envs 64 --step
 
 ## 4. 다음 단계 후보 (우선순위 순, 2026-09-28 밤)
 
-1. ~~착용자 v33 보관~~ — 완료(`checkpoints/v33_newton_suit_human`, epoch 12,218). 이후 모든 LLP 평가는 v33에서.
-2. **LLP 방향 결정 (사용자)** — v33에서 v13 그대로는 걷기 무효·달리기 낙상, ×0.5는 −20/−25, β 상한 −36/−39.
+1. ~~착용자 v33(=W1) 보관~~ — 완료. 이후 모든 LLP 평가는 W1에서.
+2. ~~LLP 방향 결정~~ — 사용자가 (ii)를 골랐고 20 N·m 고정 대신 **한계 랜덤화**로 바꿈 → **L2 학습 중** (§2-I).
+   (아래 (i)~(iii)는 결정 당시의 후보 기록.) W1에서 L1 그대로는 걷기 무효·달리기 낙상, ×0.5는 −20/−25, β 상한 −36/−39.
    * (i) v13×0.5를 실기기 후보로 두고 끝내기 — 한계 20 N·m 상당.
    * (ii) **진자 v6 재학습 (추천)** — 바꿀 것 세 가지:
      - 한계 **20 N·m** (`--assist-limit 20`).

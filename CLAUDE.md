@@ -6,7 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ProtoMotions3: GPU-accelerated simulation + RL framework for physically simulated humanoids and humanoid robots. Simulators: IsaacGym, IsaacLab, Newton, Genesis, MuJoCo. Algorithms: PPO, AMP, ASE, MaskedMimic. Python 3.8+, Apache-2.0.
 
-This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL). Single reference point for structure, terminology, file map, experiment history, roadmap and the code-study checklist: **`docs/AI_SBC_FRAMEWORK.md`**. 어떤 버전이 무엇이고 지금 무엇을 쓰는지: **`docs/AI_SBC_VERSIONS.md`** (브라우저용 `docs/versions.html`). ManiFlow integration layer: `protomotions/maniflow/` (see its README) — simulation code must go through this package, never `import maniflow` directly.
+This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL).
+**버전 체계 (2026-09-29 재정비)**: 구성 요소별 접두어 + 번호, 현재 계보는 1부터 — **H1** = HLP flexion100-h15,
+**L1** = LLP `checkpoints/L1_llp_pendulum`(옛 llp_v13), **W1** = 가상 착용자 `checkpoints/W1_wearer_human`(옛 v33).
+옛 번호(tracker v30~v32, llp_v3~v12)는 기록용 legacy — 대응표는 `docs/AI_SBC_VERSIONS.md` §0.
+**용어**: **통합** = HLP·LLP를 따로 학습한 뒤 그대로 붙여 평가·배포하는 것(`run_system.py`의 A/B가 곧 통합 평가);
+**개인화** = 통합 뒤 특정 착용자 위에서 LLP를 추가 학습하는 것(`SkeletonAssistEnv`·`llp_walk.py`, 옛 v3~v12가 이것). Single reference point for structure, terminology, file map, experiment history, roadmap and the code-study checklist: **`docs/AI_SBC_FRAMEWORK.md`**. 어떤 버전이 무엇이고 지금 무엇을 쓰는지: **`docs/AI_SBC_VERSIONS.md`** (브라우저용 `docs/versions.html`). ManiFlow integration layer: `protomotions/maniflow/` (see its README) — simulation code must go through this package, never `import maniflow` directly.
 
 ## Commands
 
@@ -65,9 +70,9 @@ LLP v3(실 HLP 150 ms chunk 형식) = `results/assist_pendulum_v3/`, 실험 파�
 A/B/C 평가 `eval_abc.py` (framework doc §6 Phase C).
 **LLP v4 = 랜덤화 플랜트**(`mlp_v4.py` + `protomotions/envs/control/assist_disturbance_control.py`:
 입각 하중·굳힘, 관성 ×1~25, ω_n 12~24, 의도 다양화, 배포 HLP 형식 10 ms × 6점, 비용 |τ·ω|+τ²).
-학습 전 점검 `check_env_v4.py`. **epoch 6,000 보관본 = `checkpoints/llp_v13_pendulum_dr` (현재 권장)**.
+학습 전 점검 `check_env_v4.py`. **epoch 6,000 보관본 = `checkpoints/L1_llp_pendulum` (현재 권장)**.
 
-### AI-SBC 통합 시스템 — HLP + LLP → 스켈레톤 (framework doc §3.5, 버전 표 `docs/AI_SBC_VERSIONS.md`)
+### AI-SBC 통합 평가 — HLP + LLP → 스켈레톤 착용자 (framework doc §3.5, 버전 표 `docs/AI_SBC_VERSIONS.md`)
 독립 제어기 `protomotions/assist/AssistController`(env 비의존, 실기기 후보) + 서브스텝 훅
 러너. 상세는 `examples/experiments/assist_skeleton/README.md`.
 ```bash
@@ -79,7 +84,7 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py --human moc
 python examples/experiments/assist_skeleton/run_system.py ... --torque-lpf-hz 12                    # 출력 저역통과(구동기 대역)
 # 보행 계열 모션만 모은 학습·평가 세트 (walk 0.75 / run 0.25)
 python examples/experiments/assist_skeleton/make_gait_motions.py
-# LLP 학습 (착용자 = 동결 tracker, 실 HLP; env 10 ms, 4096 env ≈3.5 s/epoch)
+# 개인화 학습 = 착용자 위에서 LLP 추가 학습 (동결 tracker, 실 HLP; env 10 ms, 4096 env ≈3.5 s/epoch) — 지금은 안 씀(옛 v3~v12)
 python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
     --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_gait_v6 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 4096 --batch-size 16384 \
@@ -90,10 +95,10 @@ python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cab
 −22 %(v4), 착용자 앙상블 −32/−26 %(v5) — 단, 이 숫자들은 |τ·ω| 기준이고 τ²로 재면 스켈레톤
 학습 정책은 달리기를 한 번도 못 도왔다(v10 +21 %, v11 +230 %, v12 +9 %).
 **2026-09-23 반전: 랜덤화 진자 v4에서 학습한 정책이 스켈레톤을 한 번도 안 보고도 걷기 τ²
-−30.5 %, 달리기 −25.5 %** (epoch 6,000 = `checkpoints/llp_v13_pendulum_dr`, 평가는
+−30.5 %, 달리기 −25.5 %** (epoch 6,000 = `checkpoints/L1_llp_pendulum`, 평가는
 `--llp-dt 0.01`). 지금 구조는 **랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장**이다.
 착용자 v32는 사람보다 세고(hip 피크 1.7~3.7 N·m/kg) 스윙이 8° 커서 |ω| −12 %는 정책과 무관한
-착용자 산물이었다. **2026-09-28 착용자 v33(`checkpoints/v33_newton_suit_human`, 로봇 config
+착용자 산물이었다. **2026-09-28 착용자 v33(`checkpoints/W1_wearer_human`, 로봇 config
 `skeleton_torque_suit_human` = hip 한계 200, 레시피 `tracker_human.py`)로 교체** — 주기 피크 0.95 N·m/kg,
 스윙 mocap ±2°. **v33에서 v13은 `--assist-scale 0.5`(≈20 N·m)로만**: 걷기 τ² −19.3 / 달리기 −23.9 %,
 40 N·m 그대로는 걷기 무효·달리기 4.4 s 낙상(β 오라클 상한 −35 / −41). 착용자 잣대 `eval_wearer.py`.

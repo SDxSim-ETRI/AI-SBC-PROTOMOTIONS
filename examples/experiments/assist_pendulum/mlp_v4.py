@@ -40,8 +40,13 @@ flexion100에 맞춘다** (10 ms × 6점 = 0~50 ms, 10 ms 갱신, 관측 창 {0,
         --experiment-name assist_pendulum_v4 --motion-file none --num-envs 4096 --batch-size 16384
 점검 (학습 전, 무보조 롤아웃 파형): examples/experiments/assist_pendulum/check_env_v4.py
 v5 (2026-09-28, run assist_pendulum_v5): 같은 파일에 `--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`.
+    정점 유지 못 함(걷기 −26, 달리기 −19). 보관 안 함.
+L2 (2026-09-29, run llp_L2_pendulum): 사람 범위 착용자 W1에서 L1(=v13)이 40 N·m 그대로는 무효·낙상이고 ×0.5로만
+    −19/−24 %인 것을 보고 두 가지를 바꿈 — `--mass-exponent 0.43`(질량을 관성과 함께: 중력/관성 비를 실제 다리처럼,
+    유각 말기가 스스로 감속하게) + `--assist-limit 50 --assist-limit-range 10,50`(한계를 env마다 다르게, 정책은
+    관측 못 함 → 자기 토크의 효과를 히스토리로 보고 크기를 맞추게; 배포 한계는 controller --torque-limit).
     v4는 epoch 6,000 정점(걷기 τ² −30.5 %, 달리기 −25.5 %) 뒤 두 절약 항이 이끄는 "덜 밀기"를 배워
-    물러났다(보조 RMS 33 → 26, 한계 도달 39 → 11 %). 보관본 v4@6000 = checkpoints/llp_v13_pendulum_dr.
+    물러났다(보조 RMS 33 → 26, 한계 도달 39 → 11 %). 보관본 v4@6000 = checkpoints/L1_llp_pendulum.
 평가: 진자 A/B(`eval_abc.py`) + **스켈레톤(안 본 플랜트)** `assist_skeleton/run_system.py --llp-checkpoint ...`
 """
 
@@ -72,7 +77,10 @@ def _pair(s: str):
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g = parser.add_argument_group("v4 plant/disturbance randomization")
     g.add_argument("--assist-limit", type=float, default=40.0, help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
-    g.add_argument("--inertia-range", type=_pair, default=(1.0, 25.0), help="대퇴 질량중심 관성 배율 lo,hi (질량·중력은 고정; hip 축 관성 0.42 → ×25 = 3.6 kg·m²)")
+    g.add_argument("--inertia-range", type=_pair, default=(1.0, 25.0), help="대퇴 질량중심 관성 배율 lo,hi (hip 축 관성 0.42 → ×25 = 3.6 kg·m²)")
+    # L2 (2026-09-29): 질량을 관성과 함께 키우고(중력/관성 비를 실제 다리처럼), 보조 한계를 env마다 다르게.
+    g.add_argument("--mass-exponent", type=float, default=0.0, help="질량 배율 = 관성 배율^p (0 = 질량 고정 v4; 0.43 = ×25에서 질량 ×4)")
+    g.add_argument("--assist-limit-range", type=_pair, default=None, help="env별 보조 한계 U[lo,hi] [N·m] (정책은 관측 못 함). 없으면 --assist-limit 하나")
     g.add_argument("--omega-n-range", type=_pair, default=(12.0, 24.0), help="착용자 PD 고유진동수 [rad/s] lo,hi (12 미만은 중력도 못 버텨 조기 종료)")
     g.add_argument("--zeta-range", type=_pair, default=(0.3, 0.8), help="착용자 PD 감쇠비 lo,hi")
     g.add_argument("--stance-load-per-kg", type=float, default=2.0, help="입각 하중 상한 [N·m/kg] (문헌 보행 피크 ≈ 1)")
@@ -189,4 +197,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
     # --- 토크 한계 ---
     cfg.action_config = make_torque_action_config(torque_scale=float(args.assist_limit), action_transform="tanh")
     cfg.assist_torque_limit = float(args.assist_limit)
+    cfg.mass_scale_exponent = float(args.mass_exponent)
+    if args.assist_limit_range is not None:
+        cfg.assist_limit_range = tuple(args.assist_limit_range)
     return cfg

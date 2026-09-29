@@ -19,20 +19,40 @@
 
 실제 장치에 올라가는 것은 **HLP + LLP** 둘뿐이다. tracker는 학습·평가용 "가상 착용자".
 
+### 버전 체계 (2026-09-29 재정비 — 사용자 지시)
+
+세 모델의 번호가 따로 커져(v33, v13, 스켈레톤 v3~v12) 헷갈렸으므로 **구성 요소 접두어 + 번호**로 바꾸고,
+**현재 계보는 1부터** 다시 센다. 옛 번호는 기록용 legacy로만 남긴다.
+
+| 접두어 | 뜻 | 현재 | 옛 이름 | 위치 |
+|---|---|---|---|---|
+| **H** | HLP (각도 예측기) | **H1** | flexion100-h15 | ManiFlow 레포 run (자동 탐색) — H0 = flexion40 |
+| **L** | LLP (보조 토크 정책) | **L1** | llp_v13 = 진자 v4 @6,000 | `checkpoints/L1_llp_pendulum/` — 다음 run = **L2**(`results/llp_L2_pendulum`) |
+| **W** | 가상 착용자 (tracker) | **W1** | tracker v33 | `checkpoints/W1_wearer_human/` — W0 = v32(사람보다 셈, 기준선) |
+
+시스템 조합은 **"H1+L1 @ W1"**처럼 쓴다. 옛 스켈레톤 학습 LLP(v3~v12)와 tracker v30~v31은 이 계보 밖(§5.2, §4).
+
+### 용어 (2026-09-29)
+
+| 용어 | 뜻 |
+|---|---|
+| **통합** | HLP·LLP를 **각각 따로 학습**한 뒤 그대로 붙여 평가·배포하는 것 — 기본 목표. `run_system.py`의 스켈레톤 A/B가 곧 통합 평가 |
+| **개인화** | 통합 뒤 특정 착용자 위에서 LLP를 **추가 학습**하는 것 (`SkeletonAssistEnv`·`llp_walk.py`; 옛 v3~v12가 이것). 지금은 안 씀 |
+
 ---
 
 ## 1. 지금 쓸 것 (2026-09-28)
 
 | 역할 | 버전 | 경로 |
 |------|------|------|
-| HLP | **flexion100-h15** (10 ms 격자, 미래 50 ms) | `ManiFlow_Policy` 레포 run (자동 탐색, 지정 불필요) |
-| LLP — 보행(걷기·달리기) | **llp_v13** (랜덤화 진자 학습, 10 ms 제어) — **v33에서는 `--assist-scale 0.5`로만**: τ² 걷기 −19.3 / 달리기 −23.9 % (v32에 40 N·m 그대로면 −30.5 / −25.5) | `checkpoints/llp_v13_pendulum_dr/last.ckpt` |
+| HLP | **H1** = flexion100-h15 (10 ms 격자, 미래 50 ms) | `ManiFlow_Policy` 레포 run (자동 탐색, 지정 불필요) |
+| LLP — 보행(걷기·달리기) | **L1** (옛 llp_v13; 랜덤화 진자 학습, 10 ms 제어) — **W1에서는 `--assist-scale 0.5`로만**: τ² 걷기 −19.3 / 달리기 −23.9 % (W0에 40 N·m 그대로면 −30.5 / −25.5). **L2 학습 중** | `checkpoints/L1_llp_pendulum/last.ckpt` |
 | LLP — 이전 판(스켈레톤 학습, 5 ms 제어) | llp_v10 — ⚠️ τ²로는 악화, 기준선용 | `checkpoints/llp_v10_gait_5ms_40Nm/last.ckpt` |
 | LLP — 이전 판(10 ms 제어) | llp_v6 | `checkpoints/llp_v6_gait_40Nm/last.ckpt` |
 | LLP — 착용자 두 명 모두 | llp_v5 (착용자 앙상블, walk만) | `checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt` |
 | LLP — 여러 동작 | llp_v4 | `checkpoints/llp_v4_skel_motions15_40Nm/last.ckpt` |
-| 가상 착용자 — **사람 범위 근력** | **v33** (hip 한계 200 N·m, 주기 피크 0.95 N·m/kg, 스윙 mocap ±2°) | `checkpoints/v33_newton_suit_human/last.ckpt` |
-| 가상 착용자 — 보행(대칭, 이전) | v32 — 사람보다 1.7~3.7배 셈, 기준선으로만 | `checkpoints/v32_newton_suit_gait_symmetric/last.ckpt` |
+| 가상 착용자 — **사람 범위 근력** | **W1** (옛 v33; hip 한계 200 N·m, 주기 피크 0.95 N·m/kg, 스윙 mocap ±2°) | `checkpoints/W1_wearer_human/last.ckpt` |
+| 가상 착용자 — 이전(사람보다 셈) | W0 = v32 — 1.7~3.7배 셈, 기준선으로만 | `checkpoints/v32_newton_suit_gait_symmetric/last.ckpt` |
 | 가상 착용자 — 걷기(구) | v30 | `checkpoints/v30_newton_suit_passive_walk/last.ckpt` |
 | 가상 착용자 — 15모션 | v31 | `checkpoints/v31_newton_suit_passive_motions15/last.ckpt` |
 | 인체 모델 | `skeleton_torque_suit` | `protomotions/data/assets/mjcf/skeleton_torque_suit.xml` (뼈 메시 + 캡슐 충돌) |
@@ -40,8 +60,8 @@
 ```bash
 # 폐루프 A/B 평가 한 방 (walk = motion-id 0, run = 1)
 python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint checkpoints/v33_newton_suit_human/last.ckpt \
-    --llp-checkpoint checkpoints/llp_v13_pendulum_dr/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
+    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
     --calibration wearer       # v32 착용자면 --calibration "5.70,2.63,-14.43,0.84", --assist-scale 1
 python examples/experiments/assist_skeleton/eval_wearer.py <run_dir>   # 착용자가 얼마나 사람 같은가
@@ -146,7 +166,7 @@ LLP 학습·평가 중에는 가중치를 얼려 쓴다.
 밀어주기). 하중·관성·임피던스·의도를 넓게 던진 **v4**는 스켈레톤을 한 번도 안 보고도 걷기·달리기
 모두 돕는다(3단계). 지금은 **랜덤화 진자가 학습 플랜트, 스켈레톤은 시험장**이다.
 
-### 5.2 2단계: 통합 시스템에서 재학습 (2026-09-12~16 — 지금은 시험장으로만)
+### 5.2 2단계: 착용자 위에서 추가 학습 = **개인화** 실험 (2026-09-12~16 — 지금은 안 씀, legacy)
 
 모두 같은 환경(`SkeletonAssistEnv`): 착용자 = 얼린 tracker, HLP = 실제 ManiFlow,
 LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
@@ -189,7 +209,7 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 
 ---
 
-### 5.3 3단계: 랜덤화 진자에서 학습, 스켈레톤은 시험장 (현재, 2026-09-22~)
+### 5.3 3단계: 랜덤화 진자에서 학습 → 스켈레톤에서 **통합 평가** (현재, 2026-09-22~) — L 계보
 
 `examples/experiments/assist_pendulum/mlp_v4.py` + `protomotions/envs/control/assist_disturbance_control.py`.
 정책은 하중·관성·게인 값을 관측하지 못하고 각도·각속도 히스토리(250 ms)와 예측 창으로 효과만 본다.
@@ -199,7 +219,9 @@ LLP만 학습. env 주기 10 ms, 4096 병렬, 보조 한계는 표의 값.
 |---|---|---|---|---|---|
 | v4 옛 HLP 형식(25 ms × 7점) | −0.2 % | +13 % | 30.9 | 40 % | ✗ 창 불일치 → 감쇠기 노릇 |
 | v4 @2,000 | −27.2 % | −26.2 % | 34.6 | 52 % | |
-| **v4 @6,000 = llp_v13** | **−30.5 %** | **−25.5 %** | 33.1 | 39 % | 📦 보관·권장 |
+| **v4 @6,000 = L1** (옛 llp_v13) | **−30.5 %** | **−25.5 %** | 33.1 | 39 % | 📦 보관 — 단, W1에선 ×0.5로만 (−19 / −24) |
+| v5 (절약 항 축소) @10,000 | −26.3 % | −19.2 % | 25.2 | 7 % | ✗ 정점 유지 못 함 |
+| **L2** (질량∝관성, 한계 U[10,50]) | 학습 중 2026-09-29 | | | | W1에서 한계 20·40으로 평가 |
 | v4 @10,000 | −26.8 % | −18.6 % | 27.8 | 19 % | 정점 뒤 물러남 |
 | v4 @14,000 | −28.0 % | −23.3 % | 25.5 | 11 % | 평탄 — 학습 중단(09-28, epoch 670k) |
 | β 오라클(걷기 상한, 특권) | −32.3 % | — | 22.2 | 16 % | 진단용 |
@@ -257,4 +279,5 @@ robot config 이름의 `passive_cable`/`active_cable`은 **슈트 slide 관절 4
 | 2026-09-16 | v11(τ² 목적, 한계 해제)·v12(80 N·m) — 걷기 τ²는 크게 내려가나 달리기는 아무도 못 도움 |
 | 2026-09-22 | 착용자 토크 스파이크의 정체 규명(tracker가 PD 목표를 토크 손잡이로 씀) → 랜덤화 진자 v4 착수 |
 | 2026-09-23 | 진자 v4가 스켈레톤에 전이됨(걷기 −27 %, 달리기 −26 %) — 달리기를 도운 첫 버전. HLP 형식 일치가 조건 |
-| 2026-09-28 | v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · **epoch 6,000을 llp_v13으로 보관** · 보고서 `docs/llp_v13_report.html` · 진자 v5(절약 항 축소)는 정점 유지 못 함 · **착용자 v33(사람 범위 근력) 학습·보관** — v33에선 v13이 ×0.5로만 유효(−19 / −24 %), 40 N·m는 달리기 낙상 |
+| 2026-09-28 | v4 학습 중단(epoch 670k; 6,000 정점 뒤 평탄) · **epoch 6,000을 llp_v13(=L1)으로 보관** · 보고서 `docs/llp_v13_report.html` · 진자 v5(절약 항 축소)는 정점 유지 못 함 · **착용자 v33(=W1, 사람 범위 근력) 학습·보관** — W1에선 L1이 ×0.5로만 유효(−19 / −24 %), 40 N·m는 달리기 낙상 |
+| 2026-09-29 | **버전 체계 H/L/W로 재정비, 용어 통합·개인화 확정** · **L2** 학습 시작(질량을 관성과 함께, 보조 한계 env별 U[10,50] N·m) |
