@@ -33,6 +33,11 @@
    시점은 시간 기반 무작위(간격 `stance_gap_range`)라 보행 주기에 걸리는 것도, 안
    걸리는 것도 다 나온다. (env, dof)마다 독립.
 2. **작은 섭동 (perturbation)** — 굳힘 없이 아무 때나 오는 반정현 펄스, 0~`perturb_amp_per_kg`.
+3. **반전 브레이크 (reversal brake, L3 2026-09-29)** — 의도 θ_g가 반전(θ̇_g 부호 바뀜)에 `reversal_brake_lead` 안으로
+   다가오면 확률 `reversal_brake_prob`로 외부 점성 토크 −c·θ̇(실제 각속도)를 건다. 실제 보행에서 유각 말기 대퇴는
+   무릎 결합·지면으로 **공짜로 감속**하는데(사람 범위 착용자 W1의 그 구간 hip 토크 ≈ 0), 접촉 없는 진자는 감속에
+   토크가 필요해서 정책이 "감속 중 = 브레이크 도움"을 배웠다(L1·L2의 유각 말기 오방향). 이 사건이 그 감속을 대신
+   해 주어, 브레이크 도움이 평균적으로 손해가 되게 한다. 환경 토크(착용자 토크 미포함).
 
 θ_g 다양화(계단·램프·비주기)는 부모 config의 `blend_range`·`hold_prob`로 실험 파일에서
 넓힌다 — 코드 변경 없음. 관성·기본 임피던스 랜덤화는 `AssistEnv`(v4 필드) 몫.
@@ -81,6 +86,13 @@ class DisturbedAssistTargetControlConfig(MotionAssistTargetControlConfig):
     perturb_dur_range: Tuple[float, float] = (0.03, 0.25)
     perturb_amp_per_kg: float = 0.3
 
+    # 반전 브레이크 (0이면 꺼짐 = v4/L2 호환)
+    reversal_brake_prob: float = 0.0
+    reversal_brake_lead: float = 0.15                  # 반전 전 이 시간 안이면 창 시작 [s]
+    reversal_brake_c_range: Tuple[float, float] = (2.0, 30.0)  # 점성 계수 [N·m·s/rad]
+    reversal_brake_ramp: float = 0.03
+    reversal_brake_min_vel: float = 0.3                # 이보다 느리면 반전으로 안 침 [rad/s]
+
     disturbance_enabled: bool = True
     # 의도 실현 가능성: 필요 각가속도 ≤ 이 비율 × (착용자 토크 한계 / hip 관성). 0이면 안 묶음.
     intent_accel_frac: float = 0.5
@@ -102,6 +114,10 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         self._kp_base = torch.full((n, d), 300.0, device=dev)
         self._effort_limit = torch.full((n, d), 150.0, device=dev)
         self._inertia = torch.full((n, d), 0.418, device=dev)
+        # 반전 브레이크 상태 (env, dof)
+        self._rb_near = torch.zeros(n, d, dtype=torch.bool, device=dev)
+        self._rb_c, self._rb_t0 = z(n, d), z(n, d)
+        self._tau_brake = z(n, d)
         # 이번 step 결과
         self._tau_ext = z(n, d)
         self._kp_scale = torch.ones(n, d, device=dev)
@@ -185,6 +201,9 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         self._tau_ext[env_ids] = 0.0
         self._kp_scale[env_ids] = 1.0
         self._kd_scale[env_ids] = 1.0
+        self._rb_near[env_ids] = False
+        self._rb_c[env_ids] = 0.0
+        self._tau_brake[env_ids] = 0.0
 
     def step(self) -> None:
         super().step()
@@ -237,7 +256,44 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         span = (self._pt_end - self._pt_start).clamp(min=1e-4)
         in_p = (t >= self._pt_start) & (t <= self._pt_end)
         tau_p = torch.where(in_p, self._pt_amp * torch.sin(math.pi * (t - self._pt_start) / span), torch.zeros_like(t))
-        self._tau_ext = tau_load + tau_p
+        self._tau_ext = tau_load + tau_p + self._reversal_brake(t[:, 0])
+
+    def _reversal_brake(self, t: Tensor) -> Tensor:
+        """의도가 반전에 다가올 때 실제 각속도에 비례한 외부 점성 토크 (n, d). 꺼져 있으면 0."""
+        cfg: DisturbedAssistTargetControlConfig = self.config
+        prob = float(getattr(cfg, "reversal_brake_prob", 0.0))
+        if prob <= 0:
+            return self._tau_brake.zero_()
+        lead = float(getattr(cfg, "reversal_brake_lead", 0.15))
+        delta = 0.01
+        tt = torch.stack([t, t + delta, t + lead, t + lead + delta], dim=1)  # (n, 4)
+        th = self._target_at(tt)  # (n, 4, d)
+        v_now = (th[:, 1] - th[:, 0]) / delta
+        v_lead = (th[:, 3] - th[:, 2]) / delta
+        near = (v_now * v_lead < 0) & (v_now.abs() > float(getattr(cfg, "reversal_brake_min_vel", 0.3)))
+        rising = near & ~self._rb_near
+        if rising.any():
+            k = int(rising.sum())
+            dev = t.device
+            on = torch.rand(k, device=dev) < prob
+            lo, hi = cfg.reversal_brake_c_range
+            c = lo + (hi - lo) * torch.rand(k, device=dev)
+            self._rb_c[rising] = torch.where(on, c, torch.zeros_like(c))
+            self._rb_t0[rising] = t.unsqueeze(1).expand_as(rising)[rising]
+        self._rb_c = torch.where(near, self._rb_c, torch.zeros_like(self._rb_c))
+        self._rb_near = near
+        hist = getattr(self.env, "state_history", None)
+        dof_vel = hist.dof_vel[:, 0] if hist is not None and hasattr(hist, "dof_vel") else None
+        if dof_vel is None:
+            return self._tau_brake.zero_()
+        ramp = max(float(getattr(cfg, "reversal_brake_ramp", 0.03)), 1e-4)
+        g = ((t.unsqueeze(1) - self._rb_t0) / ramp).clamp(0.0, 1.0)
+        self._tau_brake = -g * self._rb_c * dof_vel
+        return self._tau_brake
+
+    def in_reversal_brake(self) -> Tensor:
+        """진단용: 반전 브레이크가 걸린 (n, d) 마스크."""
+        return self._rb_c > 0
 
     # ------------------------------------------------------------------
     # env가 매 step 읽는 값

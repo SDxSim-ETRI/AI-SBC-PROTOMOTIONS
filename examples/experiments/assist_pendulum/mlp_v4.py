@@ -41,6 +41,10 @@ flexion100에 맞춘다** (10 ms × 6점 = 0~50 ms, 10 ms 갱신, 관측 창 {0,
 점검 (학습 전, 무보조 롤아웃 파형): examples/experiments/assist_pendulum/check_env_v4.py
 v5 (2026-09-28, run assist_pendulum_v5): 같은 파일에 `--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`.
     정점 유지 못 함(걷기 −26, 달리기 −19). 보관 안 함.
+L3 (2026-09-29, run llp_L3_pendulum): L2가 W1에서 L1×0.5와 같고(한계 도달 90 %, 유각 말기 브레이크 그대로) 실패.
+    진자에선 필요 보조가 대개 한계보다 커서 "옳은 방향으로 최대"가 최적이었다 → `--stance-load-per-kg 1.0 --stance-prob 0.6`
+    (필요량 < 한계인 상황을 흔하게) + `--reversal-brake-prob 0.7`(유각 말기 공짜 감속 → 브레이크 도움이 손해가 되게).
+    질량·한계 랜덤화는 L2 그대로.
 L2 (2026-09-29, run llp_L2_pendulum): 사람 범위 착용자 W1에서 L1(=v13)이 40 N·m 그대로는 무효·낙상이고 ×0.5로만
     −19/−24 %인 것을 보고 두 가지를 바꿈 — `--mass-exponent 0.43`(질량을 관성과 함께: 중력/관성 비를 실제 다리처럼,
     유각 말기가 스스로 감속하게) + `--assist-limit 50 --assist-limit-range 10,50`(한계를 env마다 다르게, 정책은
@@ -81,6 +85,11 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     # L2 (2026-09-29): 질량을 관성과 함께 키우고(중력/관성 비를 실제 다리처럼), 보조 한계를 env마다 다르게.
     g.add_argument("--mass-exponent", type=float, default=0.0, help="질량 배율 = 관성 배율^p (0 = 질량 고정 v4; 0.43 = ×25에서 질량 ×4)")
     g.add_argument("--assist-limit-range", type=_pair, default=None, help="env별 보조 한계 U[lo,hi] [N·m] (정책은 관측 못 함). 없으면 --assist-limit 하나")
+    # L3 (2026-09-29): 하중을 사람 범위 중심으로(필요량 < 한계인 상황이 흔하게) + 유각 말기 '공짜 감속'(반전 브레이크)
+    g.add_argument("--stance-prob", type=float, default=0.85, help="간격이 찼을 때 입각 사건이 실제로 오는 확률 (낮추면 가벼운 구간 ↑)")
+    g.add_argument("--reversal-brake-prob", type=float, default=0.0, help="의도 반전 직전 외부 점성 브레이크 확률 (0 = 꺼짐)")
+    g.add_argument("--reversal-brake-c", type=_pair, default=(2.0, 30.0), help="브레이크 점성 계수 U[lo,hi] [N·m·s/rad]")
+    g.add_argument("--reversal-brake-lead", type=float, default=0.15, help="반전 전 브레이크 창 [s]")
     g.add_argument("--omega-n-range", type=_pair, default=(12.0, 24.0), help="착용자 PD 고유진동수 [rad/s] lo,hi (12 미만은 중력도 못 버텨 조기 종료)")
     g.add_argument("--zeta-range", type=_pair, default=(0.3, 0.8), help="착용자 PD 감쇠비 lo,hi")
     g.add_argument("--stance-load-per-kg", type=float, default=2.0, help="입각 하중 상한 [N·m/kg] (문헌 보행 피크 ≈ 1)")
@@ -155,6 +164,10 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
         stance_gap_range=tuple(args.stance_gap),
         stance_dur_range=tuple(args.stance_dur),
         perturb_amp_per_kg=float(args.perturb_amp_per_kg),
+        stance_prob=float(args.stance_prob),
+        reversal_brake_prob=float(args.reversal_brake_prob),
+        reversal_brake_c_range=tuple(args.reversal_brake_c),
+        reversal_brake_lead=float(args.reversal_brake_lead),
     )
 
     # --- 플랜트 랜덤화 (AssistEnv v4 필드) ---
