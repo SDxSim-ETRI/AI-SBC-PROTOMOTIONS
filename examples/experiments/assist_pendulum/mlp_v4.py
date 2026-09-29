@@ -93,6 +93,8 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g.add_argument("--reversal-brake-prob", type=float, default=0.0, help="의도 반전 직전 외부 점성 브레이크 확률 (0 = 꺼짐)")
     g.add_argument("--reversal-brake-c", type=_pair, default=(2.0, 30.0), help="브레이크 점성 계수 U[lo,hi] [N·m·s/rad]")
     g.add_argument("--reversal-brake-lead", type=float, default=0.15, help="반전 전 브레이크 창 [s]")
+    g.add_argument("--reversal-mode", choices=["viscous", "feedforward"], default="viscous", help="반전 사건: viscous = −c·θ̇ (L3·L4) | feedforward = κ·I·θ̈_g 를 환경이 대신 냄 (L5)")
+    g.add_argument("--reversal-ff-gain", type=_pair, default=(0.5, 1.2), help="feedforward κ U[lo,hi]")
     # L4 (2026-09-29): chunk를 실제 각도에 정박 — 배포 HLP(실제 각도의 미래)와 같은 정보량
     g.add_argument("--chunk-anchor", choices=["intent", "actual"], default="intent", help="chunk 정박점: intent = θ_g 미래(v3~L3), actual = θ(t) + Δθ_g")
     g.add_argument("--omega-n-range", type=_pair, default=(12.0, 24.0), help="착용자 PD 고유진동수 [rad/s] lo,hi (12 미만은 중력도 못 버텨 조기 종료)")
@@ -173,6 +175,8 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
         reversal_brake_prob=float(args.reversal_brake_prob),
         reversal_brake_c_range=tuple(args.reversal_brake_c),
         reversal_brake_lead=float(args.reversal_brake_lead),
+        reversal_brake_mode=str(args.reversal_mode),
+        reversal_ff_gain_range=tuple(args.reversal_ff_gain),
         chunk_anchor=str(args.chunk_anchor),
     )
 

@@ -92,6 +92,12 @@ class DisturbedAssistTargetControlConfig(MotionAssistTargetControlConfig):
     reversal_brake_c_range: Tuple[float, float] = (2.0, 30.0)  # 점성 계수 [N·m·s/rad]
     reversal_brake_ramp: float = 0.03
     reversal_brake_min_vel: float = 0.3                # 이보다 느리면 반전으로 안 침 [rad/s]
+    # 반전 사건의 종류 (L5, 2026-09-29): "viscous" = −c·θ̇ (L3·L4) | "feedforward" = κ·I_eff·θ̈_g — 의도가 반전에서
+    # 요구하는 관성 토크의 κ배를 환경이 대신 낸다(실제 다리의 무릎 결합·중력이 하는 일). 진자 정책은 "의도의 관성
+    # 토크를 대신 내는 피드포워드"를 배우는데, 실제 다리에선 반전 관성이 공짜라 그 브레이크가 손해였다(L1~L4 공통).
+    reversal_brake_mode: str = "viscous"
+    reversal_ff_gain_range: Tuple[float, float] = (0.5, 1.2)   # κ
+    reversal_ff_after: float = 0.10                           # 반전 뒤에도 이만큼 유지 [s]
 
     disturbance_enabled: bool = True
     # 의도 실현 가능성: 필요 각가속도 ≤ 이 비율 × (착용자 토크 한계 / hip 관성). 0이면 안 묶음.
@@ -117,6 +123,7 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         # 반전 브레이크 상태 (env, dof)
         self._rb_near = torch.zeros(n, d, dtype=torch.bool, device=dev)
         self._rb_c, self._rb_t0 = z(n, d), z(n, d)
+        self._rb_end = z(n, d)
         self._tau_brake = z(n, d)
         # 이번 step 결과
         self._tau_ext = z(n, d)
@@ -203,6 +210,7 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         self._kd_scale[env_ids] = 1.0
         self._rb_near[env_ids] = False
         self._rb_c[env_ids] = 0.0
+        self._rb_end[env_ids] = -1.0
         self._tau_brake[env_ids] = 0.0
 
     def step(self) -> None:
@@ -265,29 +273,45 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         if prob <= 0:
             return self._tau_brake.zero_()
         lead = float(getattr(cfg, "reversal_brake_lead", 0.15))
+        mode = str(getattr(cfg, "reversal_brake_mode", "viscous"))
         delta = 0.01
-        tt = torch.stack([t, t + delta, t + lead, t + lead + delta], dim=1)  # (n, 4)
-        th = self._target_at(tt)  # (n, 4, d)
-        v_now = (th[:, 1] - th[:, 0]) / delta
-        v_lead = (th[:, 3] - th[:, 2]) / delta
+        tt = torch.stack([t - delta, t, t + delta, t + lead, t + lead + delta], dim=1)  # (n, 5)
+        th = self._target_at(tt)  # (n, 5, d)
+        v_now = (th[:, 2] - th[:, 1]) / delta
+        a_now = (th[:, 2] - 2 * th[:, 1] + th[:, 0]) / (delta * delta)   # θ̈_g
+        v_lead = (th[:, 4] - th[:, 3]) / delta
         near = (v_now * v_lead < 0) & (v_now.abs() > float(getattr(cfg, "reversal_brake_min_vel", 0.3)))
         rising = near & ~self._rb_near
+        tcol = t.unsqueeze(1).expand_as(near)
         if rising.any():
             k = int(rising.sum())
             dev = t.device
             on = torch.rand(k, device=dev) < prob
-            lo, hi = cfg.reversal_brake_c_range
+            if mode == "feedforward":
+                lo, hi = getattr(cfg, "reversal_ff_gain_range", (0.5, 1.2))
+            else:
+                lo, hi = cfg.reversal_brake_c_range
             c = lo + (hi - lo) * torch.rand(k, device=dev)
             self._rb_c[rising] = torch.where(on, c, torch.zeros_like(c))
-            self._rb_t0[rising] = t.unsqueeze(1).expand_as(rising)[rising]
-        self._rb_c = torch.where(near, self._rb_c, torch.zeros_like(self._rb_c))
+            self._rb_t0[rising] = tcol[rising]
+            # 창의 끝: 반전(≈ lead 뒤) + after
+            self._rb_end[rising] = tcol[rising] + lead + float(getattr(cfg, "reversal_ff_after", 0.10))
+        if mode == "feedforward":
+            active = tcol <= self._rb_end
+        else:
+            active = near
+        self._rb_c = torch.where(active, self._rb_c, torch.zeros_like(self._rb_c))
         self._rb_near = near
+        ramp = max(float(getattr(cfg, "reversal_brake_ramp", 0.03)), 1e-4)
+        g = ((tcol - self._rb_t0) / ramp).clamp(0.0, 1.0)
+        if mode == "feedforward":
+            # 환경이 의도의 관성 토크 κ·I·θ̈_g 를 대신 낸다 (착용자 토크 아님)
+            self._tau_brake = g * self._rb_c * self._inertia * a_now
+            return self._tau_brake
         hist = getattr(self.env, "state_history", None)
         dof_vel = hist.dof_vel[:, 0] if hist is not None and hasattr(hist, "dof_vel") else None
         if dof_vel is None:
             return self._tau_brake.zero_()
-        ramp = max(float(getattr(cfg, "reversal_brake_ramp", 0.03)), 1e-4)
-        g = ((t.unsqueeze(1) - self._rb_t0) / ramp).clamp(0.0, 1.0)
         self._tau_brake = -g * self._rb_c * dof_vel
         return self._tau_brake
 

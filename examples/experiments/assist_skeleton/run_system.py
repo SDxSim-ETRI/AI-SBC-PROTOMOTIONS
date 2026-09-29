@@ -126,6 +126,8 @@ def parse_args():
     p.add_argument("--oracle-limit", type=float, default=None,
                    help="오라클 출력 한계 [N·m] (None = LLP 학습 한계). 상한을 보려면 크게 줄 것")
     p.add_argument("--torque-limit", type=float, default=None, help="assist 토크 한계 [N·m] (None = LLP 학습값)")
+    p.add_argument("--mask-window", default=None,
+                   help="진단(특권): 보행 위상 'lo,hi' [%%] 구간에서 정책 토크를 0으로 (예: '70,100' = 유각 말기 브레이크 제거 시험)")
     p.add_argument("--hlp-latency-ms", type=float, default=0.0,
                    help="HLP 예측이 도착하기까지의 계산 지연 [ms] (실측 7 ms). 0 = 즉시(기존 가정)")
     p.add_argument("--obs-horizon-ms", type=float, default=None,
@@ -422,6 +424,10 @@ class SystemHook:
         self.motion_ids = torch.full((2,), int(args.motion_id), device=dev, dtype=torch.long)
         # 오라클 탐침
         self.oracle = args.oracle
+        self.mask_window = None
+        if args.mask_window:
+            lo, hi = (float(v) / 100.0 for v in args.mask_window.split(","))
+            self.mask_window = (lo, hi)
         self.gait_phase = gait_phase
         self.oracle_beta = float(args.oracle_beta)
         self.oracle_torque = float(args.oracle_torque)
@@ -534,6 +540,12 @@ class SystemHook:
             gate = self._oracle_gate(phase)
             tau = torch.zeros_like(tau)
             tau[ENV_B] = gate * max(-self.oracle_limit, min(self.oracle_limit, self.oracle_torque))
+
+        if self.mask_window is not None and torch.isfinite(phase).all():
+            lo, hi = self.mask_window
+            masked = (phase >= lo) & (phase < hi)
+            tau = tau.clone()
+            tau[ENV_B] = torch.where(masked, torch.zeros_like(tau[ENV_B]), tau[ENV_B])
 
         inject = tau_ff.clone()
         inject[ENV_B, self.hip_idx_t] += self.assist_scale * tau[ENV_B]
@@ -744,6 +756,7 @@ def main():
         "oracle_window": args.oracle_window if args.oracle == "phase" else None,
         "oracle_torque": args.oracle_torque if args.oracle == "phase" else None,
         "oracle_ramp": args.oracle_ramp if args.oracle == "phase" else None,
+        "mask_window": args.mask_window,
         "oracle_limit": args.oracle_limit,
         "torque_limit": ctrl.torque_limit,
         "hlp_latency_ms": args.hlp_latency_ms or None,
