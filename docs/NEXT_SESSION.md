@@ -699,7 +699,7 @@ bang-bang으로 간 것. (3) **위상 모양은 L1과 같다** — 착지 직전
 다가갈 때(θ̇_g 부호 바뀌기 전 ~150 ms) 외부 점성 토크 −c·θ̇ 로 다리를 세워 줌(무릎 결합 대역), 확률·세기 무작위 →
 "감속 중 = 브레이크 도움"이 평균적으로 손해가 되게; (iii) 한계 랜덤화는 유지(사용자 방침).
 
-## 2-J. L3 — 사람 범위 하중 + 반전 브레이크 (2026-09-29 20:45 시작, unit `aisbc-llp-L3`, run `results/llp_L3_pendulum`)
+## 2-J. L3 — 사람 범위 하중 + 반전 브레이크 (2026-09-29 20:15 시작, unit `aisbc-llp-L3`, run `results/llp_L3_pendulum`)
 
 §2-I의 L3 설계 (i)+(ii)+(iii)를 그대로: L2 인자(질량 지수 0.43, 한계 U[10,50])에
 `--stance-load-per-kg 1.0 --stance-prob 0.6 --reversal-brake-prob 0.7` 추가.
