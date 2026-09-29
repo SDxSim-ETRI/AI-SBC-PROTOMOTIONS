@@ -41,6 +41,9 @@ flexion100에 맞춘다** (10 ms × 6점 = 0~50 ms, 10 ms 갱신, 관측 창 {0,
 점검 (학습 전, 무보조 롤아웃 파형): examples/experiments/assist_pendulum/check_env_v4.py
 v5 (2026-09-28, run assist_pendulum_v5): 같은 파일에 `--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`.
     정점 유지 못 함(걷기 −26, 달리기 −19). 보관 안 함.
+L4 (2026-09-29, run llp_L4_pendulum): L3 + `--chunk-anchor actual`. L3@2000이 유각 말기 브레이크를 못 고쳤고, 진자에선
+    브레이크 중 |θ_g−θ|가 2.4°(평소 1.5°)로 어긋남이 chunk에 보이는데 W1에선 HLP 20 ms 오차가 0.4~0.8°라 그 신호가 없다.
+    정책이 배포 때와 같은 정보(실제 각도의 미래)만 보게 한다.
 L3 (2026-09-29, run llp_L3_pendulum): L2가 W1에서 L1×0.5와 같고(한계 도달 90 %, 유각 말기 브레이크 그대로) 실패.
     진자에선 필요 보조가 대개 한계보다 커서 "옳은 방향으로 최대"가 최적이었다 → `--stance-load-per-kg 1.0 --stance-prob 0.6`
     (필요량 < 한계인 상황을 흔하게) + `--reversal-brake-prob 0.7`(유각 말기 공짜 감속 → 브레이크 도움이 손해가 되게).
@@ -90,6 +93,8 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g.add_argument("--reversal-brake-prob", type=float, default=0.0, help="의도 반전 직전 외부 점성 브레이크 확률 (0 = 꺼짐)")
     g.add_argument("--reversal-brake-c", type=_pair, default=(2.0, 30.0), help="브레이크 점성 계수 U[lo,hi] [N·m·s/rad]")
     g.add_argument("--reversal-brake-lead", type=float, default=0.15, help="반전 전 브레이크 창 [s]")
+    # L4 (2026-09-29): chunk를 실제 각도에 정박 — 배포 HLP(실제 각도의 미래)와 같은 정보량
+    g.add_argument("--chunk-anchor", choices=["intent", "actual"], default="intent", help="chunk 정박점: intent = θ_g 미래(v3~L3), actual = θ(t) + Δθ_g")
     g.add_argument("--omega-n-range", type=_pair, default=(12.0, 24.0), help="착용자 PD 고유진동수 [rad/s] lo,hi (12 미만은 중력도 못 버텨 조기 종료)")
     g.add_argument("--zeta-range", type=_pair, default=(0.3, 0.8), help="착용자 PD 감쇠비 lo,hi")
     g.add_argument("--stance-load-per-kg", type=float, default=2.0, help="입각 하중 상한 [N·m/kg] (문헌 보행 피크 ≈ 1)")
@@ -168,6 +173,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
         reversal_brake_prob=float(args.reversal_brake_prob),
         reversal_brake_c_range=tuple(args.reversal_brake_c),
         reversal_brake_lead=float(args.reversal_brake_lead),
+        chunk_anchor=str(args.chunk_anchor),
     )
 
     # --- 플랜트 랜덤화 (AssistEnv v4 필드) ---
