@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ProtoMotions3: GPU-accelerated simulation + RL framework for physically simulated humanoids and humanoid robots. Simulators: IsaacGym, IsaacLab, Newton, Genesis, MuJoCo. Algorithms: PPO, AMP, ASE, MaskedMimic. Python 3.8+, Apache-2.0.
 
 This fork hosts the **AI-SBC hip-assist research** (HLP = ManiFlow flexion predictor, LLP = assist-torque RL).
+**처음 오는 에이전트는 `docs/HANDOFF.md`부터 읽을 것** — 현재 결론·구조·타임라인·교훈·열린 과제의 요약(2026-10-01).
 **버전 체계 (2026-09-29 재정비)**: 구성 요소별 접두어 + 번호, 현재 계보는 1부터 — **H1** = HLP flexion100-h15,
 **L1** = LLP `checkpoints/L1_llp_pendulum`(옛 llp_v13), **W1** = 가상 착용자 `checkpoints/W1_wearer_human`(옛 v33).
 옛 번호(tracker v30~v32, llp_v3~v12)는 기록용 legacy — 대응표는 `docs/AI_SBC_VERSIONS.md` §0.

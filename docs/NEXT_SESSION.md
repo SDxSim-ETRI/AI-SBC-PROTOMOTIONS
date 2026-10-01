@@ -5,6 +5,7 @@
 **용어**: 통합 = 따로 학습한 HLP·LLP를 그대로 붙여 평가·배포(스켈레톤 A/B가 곧 통합 평가); 개인화 = 착용자 위 LLP 추가 학습(옛 v3~v12).
 아래 본문의 옛 이름(v13, v33, v32)은 L1, W1, W0으로 읽을 것.
 
+처음 오는 에이전트는 **`HANDOFF.md`**(전체 상황 요약, 2026-10-01)를 먼저 읽고, 이 파일은 실험 일지로 쓸 것.
 새 세션에서 이 파일 + `AI_SBC_VERSIONS.md`만 읽으면 이어서 할 수 있게 정리한 것.
 설계 배경은 `AI_SBC_FRAMEWORK.md`, 통합 시스템 사용법은
 `../examples/experiments/assist_skeleton/README.md`.

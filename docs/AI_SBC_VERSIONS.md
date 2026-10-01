@@ -4,6 +4,7 @@
 따로 붙어서 헷갈리기 쉬우므로, 이 문서 하나에 "어떤 버전이 무엇이고 지금 무엇을
 쓰면 되는지"를 모아 둔다. 같은 내용의 브라우저용 페이지: [`versions.html`](versions.html).
 
+- 처음 읽을 요약(현재 결론·타임라인·교훈): [`HANDOFF.md`](HANDOFF.md)
 - 설계·원리: [`AI_SBC_FRAMEWORK.md`](AI_SBC_FRAMEWORK.md)
 - 통합 시스템 사용법: [`../examples/experiments/assist_skeleton/README.md`](../examples/experiments/assist_skeleton/README.md)
 
