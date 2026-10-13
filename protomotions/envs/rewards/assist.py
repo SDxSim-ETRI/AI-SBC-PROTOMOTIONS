@@ -45,6 +45,37 @@ def compute_human_power_rew(
     return (tau_agent * dof_vel).abs().sum(dim=-1)
 
 
+def compute_assist_opposition_cost(tau_agent: Tensor, tau_assist: Tensor) -> Tensor:
+    """Penalize opposing wearer/device torques within the same control window.
+
+    Per-joint rectification prevents useful assistance on one hip from cancelling
+    opposition on the other. The output has torque-squared units; use a negative
+    reward weight. Reward-only privileged torques never enter actor observations.
+
+    This is a coordination proxy, NOT a counterfactual no-assistance comparison.
+    It can also penalize transient opposition needed during a movement change;
+    tracking and held-out evaluation must decide whether it helps in practice.
+    """
+    return torch.clamp(-tau_agent * tau_assist, min=0.0).sum(dim=-1)
+
+
+def compute_relative_assist_opposition_cost(
+    tau_agent: Tensor, tau_assist: Tensor, torque_floor: float = 10.0
+) -> Tensor:
+    """Dimensionless log cost reduces domination by rare large-torque samples.
+
+    A fixed torque scale regularizes zero without putting either actor's torque
+    in the denominator. The cost must never shrink when opposing wearer OR
+    device torque grows. Log compression keeps that monotonicity while giving
+    moderate repeated opposition more relative weight than a quadratic product.
+    This remains a coordination proxy, not a counterfactual burden measurement.
+    """
+    if not 0.0 < torque_floor < float("inf"):
+        raise ValueError("torque_floor must be finite and positive")
+    opposition = torch.clamp(-tau_agent * tau_assist, min=0.0)
+    return torch.log1p(opposition / torque_floor**2).sum(dim=-1)
+
+
 def compute_target_tracking_rew(
     dof_pos: Tensor,
     theta_g: Tensor,
@@ -74,6 +105,24 @@ def compute_assist_effort_rew(tau_assist: Tensor) -> Tensor:
         [num_envs] 토크 제곱 합.
     """
     return (tau_assist * tau_assist).sum(dim=-1)
+
+
+def compute_paired_tracking_rew(
+    dof_pos: Tensor,
+    reference_dof_pos: Tensor,
+    theta_g: Tensor,
+    tracking_coef: float = 40.0,
+) -> Tensor:
+    """Keep tracking no worse than a separately integrated unassisted wearer.
+
+    Rectify each joint before averaging: improvement of one hip cannot pay for
+    worsening the other. Beating the reference earns no additional reward.
+    The reference is privileged, reward-only data; it is NOT the assisted state
+    with the instantaneous assistance subtracted from its torque.
+    """
+    excess = ((dof_pos - theta_g).square()
+              - (reference_dof_pos.detach() - theta_g).square()).clamp_min(0.0)
+    return torch.exp(-tracking_coef * excess.mean(dim=-1))
 
 
 # =============================================================================

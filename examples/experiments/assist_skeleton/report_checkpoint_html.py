@@ -45,6 +45,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from analysis import assist_output_limit, assist_saturation_pct  # noqa: E402
 from report_html import (  # noqa: E402
     A,
     B,
@@ -69,9 +70,9 @@ def extra_metrics(run: Path):
     tr, meta, idx = load(run)
     tau = (tr["tau_pd_prev"] + tr["tau_ff_prev"])[idx]
     assist = tr["tau_assist"][idx - 1]
-    lim = float(meta["torque_limit"])
+    lim = assist_output_limit(meta)
     dt = float(meta["llp_dt"])
-    sat = 100.0 * float(np.mean(np.abs(assist[:, B]) > 0.95 * lim))
+    sat = assist_saturation_pct(assist[:, B], meta)
     big = np.abs(tau[:, A]) > 5.0
     agree = 100.0 * float(np.mean((np.sign(assist[:, B]) == np.sign(tau[:, A]))[big]))
     slew = float(np.sqrt(np.mean(np.diff(assist[:, B], axis=0) ** 2)) / dt)
@@ -119,7 +120,7 @@ def time_window(run: Path, strides=3, t_from=10.0):
         "tauA": tau[sl, A, 0],
         "tauB": tau[sl, B, 0],
         "assist": np.concatenate([[0.0], tr["tau_assist"][i0 : i1, B, 0]]),
-        "limit": float(meta["torque_limit"]),
+        "limit": assist_output_limit(meta),
     }
 
 
@@ -266,7 +267,7 @@ def key_numbers_html(name, wm, wx, rm, rx):
     return f"""
 <section>
   <h2>핵심 숫자 — {html.escape(name)}, 무보조 A 대비 보조 B (40 s 짝비교)</h2>
-  <p class="note">음수가 좋다. τ²는 착용자 hip 근토크의 제곱 평균이라 다리를 덜 움직여서는 못 내린다 — 기준 지표. |τ·ω| 파워는 각속도가 줄어도 내려가므로 참고만.</p>
+  <p class="note">τ²는 착용자 hip 토크 제곱의 좌우 합을 시간 평균한 기준 지표이며 실제 근활성 측정값은 아니다. |τ·ω|와 달리 각속도를 직접 곱하지 않지만, 동작이 바뀌면 τ²도 달라질 수 있어 전진 거리·몸체 오차와 함께 판단한다.</p>
   <div class="cards">{card("걷기 (motion 0)", wm, wx)}{card("달리기 (motion 1)", rm, rx)}</div>
 </section>"""
 
@@ -386,10 +387,10 @@ def main():
 
     walk_rows = {**{n: metrics(r) for n, r in ref_w.items()}, args.name: wm}
     run_rows = {**{n: metrics(r) for n, r in ref_r.items()}, args.name: rm}
-    walk_tbl = table_html(walk_rows, "걷기 (motion 0, 40 s, 착용자 v32) — 기준 실행과 같은 잣대",
-                          "무보조 A 대비 보조 B의 변화 [%]. v10 = 스켈레톤에서 직접 학습한 이전 정책(|τ·ω| 목적), β 오라클 = 착용자 토크의 절반을 같은 방향으로 미는 특권 상한(실기기 불가). 굵은 칸 = 열에서 가장 낮은 값.")
-    run_tbl = table_html(run_rows, "달리기 (motion 1, 40 s)",
-                         "같은 잣대. 스켈레톤에서 학습한 v10은 달리기에서 τ²를 늘렸다(파워 감소는 각속도분). 진자 학습 정책이 달리기에서 τ²를 줄인 첫 버전이다 — 진자엔 걷기도 달리기도 없다.")
+    walk_tbl = table_html(walk_rows, "걷기 — 기준 실행과 같은 잣대",
+                          "무보조 A 대비 보조 B의 변화 [%]. τ²와 함께 전진 거리·몸체 오차·완주 여부를 확인한다. β 오라클은 착용자 토크를 사용하는 특권 참고값이며 배포 정책이 아니다. 굵은 칸 = 열에서 가장 낮은 값.")
+    run_tbl = table_html(run_rows, "달리기 — 기준 실행과 같은 잣대",
+                         "같은 지표로 비교한다. 보조 배율·착용자·제어 주기 등 실행 조건과 원본 경로는 아래 설정을 확인한다.")
 
     phase_w = {n: phase_rows(r) for n, r in {**ref_w, args.name: walk}.items()}
     phase_r = {n: phase_rows(r) for n, r in {**ref_r, args.name: run}.items()}
@@ -424,6 +425,7 @@ def main():
   --s1:{SERIES_DARK[0]};--s2:{SERIES_DARK[1]};--s3:{SERIES_DARK[2]};--s4:{SERIES_DARK[3]};--best:#22304a;--card:#232320;--pick:#3a2a20}}
 body{{background:var(--bg);color:var(--ink);font:15px/1.55 "IBM Plex Sans KR",system-ui,sans-serif;padding-block:32px 56px;padding-inline:20px}}
 main{{max-width:900px;margin:0 auto;display:grid;gap:40px}}
+main > *{{min-width:0}}
 h1{{font-size:26px;font-weight:600;margin:0 0 6px;text-wrap:balance;letter-spacing:-.01em}}
 h2{{font-size:17px;font-weight:600;margin:0 0 6px;text-wrap:balance}}
 h3{{font-size:14px;font-weight:600;margin:0 0 10px;color:var(--ink2)}}

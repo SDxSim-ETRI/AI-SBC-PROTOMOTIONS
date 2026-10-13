@@ -20,8 +20,11 @@
     env 0 (A) = 보조 없음 — 착용자 단독 (대조군)
     env 1 (B) = 보조 — HLP(ManiFlow) → LLP(assist RL) → hip flexion qfrc 주입
 
-두 env는 같은 mocap 클립·같은 초기 상태를 받고 착용자 대역이 결정적이므로,
-B의 차이는 전부 assist 토크에서 온다 (paired 비교).
+두 env는 같은 mocap 클립·같은 초기 상태에서 시작한다 (paired 비교).
+보조 효과를 해석할 때 물리 실행 산포와 동작 추종도 함께 확인한다.
+
+기본 비교 기준: W1 착용자 + H1 각도 예측 + L1 보조(출력 0.5배), 기존 걷기.
+다른 LLP 체크포인트와 오라클 진단의 기본 출력 배율은 1이다.
 
 착용자 대역 (--human):
     mocap_pd  골반 고정(fix_base_link + z 상승) + 관절 built-in PD가 mocap 각도를
@@ -35,15 +38,16 @@ LLP --llp-dt(10 ms, 학습 주기). LLP는 `SubstepHookMixin`으로 서브스텝
 
 HLP 관측: hip flexion = 관절각, trunk pitch/roll = pelvis 자세 × lumbar FK
 (`protomotions.assist.skeleton_features`, 학습 데이터 추출기와 동일). 영점 보정은
-재생 클립 평균을 SEED 평균에 맞추는 오프셋 (--calibration motion).
+착용자의 warmup 관측 평균을 SEED 평균에 맞추는 오프셋 (--calibration wearer).
 
 출력 (--out/<timestamp>_<human>/): traces.npz, metrics.json, report.md, plots.png,
 (--record) mp4.
 
 실행 (sbc env):
+    python examples/experiments/assist_skeleton/run_system.py --seconds 40
+    python examples/experiments/assist_skeleton/run_system.py --motion-id 1 --seconds 40
+    # 골반 고정 진단 (보행 평가와 별도)
     python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --seconds 30
-    python examples/experiments/assist_skeleton/run_system.py --human tracker \\
-        --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30
     # 뷰어(A=고스트 라인, B=메시) / 녹화
     python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --viewer --record
 """
@@ -82,6 +86,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analysis import analyze  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
+DEFAULT_LLP_CHECKPOINT = "checkpoints/L1_llp_pendulum/last.ckpt"
+DEFAULT_HLP_CHECKPOINT = str(
+    Path.home() / "Projects/ManiFlow_Policy/ManiFlow/data/outputs"
+    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42"
+    / "checkpoints/epoch=0006-val_loss=0.000762.ckpt"
+)
 MIMIC_EXPERIMENT = REPO / "examples" / "experiments" / "mimic" / "mlp.py"
 HOOK_SIM = "protomotions.simulator.newton.substep_hook.SubstepHookNewtonSimulator"
 HOOK_SIM_FIXED = "protomotions.simulator.newton.substep_hook.SubstepHookFixedBaseNewtonSimulator"
@@ -91,27 +101,29 @@ PELVIS_BODY = 0
 
 
 # ---------------------------------------------------------------------------
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--human", choices=["mocap_pd", "tracker"], default="mocap_pd")
-    p.add_argument("--tracker-checkpoint", default="results/mimic_suit_passive_walk/last.ckpt")
+    p.add_argument("--human", choices=["mocap_pd", "tracker"], default="tracker")
+    p.add_argument("--tracker-checkpoint", default="checkpoints/W1_wearer_human/last.ckpt")
     p.add_argument("--robot-name", default="skeleton_torque_suit_passive_cable")
-    p.add_argument("--motion-file", default="data/motion_for_trackers/skeleton_torque_suit_walk.pt")
+    p.add_argument("--motion-file", default="data/motion_for_trackers/skeleton_torque_suit_gait.pt")
     p.add_argument("--motion-id", type=int, default=0)
     p.add_argument("--start-time", type=float, default=0.0, help="클립 시작 시각 [s]")
-    p.add_argument("--llp-checkpoint", default="results/assist_pendulum_v3/last.ckpt")
-    p.add_argument("--hlp-checkpoint", default=None, help="None이면 flexion40 run 자동 탐색")
+    p.add_argument("--llp-checkpoint", default=DEFAULT_LLP_CHECKPOINT)
+    p.add_argument("--hlp-checkpoint", default=DEFAULT_HLP_CHECKPOINT,
+                   help="H1 flexion100-h15의 검증된 체크포인트 (다른 모델은 경로를 명시)")
     p.add_argument("--denoise", type=int, default=1,
-                   help="HLP denoise 스텝 (실측: 1이나 6이나 정확도 동일, 지연만 스텝당 3 ms 증가)")
-    p.add_argument("--calibration", default="motion",
+                   help="HLP denoise 스텝 (기본 비교 기준: 1)")
+    p.add_argument("--calibration", default="wearer",
                    help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | "
                         "wearer(warmup 동안 착용자 스트림을 재서 영점조정 — 실기기 방식) | none | 'p,q,r,s' (deg)")
     p.add_argument("--physics-fps", type=int, default=400)
     p.add_argument("--env-dt", type=float, default=0.05, help="착용자 env 주기 [s] (tracker 학습 50 ms)")
     p.add_argument("--llp-dt", type=float, default=0.01, help="LLP 주기 [s] (학습 10 ms)")
-    p.add_argument("--seconds", type=float, default=30.0)
+    p.add_argument("--seconds", type=float, default=40.0)
     p.add_argument("--warmup", type=float, default=1.0, help="지표에서 제외할 초반 구간 [s]")
-    p.add_argument("--assist-scale", type=float, default=1.0, help="B에 주입하는 τ_assist 배율 (0 = 차단)")
+    p.add_argument("--assist-scale", type=float, default=None,
+                   help="B에 주입하는 토크 배율 (0 = 차단). 생략하면 보관 L1 정책은 0.5, 다른 정책·오라클은 1")
     # --- 오라클 진단: 학습된 정책 대신 정해진 규칙의 토크를 B에 강제 주입한다 (정책이 아니라 탐침) ---
     p.add_argument("--oracle", choices=["off", "beta", "phase"], default="off",
                    help="off: LLP 정책 / beta: τ = β·(착용자가 직전 창에 실제로 낸 토크) / "
@@ -129,9 +141,9 @@ def parse_args():
     p.add_argument("--mask-window", default=None,
                    help="진단(특권): 보행 위상 'lo,hi' [%%] 구간에서 정책 토크를 0으로 (예: '70,100' = 유각 말기 브레이크 제거 시험)")
     p.add_argument("--hlp-latency-ms", type=float, default=0.0,
-                   help="HLP 예측이 도착하기까지의 계산 지연 [ms] (실측 7 ms). 0 = 즉시(기존 가정)")
+                   help="HLP 예측 도착 지연 모사 [ms]. 0 = 즉시 반영 (실측 추론 시간과 별도)")
     p.add_argument("--obs-horizon-ms", type=float, default=None,
-                   help="LLP가 보는 미래 창을 이 시간까지만 쓴다 (절제 진단; 학습값 150 ms)")
+                   help="LLP가 보는 미래 창을 이 시간까지만 쓴다 [ms] (절제 진단; 기본은 체크포인트 설정)")
     p.add_argument("--torque-lpf-hz", type=float, default=0.0,
                    help="assist 출력 1차 저역통과 차단주파수 [Hz] (0 = 끔) — 구동기 대역 모사")
     p.add_argument("--torque-slew-limit", type=float, default=None,
@@ -150,7 +162,12 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", default="results/assist_skeleton")
     p.add_argument("--tag", default="")
-    args = p.parse_args()
+    p.add_argument("--fullbody-diagnostic", action="store_true",
+                   help="전신 상태·PD 목표·400 Hz 동역학/접촉을 별도 파일로 기록 (정책 입력 변경 없음)")
+    args = p.parse_args(argv)
+    if args.assist_scale is None:
+        is_l1 = Path(args.llp_checkpoint).resolve() == (REPO / DEFAULT_LLP_CHECKPOINT).resolve()
+        args.assist_scale = 0.5 if is_l1 and args.oracle == "off" else 1.0
     if args.record:
         args.viewer = True
     return args
@@ -460,13 +477,14 @@ class SystemHook:
         self.log = {
             "t": torch.zeros(n_calls, device=dev),
             "hip_pos": z(2, 2), "hip_vel": z(2, 2), "trunk": z(2, 2), "ref_hip": z(2, 2),
-            "tau_assist": z(2, 2), "tau_pd_prev": z(2, 2), "tau_ff_prev": z(2, 2),
+            "tau_assist": z(2, 2), "tau_requested": z(2, 2), "tau_pd_prev": z(2, 2), "tau_ff_prev": z(2, 2),
             "raw_action": z(2, 2), "theta_d_future": z(2, S, 2), "chunk_age": z(2),
             "chunk": z(2, K, 2), "chunk_t0": z(2), "root_z": z(2), "root_xy": z(2, 2),
             # 오라클 진단용: 정책이 내려던 토크와 실제 보행 위상
             "tau_policy": z(2, 2), "gait_phase": z(2),
         }
         self.t_sim = 0.0
+        self.diagnostic = None
 
     def _oracle_gate(self, phase: torch.Tensor) -> torch.Tensor:
         """위상 (2,) → 창 안이면 1, 경계에서 코사인으로 오르내리는 게이트 (2,)."""
@@ -560,6 +578,7 @@ class SystemHook:
         L["trunk"][i] = trunk
         L["ref_hip"][i] = ref.dof_pos[:, self.hip_idx]
         L["tau_assist"][i] = inject[:, self.hip_idx_t] - tau_ff[:, self.hip_idx_t]
+        L["tau_requested"][i] = self.ctrl.last_requested_tau_joint
         L["tau_pd_prev"][i] = sim.window_tau_pd_common[:, self.hip_idx]
         L["tau_ff_prev"][i] = self.prev_tau_ff[:, self.hip_idx]
         L["raw_action"][i] = self.ctrl.last_raw_action
@@ -573,6 +592,8 @@ class SystemHook:
             root_pos = sim._get_simulator_root_state().root_pos
             L["root_z"][i] = root_pos[:, 2]
             L["root_xy"][i] = root_pos[:, :2]
+        if self.diagnostic is not None:
+            self.diagnostic.record_control(dof_pos, dof_vel, ref, self.prev_tau_ff)
         self.prev_tau_ff = tau_ff
         self.i += 1
         self.t_sim += self.llp_dt
@@ -670,6 +691,11 @@ def main():
     override.zero()
     hook.need_reset = True
 
+    if args.fullbody_diagnostic:
+        from fullbody_diagnostic import FullBodyDiagnostic
+
+        hook.diagnostic = FullBodyDiagnostic(sim, n_calls, out_dir)
+
     ghost = None
     if args.viewer:
         from viz import GhostSkeletonRenderer, HipTorqueArrows
@@ -759,6 +785,9 @@ def main():
         "mask_window": args.mask_window,
         "oracle_limit": args.oracle_limit,
         "torque_limit": ctrl.torque_limit,
+        "policy_torque_limit": ctrl.layout.torque_limit,
+        "policy_torque_scale": ctrl.layout.torque_scale,
+        "policy_action_transform": ctrl.layout.action_transform,
         "hlp_latency_ms": args.hlp_latency_ms or None,
         "obs_horizon_ms": args.obs_horizon_ms,
         "torque_lpf_hz": args.torque_lpf_hz or None,
@@ -781,6 +810,8 @@ def main():
     }
     np.savez_compressed(out_dir / "traces.npz", **traces)
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    if hook.diagnostic is not None:
+        hook.diagnostic.save()
     metrics = analyze(traces, meta, out_dir)
     print(json.dumps(metrics["summary"], indent=2, ensure_ascii=False))
     print(f"saved: {out_dir}")

@@ -195,6 +195,9 @@ class SkeletonAssistControlConfig(MotionAssistTargetControlConfig):
     chunk_refresh_steps: int = 2
     obs_future_samples: int = 4
     obs_future_dt: float = 0.05
+    # Optional policy-coordinate bounds when transferring a pendulum actor.
+    target_low_override: tuple = ()
+    target_high_override: tuple = ()
 
 
 class SkeletonAssistControl(ControlComponent):
@@ -262,6 +265,9 @@ class SkeletonAssistControl(ControlComponent):
         kin = robot.kinematic_info
         self._target_low = (kin.dof_limits_lower.float() * config.dof_limit_margin).to(dev)[self.assist_dof_indices]
         self._target_high = (kin.dof_limits_upper.float() * config.dof_limit_margin).to(dev)[self.assist_dof_indices]
+        if config.target_low_override:
+            self._target_low = torch.tensor(config.target_low_override, device=dev)
+            self._target_high = torch.tensor(config.target_high_override, device=dev)
 
         # --- 계측 버퍼 (env가 기록) ---
         self._tau_agent = torch.zeros(n, d, device=dev)

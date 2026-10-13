@@ -235,6 +235,10 @@ def create_parser():
         "--nodes", type=int, default=1, help="Number of nodes for distributed training"
     )
     parser.add_argument(
+        "--distributed-backend", choices=("nccl", "gloo"), default=None,
+        help="Override the Fabric process-group backend (default: automatic).",
+    )
+    parser.add_argument(
         "--headless", default=True, help="Run simulation in headless mode"
     )
     parser.add_argument(
@@ -686,6 +690,10 @@ def main():
         loggers=loggers,
         callbacks=callbacks,
     )
+    if args.distributed_backend is not None:
+        from lightning.fabric.strategies import DDPStrategy
+
+        fabric_config.strategy = DDPStrategy(process_group_backend=args.distributed_backend)
     print(asdict(fabric_config))
     fabric: Fabric = Fabric(**asdict(fabric_config))
     fabric.launch()

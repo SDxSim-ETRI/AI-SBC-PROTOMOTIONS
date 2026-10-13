@@ -1,58 +1,51 @@
-# Checkpoint Info — 가상 착용자 **W1** (옛 이름 v33; mimic tracker, 사람 범위 근력)
+# W1 — 시뮬레이션 가상 착용자
 
-버전 체계(2026-09-29): H = HLP, L = LLP, W = 가상 착용자, 현재 계보는 1부터. `docs/AI_SBC_VERSIONS.md` §0.
+W1은 전신 동작을 따라가는 동결 mimic tracker다. 실제 장치에서 사용하는 HLP·LLP와 별도다.
+옛 이름은 `tracker v33`이며, 현재 기존 걷기·달리기의 비교 기준으로 보존한다.
+모델 목록은 [버전표](../../docs/AI_SBC_VERSIONS.md), 다음 작업은 [HANDOFF](../../docs/HANDOFF.md)를 참조한다.
+
+## 보관 정보
 
 | 항목 | 내용 |
-|------|------|
-| 소스 | `results/mimic_suit_human` (snap_12218 = last.ckpt @ epoch 12,218), unit `aisbc-tracker-v33` |
+|---|---|
+| 가중치 | `last.ckpt`, 학습 12,218회 시점 |
+| 원본 실행 | `results/mimic_suit_human`, `snap_12218` |
 | 보관일 | 2026-09-28 |
-| Epoch | 12,218 (v32 epoch 8,810에서 warm start, 3,400 epoch 추가; 11,200 이후 평탄) |
-| 로봇 | **`skeleton_torque_suit_human`** (27 DOF) — passive_cable과 같되 **hip 3관절 effort_limit 600 → 200 N·m** |
-| 시뮬레이터 | Newton, 평지, 물리 120 Hz / decimation 6 (env 20 Hz), 4096 env, batch 16384 |
-| 모션 | 보행 계열 `skeleton_torque_suit_gait.pt` (walk 0.75 + run 0.25) |
-| 레시피 | `examples/experiments/assist_skeleton/tracker_human.py` — v32 레시피 + `dof_pos_rew` 0.5 → **1.0**, `pow_rew` −1e-5 → **−1e-4**, `torque_sq_rew` **−1e-6** 추가 |
-| 학습 지표 | 성공률 1.0, 몸체 오차 0.060 m (v32 0.068), 관절각 추종 보상 0.565 → 0.666, 전신 파워 1,324 → 658 W |
+| 시작 모델 | 이전 v32의 학습 8,810회 체크포인트 |
+| 로봇 | `skeleton_torque_suit_human`, 27 DOF |
+| 고관절 한계 | 좌우 고관절 각 축의 effort limit 200 N·m |
+| 학습 시간 | Newton 물리 120 Hz, decimation 6, 착용자 20 Hz |
+| 통합 평가 시간 | Newton 물리 400 Hz, 착용자 20 Hz, 보조 100 Hz |
+| 학습 모션 | `skeleton_torque_suit_gait.pt`, 걷기 0.75 / 달리기 0.25 |
+| 학습 구성 | `experiment_config.py`, `resolved_configs*.pt/yaml`, `config.yaml` |
+| 원래 실행 스크립트 | `examples/experiments/assist_skeleton/train_tracker_human.sh` |
 
-## 왜 다시 학습했나
-v32(hip 한계 600)는 PD 목표각을 토크 손잡이로 써서 착지마다 −257~−332 N·m(2.8~3.7 N·m/kg)를 냈다 —
-문헌 보행 hip 모멘트 피크는 약 1 N·m/kg. 또 무보조 hip 스윙이 54.5°로 mocap(46°)보다 8° 커서 보조를 켜면
-정책과 무관하게 |ω|가 12 % 줄었다(착용자 산물). LLP의 τ² 절감률이 "사람보다 센 착용자" 기준으로 재어지고
-진자 학습 분포(하중 ≤120 N·m)와도 어긋났다. v33은 시험대를 사람 쪽으로 옮긴 것이다.
+## 사용 범위
 
-## 착용자 잣대 (`eval_wearer.py`, 무보조 env A, 40 s)
+L1 출력 0.5배와 결합한 기존 걷기·달리기 비교 기준이다.
+기존 동작의 결과는 [기준 보고서](../../docs/l1_w1_report.html)에 있다.
+고관절 힘 한계를 줄인 시뮬레이션 모델이라는 뜻이며, 실제 사람 전반을 검증한 모델은 아니다.
 
-| | hip 스윙 A / mocap | hip 파워 | 토크 RMS | 스트라이드 신전 피크 | 주기 평균 신전 / 굴곡 | 피크/RMS | 몸체 오차 |
-|---|---|---|---|---|---|---|---|
-| v32 걷기 | 54.5° / 46.0° | 179 W | 75 N·m | −257 N·m (2.8 N·m/kg) | −152 / +65 | 3.4 | 0.069 m |
-| **v33 걷기** | **48.1° / 46.0°** | **77 W** | **39 N·m** | **−150 N·m (1.65)** | **−86 / +34** | 3.9 | **0.060 m** |
-| v32 달리기 | 65.3° / 58.9° | 360 W | 83 | −180 (2.0) | −126 / +86 | 2.2 | 0.064 |
-| **v33 달리기** | **57.2° / 58.9°** | **170 W** | **56** | **−127 (1.4)** | **−112 / +76** | 2.3 | **0.061** |
+2026-10-13의 새 실제 보통·느린 보행 16조건에서는 15낙상,
+1조건은 골반이 내려가는 중 클립 끝에 도달했다.
+따라서 새 보행에서 보조 모델을 판정하는 시험대로는 아직 쓸 수 없다.
+[착용자 추종 보고서](../../docs/walking_retarget_report.html)에서 데이터 표현과 추종 한계를 확인한다.
 
-주기 평균 신전 피크 0.95 N·m/kg = 문헌 값. 스윙은 mocap ±2° 안. 피크/RMS 3.9는 200 N·m 안에서 여전히
-슬램이 있다는 뜻(토크² 벌점 −1e-6은 이를 못 눌렀다) — 남은 과제.
+## 실행
 
-## 이 착용자에서 LLP는 어떻게 되나 (같은 실행의 env B)
+저장소 루트의 `sbc` 환경에서 실행한다.
 
-| v33 위에 | 걷기 τ² | 달리기 τ² | 몸체 오차 | 보조 RMS |
-|---|---|---|---|---|
-| L1 (옛 llp_v13) 그대로 (40 N·m) | −0.1 % | **4.4 s 낙상** | — | 33 / 35 N·m |
-| **L1 × 0.5** (`--assist-scale 0.5`) | **−19.3 %** | **−23.9 %** | −1.6 / −0.3 % | 17 / 19 |
-| β 오라클 0.5 (특권 상한) | −35.1 % | −40.8 % | −1.9 / −0.1 % | 14 / 20 |
-
-**40 N·m 그대로는 쓰지 말 것.** 사람 범위 착용자에겐 ~20 N·m가 맞고, 정책은 착용자 근력을 관측하지 못해 크기를
-스스로 줄이지 못한다(`docs/NEXT_SESSION.md` §2-H). β와의 차이는 유각 말기(70~90 %) 브레이크 오방향.
-
-## 사용
 ```bash
-# 통합 시스템 A/B (walk = motion-id 0, run = 1). 영점은 착용자 스트림에서 잰다(--calibration wearer).
-python examples/experiments/assist_skeleton/run_system.py --human tracker \
+# W1 + H1 + L1 출력 0.5배의 기존 걷기 비교
+python examples/experiments/assist_skeleton/run_system.py --seconds 40
+
+# 새 실제 보행의 무보조 추종만 확인. 출력은 새 폴더를 사용한다.
+python examples/experiments/assist_skeleton/evaluate_native_wearer.py \
     --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
-    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
-    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40 \
-    --calibration wearer
-python examples/experiments/assist_skeleton/eval_wearer.py results/oracle/<run>   # 착용자 잣대
-# 재학습
-bash examples/experiments/assist_skeleton/train_tracker_human.sh
+    --motion-file results/real_walk_retarget_20261012_224957/native_pairs_v1/suit_native_walk.pt \
+    --starts 0 0.5 --max-seconds 8 --out results/native_walk_check
 ```
-`run_system.py`·`llp_walk.py`는 로봇 config를 이 체크포인트의 `resolved_configs_inference.pt`에서 읽으므로
-`--robot-name`을 따로 줄 필요가 없다. 뷰어/영상은 `skeleton_torque_suit_human`이 메시 표에 등록돼 있다.
+
+로봇 설정은 체크포인트의 `resolved_configs_inference.pt`에서 읽는다.
+기존 실험 수치·학습 동기·초기 비교표는 [보관 기록](../../docs/archive/20261013/W1_INFO.md)에 보존했다.
+새 착용자 학습은 현재 데이터 표현과 발 접촉을 확인한 뒤 별도 판단한다.

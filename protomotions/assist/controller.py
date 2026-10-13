@@ -419,6 +419,7 @@ class AssistController:
             torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None
             t_start = time.perf_counter()
         raw = self.llp.act(obs)
+        self.last_requested_tau_joint = self._to_joint(self.llp.requested_torque(raw))
         tau_llp = torch.clamp(self.llp.to_torque(raw), -self.torque_limit, self.torque_limit)
         if self.config.measure_timing:
             torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None

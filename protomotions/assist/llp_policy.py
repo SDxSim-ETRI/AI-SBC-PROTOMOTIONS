@@ -138,8 +138,12 @@ class LLPPolicy:
             torque_scale=float(action_cfg["torque_scale"]),
             action_transform=action_cfg.get("action_transform", "tanh"),
             torque_limit=float(env_cfg.assist_torque_limit),
-            target_low=(kin.dof_limits_lower.float()[idx_t] * margin).to(self.device),
-            target_high=(kin.dof_limits_upper.float()[idx_t] * margin).to(self.device),
+            target_low=(torch.tensor(comp.target_low_override).to(self.device)
+                        if getattr(comp, "target_low_override", ()) else
+                        (kin.dof_limits_lower.float()[idx_t] * margin).to(self.device)),
+            target_high=(torch.tensor(comp.target_high_override).to(self.device)
+                         if getattr(comp, "target_high_override", ()) else
+                         (kin.dof_limits_upper.float()[idx_t] * margin).to(self.device)),
             in_keys=list(agent_cfg.model.actor.in_keys),
             flexion_sign=float(getattr(comp, "flexion_sign", -1.0)),
             assist_dof_names=assist_names,
@@ -204,13 +208,18 @@ class LLPPolicy:
         td = self.actor.mu(td)
         return td[self.mu_key]
 
-    def to_torque(self, raw_action: Tensor) -> Tensor:
-        """raw action → assist 토크 [N·m] (env의 action 처리 + limit clamp 재현)."""
+    def requested_torque(self, raw_action: Tensor) -> Tensor:
+        """raw action → requested N·m, before the final assist limit."""
         lay = self.layout
         a = raw_action
         if lay.action_transform == "tanh":
             a = torch.tanh(a)
         elif lay.action_transform == "clamp":
             a = torch.clamp(a, -1.0, 1.0)
-        tau = a * lay.torque_scale
+        return a * lay.torque_scale
+
+    def to_torque(self, raw_action: Tensor) -> Tensor:
+        """raw action → assist 토크 [N·m] (env의 action 처리 + limit clamp 재현)."""
+        lay = self.layout
+        tau = self.requested_torque(raw_action)
         return torch.clamp(tau, -lay.torque_limit, lay.torque_limit)

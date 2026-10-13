@@ -181,22 +181,28 @@ class JointTorqueOverride:
         self.gain_scale = 1.0
         self._engaged = False
 
-    def set_torques(self, torques: torch.Tensor) -> torch.Tensor:
+    def set_torques(
+        self, torques: torch.Tensor, *, clamp_to_effort_limits: bool = True
+    ) -> torch.Tensor:
         """Set the torques applied on the next control step(s).
 
         Args:
             torques: (len(env_ids), len(common_dof_indices)) raw torques in
                 N·m, COMMON DOF ordering of the overridden channels. NaNs are
-                treated as 0; values are clamped to the per-DOF effort limit.
+                treated as 0; by default values are clamped to the per-DOF effort limit.
+            clamp_to_effort_limits: False only for a sum of independently bounded
+                simulated sources (assist, wearer feedforward, external load).
+                Their sum is not a single wearer actuator command.
 
         Returns:
-            The clamped torques actually written, same shape as the input.
+            The torques actually written, same shape as the input.
         """
         assert self._engaged, "call engage() before set_torques()"
         torques = torch.nan_to_num(
             torques.to(device=self.device, dtype=torch.float32), nan=0.0
         )
-        torques = torch.clamp(torques, -self.torque_limits, self.torque_limits)
+        if clamp_to_effort_limits:
+            torques = torch.clamp(torques, -self.torque_limits, self.torque_limits)
 
         self._torques_sim.zero_()
         self._torques_sim[self.env_ids[:, None], 0, self.sim_dof_indices[None, :]] = (

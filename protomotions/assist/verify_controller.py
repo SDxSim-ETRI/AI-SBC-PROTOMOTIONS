@@ -33,8 +33,8 @@ chunk_source=maniflow)와 **같은 관측을 조립해 같은 action을 내는�
 
 실행 (sbc env):
     python -m protomotions.assist.verify_controller \
-        --checkpoint results/assist_pendulum_v3/last.ckpt \
-        --zarr ~/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-40fps.zarr
+        --checkpoint checkpoints/L1_llp_pendulum/last.ckpt \
+        --zarr ~/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr
 """
 
 import argparse
@@ -58,35 +58,43 @@ from runtime_utils import build_env_agent  # noqa: E402
 from protomotions.assist.controller import AssistController, AssistControllerConfig  # noqa: E402
 
 DEFAULT_ZARR = os.path.expanduser(
-    "~/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-40fps.zarr"
+    "~/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr"
 )
 # 1부/2부 허용오차: 같은 연산을 같은 순서로 하므로 float32 잡음 수준이어야 한다
 TOL_ACTION = 1e-4
 TOL_RING = 1e-6
+TOL_TORQUE = 1e-4
+TOL_AGE = 1e-6
 
 
 def _parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--checkpoint", default="results/assist_pendulum_v3/last.ckpt")
+    p.add_argument("--checkpoint", default="checkpoints/L1_llp_pendulum/last.ckpt")
+    p.add_argument("--hlp-checkpoint", default=None)
+    p.add_argument("--hlp-denoise-steps", type=int, default=1)
     p.add_argument("--zarr", default=DEFAULT_ZARR)
     p.add_argument("--split", default="val")
     p.add_argument("--num-envs", type=int, default=4)
     p.add_argument("--num-steps", type=int, default=600, help="1·2부 step 수")
     p.add_argument("--num-steps-paired", type=int, default=200, help="3부 step 수")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--reset-every", type=int, default=137, help="1부에서 부분 reset 검증 주기 (0이면 자연 종료만)")
     p.add_argument("--out", default="results/assist_controller_verify")
     return p
 
 
 def _overrides(args):
     a = "env.control_components.assist."
-    return {
+    overrides = {
         a + "intent_source": "motion_data",
         a + "motion_zarr_path": args.zarr,
         a + "motion_split": args.split,
         a + "motion_seed": 0,
         a + "chunk_source": "maniflow",
+        a + "maniflow_ckpt": _hlp_checkpoint(args),
+        a + "maniflow_denoise_steps": args.hlp_denoise_steps,
     }
+    return overrides
 
 
 def _env_state(env, comp):
@@ -105,21 +113,21 @@ def _reset_state(env, comp, env_ids):
     return dof_pos, dof_vel, trunk
 
 
-def _hlp_checkpoint(comp) -> str:
+def _hlp_checkpoint(args) -> str:
     """env의 chunk 소스와 같은 HLP 체크포인트 (ManiFlowChunkSource.from_config 규칙)."""
-    if comp.config.maniflow_ckpt:
-        return str(comp.config.maniflow_ckpt)
+    if args.hlp_checkpoint:
+        return str(Path(args.hlp_checkpoint).expanduser().resolve())
     from protomotions.maniflow.loader import discover_best_checkpoint
-    from protomotions.maniflow.verify_angle_estimator import FLEXION40_RUN_DIR
+    from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
 
-    return str(discover_best_checkpoint(FLEXION40_RUN_DIR))
+    return str(discover_best_checkpoint(FLEXION100_RUN_DIR))
 
 
 def _make_controller(env, comp, args, external_chunk: bool) -> AssistController:
     ctrl = AssistController(
         AssistControllerConfig(
             llp_checkpoint=str(Path(args.checkpoint).resolve()),
-            hlp_checkpoint=_hlp_checkpoint(comp),
+            hlp_checkpoint=comp.config.maniflow_ckpt,
             hlp_denoise_steps=int(comp.config.maniflow_denoise_steps),
             joint_sign=-1.0,  # hip_pendulum: +θ = 신전
             dt=env.dt,
@@ -128,14 +136,34 @@ def _make_controller(env, comp, args, external_chunk: bool) -> AssistController:
         device=env.device,
     )
     ctrl.external_chunk = external_chunk
+    if ctrl.num_knots != comp.config.chunk_knots or not math.isclose(ctrl.hlp_dt, comp.config.hlp_dt):
+        raise ValueError("Environment and controller HLP grids differ")
+    # Capture the actual actor inputs, including history ordering, before normalization.
+    original_act = ctrl.llp.act
+
+    def record_obs(obs):
+        ctrl.verification_obs = {key: value.clone() for key, value in obs.items()}
+        return original_act(obs)
+
+    ctrl.llp.act = record_obs
     return ctrl
 
 
 def _mean_action(agent, obs):
     td = agent.obs_dict_to_tensordict(agent.add_agent_info_to_obs(obs))
     with torch.no_grad():
-        out = agent.model(td)
-    return out["mean_action"]
+        actor = agent.model._actor
+        out = actor.mu(td)
+    return out[actor.config.mu_key]
+
+
+def _max_diff(left, right):
+    diff = (left - right).abs()
+    return float(diff.max()) if torch.isfinite(diff).all() else float("inf")
+
+
+def _obs_diff(ctrl, obs):
+    return max(_max_diff(value, obs[key]) for key, value in ctrl.verification_obs.items())
 
 
 def run_injected(env, agent, comp, args):
@@ -151,32 +179,35 @@ def run_injected(env, agent, comp, args):
 
     max_act, max_tau, max_ring, max_age = 0.0, 0.0, 0.0, 0.0
     a_env = _mean_action(agent, obs)
-    a_ctrl_raw = ctrl.act()  # 관절 규약 토크
-    max_act = max(max_act, (ctrl.last_raw_action - a_env).abs().max().item())
+    tau_ctrl = ctrl.act()
+    max_obs = _obs_diff(ctrl, obs)
+    max_act = _max_diff(ctrl.last_raw_action, a_env)
     num_resets = 0
+    forced_resets = 0
     for step in range(args.num_steps):
         obs, _rew, done, _term, _extras = env.step(a_env)
+        # Compare with the torque actually applied by AssistEnv, including its
+        # action transform and clamp, rather than reimplementing that transform.
+        max_tau = max(max_tau, _max_diff(tau_ctrl, comp._tau_assist))
         dof_pos, dof_vel, trunk = _env_state(env, comp)
         ctrl.observe(dof_pos, dof_vel, trunk)
         # 2부: 링 버퍼 동일성 (재표집 전 원본)
-        max_ring = max(max_ring, (comp._chunk_src._ring - ctrl.hlp._ring).abs().max().item())
+        max_ring = max(max_ring, _max_diff(comp._chunk_src._ring, ctrl.hlp._ring))
         # 1부: env chunk 주입 후 action 비교
         ctrl.set_chunk(comp._chunk.clone(), comp._chunk_t0.clone())
         a_env = _mean_action(agent, obs)
         tau_ctrl = ctrl.act()
-        max_act = max(max_act, (ctrl.last_raw_action - a_env).abs().max().item())
+        max_obs = max(max_obs, _obs_diff(ctrl, obs))
+        max_act = max(max_act, _max_diff(ctrl.last_raw_action, a_env))
         # 관측 보조값: chunk age
         age_env = comp._episode_time() - comp._chunk_t0
-        max_age = max(max_age, (age_env - ctrl.chunk_age).abs().max().item())
-        # env가 다음 step에 실제로 주입할 토크와 제어기 토크 (부호 규약 동일: 진자)
-        tau_env_next = torch.clamp(
-            torch.tanh(a_env) * env.config.assist_torque_limit,
-            -env.config.assist_torque_limit,
-            env.config.assist_torque_limit,
-        )
-        max_tau = max(max_tau, (tau_ctrl - tau_env_next).abs().max().item())
+        max_age = max(max_age, _max_diff(age_env, ctrl.chunk_age))
 
         done_ids = done.nonzero(as_tuple=False).flatten()
+        if args.reset_every > 0 and (step + 1) % args.reset_every == 0:
+            forced_ids = torch.tensor([(step // args.reset_every) % env.num_envs], device=env.device)
+            done_ids = torch.unique(torch.cat((done_ids, forced_ids)))
+            forced_resets += len(forced_ids)
         if len(done_ids) > 0:
             num_resets += len(done_ids)
             env.reset(done_ids)
@@ -185,16 +216,23 @@ def run_injected(env, agent, comp, args):
             ctrl.reset(done_ids, dof_pos, dof_vel, trunk)
             ctrl.set_chunk(comp._chunk[done_ids].clone(), comp._chunk_t0[done_ids].clone(), done_ids)
             a_env = _mean_action(agent, obs)
-            ctrl.act()
+            tau_ctrl = ctrl.act()
+            max_obs = max(max_obs, _obs_diff(ctrl, obs))
+            max_act = max(max_act, _max_diff(ctrl.last_raw_action, a_env))
     return {
         "steps": args.num_steps,
         "resets": num_resets,
+        "forced_resets": forced_resets,
+        "max_abs_obs_diff": max_obs,
         "max_abs_raw_action_diff": max_act,
         "max_abs_torque_diff_Nm": max_tau,
         "max_abs_chunk_age_diff_s": max_age,
         "max_abs_ring_diff_rad": max_ring,
         "pass_action": max_act < TOL_ACTION,
         "pass_ring": max_ring < TOL_RING,
+        "pass_obs": max_obs < TOL_RING,
+        "pass_torque": max_tau < TOL_TORQUE,
+        "pass_age": max_age < TOL_AGE,
     }
 
 
@@ -228,10 +266,10 @@ def run_paired(env, agent, comp, args):
         refreshed = (env.progress_buf % comp.config.chunk_refresh_steps == 0).any().item()
         if refreshed:
             n_refresh += 1
-            knot_diffs.append((comp._chunk - ctrl._chunk).abs().max().item())
+            knot_diffs.append(_max_diff(comp._chunk, ctrl._chunk))
         a_env = _mean_action(agent, obs)
         ctrl.act()
-        act_diffs.append((ctrl.last_raw_action - a_env).abs().max().item())
+        act_diffs.append(_max_diff(ctrl.last_raw_action, a_env))
     knot_max = max(knot_diffs) if knot_diffs else float("nan")
     act_max = max(act_diffs) if act_diffs else float("nan")
     return {
@@ -240,11 +278,15 @@ def run_paired(env, agent, comp, args):
         "max_abs_knot_diff_deg": math.degrees(knot_max) if knot_diffs else None,
         "max_abs_raw_action_diff": act_max,
         "hlp_rng_paired_exact": bool(knot_diffs) and knot_max < 1e-5,
+        "pass_action": act_max < TOL_ACTION,
+        "completed": len(act_diffs) == args.num_steps_paired,
     }
 
 
 def main():
     args = _parser().parse_args()
+    if min(args.num_envs, args.num_steps, args.num_steps_paired, args.hlp_denoise_steps) <= 0 or args.reset_every < 0:
+        raise ValueError("Environment/step counts must be positive and reset interval nonnegative")
 
     env, agent = build_env_agent(args.checkpoint, args.num_envs, headless=True, overrides=_overrides(args))
     comp = env.control_manager.components["assist"]
@@ -259,10 +301,11 @@ def main():
     paired = run_paired(env, agent, comp, args)
     print("[3부] RNG 페어링 비교:", json.dumps(paired, indent=2))
 
-    verdict = injected["pass_action"] and injected["pass_ring"]
+    verdict = all(injected[key] for key in ("pass_action", "pass_ring", "pass_obs", "pass_torque", "pass_age"))
+    verdict = verdict and paired["completed"] and paired["hlp_rng_paired_exact"] and paired["pass_action"]
     report = {
         "checkpoint": str(Path(args.checkpoint).resolve()),
-        "hlp_checkpoint": _hlp_checkpoint(comp),
+        "hlp_checkpoint": comp.config.maniflow_ckpt,
         "zarr": args.zarr,
         "split": args.split,
         "num_envs": args.num_envs,

@@ -468,7 +468,7 @@ def normalized_torque_action(
 
     Args:
         action: Raw action tensor from policy [num_envs, num_actions]
-        torque_scale: Max torque magnitude in N·m (scalar).
+        torque_scale: N·m per transformed action unit (scalar).
         action_transform: How to bound actions - "tanh", "clamp", or None.
         clamp_value: Max absolute action value for clamp mode. Default 1.0.
 
@@ -491,7 +491,7 @@ def make_torque_action_config(
     """Create action config dict for direct torque output.
 
     Args:
-        torque_scale: Max torque magnitude in N·m.
+        torque_scale: N·m per transformed action unit; unbounded when transform is None.
         action_transform: How to bound actions - "tanh", "clamp", or None.
 
     Returns:

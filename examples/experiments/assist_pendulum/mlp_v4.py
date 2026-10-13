@@ -83,7 +83,10 @@ def _pair(s: str):
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
     g = parser.add_argument_group("v4 plant/disturbance randomization")
-    g.add_argument("--assist-limit", type=float, default=40.0, help="assist 토크 한계 [N·m] (tanh 스케일 = clamp)")
+    g.add_argument("--assist-limit", type=float, default=40.0, help="최종 assist 토크 한계 [N·m] (기본 action 스케일도 이 값)")
+    g.add_argument("--action-torque-scale", type=float, default=None, help="raw action의 N·m 스케일. 기본값은 기존처럼 assist-limit")
+    g.add_argument("--action-transform", choices=["tanh", "none"], default="tanh", help="none이면 선형 요청 토크를 만든 뒤 assist-limit에서만 제한")
+    g.add_argument("--separate-torque-limits", action="store_true", help="보조·착용자 FF를 개별 제한하고 외란과의 합에 착용자 한계를 재적용하지 않음")
     g.add_argument("--inertia-range", type=_pair, default=(1.0, 25.0), help="대퇴 질량중심 관성 배율 lo,hi (hip 축 관성 0.42 → ×25 = 3.6 kg·m²)")
     # L2 (2026-09-29): 질량을 관성과 함께 키우고(중력/관성 비를 실제 다리처럼), 보조 한계를 env마다 다르게.
     g.add_argument("--mass-exponent", type=float, default=0.0, help="질량 배율 = 관성 배율^p (0 = 질량 고정 v4; 0.43 = ×25에서 질량 ×4)")
@@ -218,8 +221,15 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace):
     cfg.reward_components["action_rate"] = action_smoothness_factory(weight=float(args.action_rate_weight))
 
     # --- 토크 한계 ---
-    cfg.action_config = make_torque_action_config(torque_scale=float(args.assist_limit), action_transform="tanh")
+    scale = args.assist_limit if args.action_torque_scale is None else args.action_torque_scale
+    if not 0 < float(scale) < float("inf") or not 0 < float(args.assist_limit) < float("inf"):
+        raise ValueError("Action scale and assist limit must be finite and positive")
+    cfg.action_config = make_torque_action_config(
+        torque_scale=float(scale),
+        action_transform=None if args.action_transform == "none" else args.action_transform,
+    )
     cfg.assist_torque_limit = float(args.assist_limit)
+    cfg.clamp_combined_injection = not args.separate_torque_limits
     cfg.mass_scale_exponent = float(args.mass_exponent)
     if args.assist_limit_range is not None:
         cfg.assist_limit_range = tuple(args.assist_limit_range)

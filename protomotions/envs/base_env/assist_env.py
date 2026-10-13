@@ -60,6 +60,9 @@ class AssistEnvConfig(EnvConfig):
     _target_: str = "protomotions.envs.base_env.assist_env.AssistEnv"
 
     assist_torque_limit: float = 25.0
+    # Legacy runs clamp the sum of independent qfrc sources to the wearer limit.
+    # New experiments limit assist and wearer FF separately before adding external loads.
+    clamp_combined_injection: bool = True
     human_gain_scale_min: float = 0.7
     human_gain_scale_max: float = 1.3
     assist_component_name: str = "assist"
@@ -68,6 +71,9 @@ class AssistEnvConfig(EnvConfig):
     # built-in PD(Kp(θ_g−θ) − Kd·θ̇) 위에 τ_ff = Kd·θ̇_g를 qfrc로 가산해 구현.
     # False면 순수 위치 PD (v1 동작).
     human_velocity_feedforward: bool = False
+    # L11: fixed per-environment mixture of position-PD and velocity-FF wearers.
+    # Zero preserves the old FF path without consuming an extra random draw.
+    human_feedforward_disable_prob: float = 0.0
 
     # ---- v4 플랜트 랜덤화 (기본값 = 꺼짐, 옛 pickle과 호환) ----
     # 대퇴 body의 **질량중심 관성(body_inertia)** 배율 범위 (env·dof별 1회 샘플). (1,1)이면 비활성.
@@ -83,6 +89,9 @@ class AssistEnvConfig(EnvConfig):
     impedance_mode: str = "gain_scale"
     omega_n_range: tuple = (26.4, 26.4)
     zeta_range: tuple = (0.66, 0.66)
+    # Optional floor when broadening natural frequencies to soft/high-inertia wearers.
+    # Zero preserves all legacy experiments. Kd uses the resulting Kp to retain zeta.
+    human_stiffness_floor: float = 0.0
     hip_inertia_base: float = 0.418  # (하위 호환) 대퇴 hip 축 관성 [kg·m²]
     hip_inertia_com: float = 0.1316  # 대퇴 질량중심 관성 (hip_pendulum.xml, MuJoCo 계산)
     hip_inertia_parallel: float = 0.2863  # m·d² 평행축 항 (질량 배율에 비례)
@@ -154,6 +163,16 @@ class AssistEnv(BaseEnv):
         self._ke_base = ke[:, self._dof_sim_idx].clone()
         self._kd_base = kd[:, self._dof_sim_idx].clone()
         self._human_kd = self._kd_base.clone()
+        probability = float(getattr(self.config, "human_feedforward_disable_prob", 0.0))
+        if not 0.0 <= probability <= 1.0:
+            raise ValueError("human_feedforward_disable_prob must be in [0, 1]")
+        self._human_ff_enabled = None
+        if probability > 0.0 and self.config.human_velocity_feedforward:
+            # Both hips belong to the same wearer; do not switch their controller
+            # type independently or within an episode. No actor input is added.
+            self._human_ff_enabled = (
+                torch.rand(self.num_envs, 1, device=self.device) >= probability
+            )
         self._gain_scheduled = hasattr(self.assist_component, "gain_schedule")
         # 착용자 토크 한계 (COMMON 순서, (n, d)). built-in PD는 솔버가 이 값으로 clamp하지만
         # 피드포워드는 qfrc 경로라 여기서 직접 clamp해야 한다 — 안 그러면 Kd 150 × θ̇_g 7 rad/s
@@ -247,6 +266,11 @@ class AssistEnv(BaseEnv):
         wn = wlo + (whi - wlo) * torch.rand(self.num_envs, n_dofs, device=self.device)
         ze = zlo + (zhi - zlo) * torch.rand(self.num_envs, n_dofs, device=self.device)
         kp = wn * wn * I_eff
+        floor = float(getattr(cfg, "human_stiffness_floor", 0.0))
+        if not 0.0 <= floor < float("inf"):
+            raise ValueError("human_stiffness_floor must be finite and nonnegative")
+        if floor > 0:
+            kp = kp.clamp_min(floor)
         kd = 2.0 * ze * torch.sqrt(kp * I_eff)
         ke_t = wp.to_torch(self._ke_wp).view(self.num_envs, -1)
         kd_t = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
@@ -331,6 +355,7 @@ class AssistEnv(BaseEnv):
 
         # policy action -> assist torque [N·m]
         action_dict = self._process_action(action, self.context)
+        self.requested_assist_torque = action_dict["processed_action"].clone()
         lim = getattr(self, "_assist_limit", None)
         if lim is not None:  # env마다 다른 한계 (L2)
             tau_assist = torch.maximum(torch.minimum(action_dict["processed_action"], lim), -lim)
@@ -353,6 +378,8 @@ class AssistEnv(BaseEnv):
             tau_ff = self._human_kd * target_vel  # 사람 몫의 피드포워드
             if getattr(self, "_effort_limit", None) is not None:
                 tau_ff = torch.clamp(tau_ff, -self._effort_limit, self._effort_limit)
+            if self._human_ff_enabled is not None:
+                tau_ff = tau_ff * self._human_ff_enabled
         else:
             pd_targets = comp.get_pd_targets()
             tau_ff = None
@@ -361,7 +388,17 @@ class AssistEnv(BaseEnv):
         inject = tau_assist if tau_ff is None else tau_assist + tau_ff
         if hasattr(comp, "external_torque"):
             inject = inject + comp.external_torque()
-        self._torque_override.set_torques(inject)
+        written = self._torque_override.set_torques(
+            inject, clamp_to_effort_limits=self.config.clamp_combined_injection
+        )
+        self.extras["assist/requested_abs_max_Nm"] = self.requested_assist_torque.abs().max()
+        self.extras["assist/limit_fraction"] = (
+            (self.requested_assist_torque - tau_assist).abs() > 1e-5
+        ).float().mean()
+        self.extras["assist/injection_error_max_Nm"] = (written - inject).abs().max()
+        self.extras["assist/injection_clipped_fraction"] = (
+            (written - inject).abs() > 1e-5
+        ).float().mean()
         comp._tau_assist[:] = tau_assist
 
         self.simulator.step(pd_targets, markers_callback=self.get_markers_state)

@@ -1,46 +1,29 @@
-# AI-SBC 프레임워크: HLP + LLP 고관절 보조 제어
+# AI-SBC 프레임워크: 설계와 코드 지도
 
-> 강체(rigid-link) 고관절 assist 착용로봇의 딥러닝 기반 제어기 연구 (2026).
-> 이 문서는 프레임워크 전체 구조, 코드 지도, 실험 이력, 로드맵의 단일 참조점이다.
-> 최종 갱신: 2026-09-13
-> 버전별 요약(무엇을 언제 쓰나): `AI_SBC_VERSIONS.md` / 브라우저용 `versions.html`
-> 처음 오는 에이전트의 첫 문서(현재 결론·타임라인·교훈·열린 과제): `HANDOFF.md` (2026-10-01)
+> 2026-10-13 문서 정리. 현재 상태는 [HANDOFF.md](HANDOFF.md), 결과는 [실험 요약](experiment_summary.html),
+> 모델 경로는 [AI_SBC_VERSIONS.md](AI_SBC_VERSIONS.md)를 읽는다.
+> 이 문서는 설계·코드·디버깅 참조다. 과거 실험 수치와 세션별 진행 상황은 덧붙이지 않는다.
+> 초기 구성과 이전 실험 기록은 [정리 전 원문](archive/20261013/AI_SBC_FRAMEWORK.md)에 보존했다.
 
 ---
 
 ## 1. 개요
 
-제어기는 두 계층으로 구성된다.
+각도 예측기(HLP, ManiFlow)가 실제 관절 움직임으로 미래 고관절 각도를 예측하고,
+보조 제어기(LLP, PPO 정책)가 그 예측과 고관절 상태를 받아 좌우 보조 토크를 낸다.
+가상 착용자(W1)는 시뮬레이션에서 사람 대신 원본 전신 동작을 추종한다.
+실제 장치에 사용하는 제어 모델은 HLP와 LLP이며 W1은 시뮬레이션용이다.
 
-```
-                        ┌──────────────────────────────┐
-   관절각/몸통자세      │  HLP (High-Level Policy)     │   미래 목표각 chunk
-   히스토리 (40 Hz) ──▶ │  ManiFlow flexion 예측 모델  │ ──▶ θ_d[t..t+K]
-                        │  (BONES-SEED mocap 학습)     │   (저주파, ~10 Hz 갱신)
-                        └──────────────────────────────┘
-                                                            │
-                        ┌──────────────────────────────┐    ▼
-   관절 상태 + action   │  LLP (Low-Level Policy)      │   assist 토크
-   히스토리 (100 Hz) ──▶│  PPO assist torque 정책      │ ──▶ τ_assist (고주파)
-                        └──────────────────────────────┘
+```text
+실제 고관절 각도·몸통 자세 → H1 각도 예측 → 현재~50 ms 미래각
+실제 고관절 상태·히스토리 + 예측 → LLP → 좌우 보조 토크
+착용자 토크 + 보조 토크 → suit 전신 물리 → 실제 상태로 피드백
 ```
 
-- **HLP**: 사용자의 flexion 방향 고관절 각도를 예측한다. 관절각 4채널
-  (hip_flexion_r/l + trunk pitch/roll) 히스토리를 입력받아 미래 flexion
-  각도 chunk를 출력하는 ManiFlow 모델. 이 예측을 **pseudo GT 목표**로 삼는다.
-- **LLP**: HLP가 준 목표 각도로의 움직임을 돕는 **assist torque**를 출력하는
-  RL(PPO) 정책. 착용자의 에너지(기계적 파워)를 최소화하되 궤적 추종을
-  깨뜨리지 않도록 학습된다.
-
-물리 모델 (모델 설명 자료 10p 진자 모델):
-
-```
-τ_total = τ_agent + τ_assist
-  τ_agent  = 착용자(사람) 몫 — 시뮬레이션에서는 PD 제어기 또는 mimic tracker가 대역
-  τ_assist = 로봇 보조 몫  — LLP 출력, additive 주입
-```
-
-LLP의 목적함수: 사람 기계적 파워 E = ∫|τ_agent·θ̇|dt 최소화 + 추종 유지.
+물리는 400 Hz, W1은 20 Hz, 최근 보조 제어 실험은 100 Hz다.
+목표는 원래 움직임을 방해하지 않으면서 착용자 부담을 줄이는 것이다.
+고관절 토크 제곱 평균, 동작 추종, 낙상, 전신 관절 부담을 함께 평가한다.
+기계적 파워 `|τ·ω|`만으로 성공을 판정하거나 토크 지표를 대사량 실측으로 해석하지 않는다.
 
 ---
 
@@ -64,7 +47,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 |---|---|---|
 | 정체 | ProtoMotions Mimic(PPO) 전신 모션 추종 RL 정책 | BONES-SEED mocap 지도학습 예측 모델 |
 | 역할 | 시뮬레이션 속 **"착용자" 대역** (skeleton을 걷게 함) | **사용자 의도 예측** (미래 flexion 출력) |
-| 체크포인트 | ~~`checkpoints/v18_2_newton_suit_passive_cable`~~ — **2026-09-03 삭제**(§3.4), 2026-09-12 같은 로봇으로 **재학습 중** (`results/mimic_suit_passive_walk/`) | `ManiFlow_Policy/.../locomotion-flexion40-run01` (현역) |
+| 현재 체크포인트 | `checkpoints/W1_wearer_human/last.ckpt` | H1 flexion100-h15 (버전표의 경로) |
 
 ### 2.3 Chunk 인터페이스 (HLP ↔ LLP 결합점)
 
@@ -79,7 +62,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
   선형 interpolation한 미래 목표 창(`theta_d_future`)을 LLP 관측으로 제공.
   v2 = 0~0.4 s (5×0.1), v3 = **0~0.15 s** (4×0.05, `obs_future_*`).
 
-시간 스케일 (진자 기준): 물리 400 Hz → policy 100 Hz (decimation 4) →
+초기 H0 실험의 시간 스케일 (현재 H1은 §3.1): 물리 400 Hz → policy 100 Hz (decimation 4) →
 chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(25 ms)
 프레임, n_obs 10(= 250 ms), n_act 4, horizon 16.
 
@@ -94,7 +77,7 @@ chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(
 ### 2.4 사람 모델 (시뮬레이션 근사)
 
 - **v1**: Newton BUILT_IN_PD — τ_agent = Kp(θ_g−θ) − Kd·θ̇ (substep implicit)
-- **v2 (현행)**: v1 + 속도 피드포워드 τ_ff = Kd·θ̇_g를 qfrc로 가산
+- **진자 v2 이후의 한 구성**: v1 + 속도 피드포워드 τ_ff = Kd·θ̇_g를 qfrc로 가산
   → τ_agent = Kp(θ_g−θ) + Kd(θ̇_g−θ̇). 사람 단독 추종 0.072→0.019 rad로 개선,
   assist 효과를 "순수 에너지 절감"으로 분리 (`human_velocity_feedforward=True`)
 - **게인 DR**: env별 ke/kd 배율 0.7~1.3 랜덤 (착용자마다 다른 근력/임피던스),
@@ -126,179 +109,38 @@ chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(
 
 ---
 
-## 3. 구성요소 현황 (2026-09-12)
+## 3. 현재 구성과 실행 경로
 
-### 3.1 HLP — ManiFlow flexion 예측 모델 ✅ 오프라인 검증 완료
+### 3.1 각도 예측기
 
-| 항목 | 내용 |
-|------|------|
-| 학습 데이터 | HF `bones-studio/seed` locomotion 68,960클립 / 20.7M프레임 @ **40 fps** (120 fps ÷3) |
-| 관측 | 각도 4ch: hip_flexion_r/l + trunk pitch/roll (rad, skeleton hinge 규약) |
-| 출력 | flexion 2ch × horizon 16 — 관측 창과 정렬(§2.3)이라 **미래는 7프레임(현재+150 ms)** |
-| 구조 | ManiFlow lowdim, n_obs 10 / n_act 4 |
-| run | `hip_flexion_seed-maniflow_lowdim_policy_walking-locomotion-flexion40-run01_seed42` |
-| best ckpt | `checkpoints/epoch=0021-val_loss=0.002854.ckpt` |
-| 성능 (suit14 교차평가, 캘리브레이션 후) | **MAE 0.95° / R² 0.991 / corr 0.996** (denoise 3) — 전 14모션 R²≥0.96 |
-| lead별 오차 (오프라인 suit14) | 25 ms 0.45° / 50 ms 1.18° / 75 ms 2.06° |
-| lead별 오차 (100~150 ms, `verify_chunk_source`로 신규 측정) | 100 ms 2.97° / 125 ms 3.92° / 150 ms 4.90° |
-| 추론 지연 (batch 1, RTX 5090) | denoise 3 = **5.95 ms** (권장), 10 = 19.5 ms — 과제 목표 ≤20 ms 충족 |
+H1 = ManiFlow flexion100-h15. 고관절 좌우 각도와 몸통 pitch/roll의 4채널을 입력한다.
+입력 간격 10 ms, 현재부터 50 ms까지 6점을 예측한다. LLP는 0/10/20 ms 미래 창을 소비한다.
+체크포인트 위치는 버전표에 고정했다. 시뮬레이션 코드는 `protomotions/maniflow/`를 통해 접근한다.
+40 Hz·150 ms의 H0는 초기 비교 모델이며 H1과 시간 계약을 혼용하지 않는다.
 
-- **캘리브레이션 (영점 오프셋)**: SEED와 ETRI suit는 중립자세 각도 규약이
-  채널별 상수만큼 다름 — 실측: obs flexion +13.9°/+12.0°, trunk_pitch −10.2°,
-  출력 +13.9°/+12.2°. 오프라인 평가는 데이터 전체 평균 정렬로 처리했고,
-  온라인에서는 상수 고정(시뮬 통합) 또는 시작 시 중립자세 영점조정(실기기,
-  미결정) 필요.
-- suit14 평가 모션(ETRI 자체 수집 14종): walk, run, squat, highknee,
-  stepinplace×3, onestepleft/right/long, onehopforward, walk_koo,
-  lunge_left/right_koo.
+### 3.2 보조 제어기
 
-### 3.2 LLP — hip pendulum assist RL ✅ 시뮬 검증 완료 (1단계)
+기본 비교 모델 L1은 진자에서 학습했다. W1 평가 시 출력 0.5배와 10 ms 제어 주기를 사용한다.
+L9는 전신 학습의 시작 모델이고 L13R 400회·L14 200회는 기존 걷기의 연구 후보다.
+후보의 관측은 고관절 상태·히스토리·예측이며, 학습용 무보조 정답을 실행 입력으로 쓰지 않는다.
+L12는 코드 준비 후 학습하지 않았다. 성능과 적용 한계는 실험 요약·버전표를 참조한다.
 
-2-DOF 진자(고정 골반 + 좌/우 대퇴 hinge, Kp=300/Kd=15/effort 150 N·m)에서
-PPO로 학습. 비대칭 actor-critic: actor는 실측 가능값만(관절+히스토리, action
-히스토리, chunk 창), critic은 +privileged(τ_agent, 깨끗한 θ_g, gain_scale).
+### 3.3 가상 착용자
 
-**v2 결과** (paired 8env×10 s, θ_g bit-exact 동일): 사람 파워 **76.6% 절감**
-(4.04 vs 17.27 W), 추종 오차 0.005 vs 0.015 rad, assist RMS 6.4 N·m,
-전 env 67–83% 일관 절감. 체크포인트: `results/assist_pendulum_v2/`
-(v1 순수 위치 PD: `results/assist_pendulum/`).
+W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델이며 보조 실험에서는 동결한다.
+현재 기준은 W1이고 W0 및 이전 착용자는 과거 비교용이다. 새 실제 보행의 무보조 추종은 아직 확보하지 못했다.
 
-보상: tracking(exp, w=1.0) + human_power(|τ·θ̇|, w=−0.01) +
-assist_effort(Στ², w=−2e-5) + action_rate(w=−0.005).
-종료: 추종 오차 >1 rad 또는 각속도 >25 rad/s.
+### 3.4 데이터와 변환
 
-### 3.3 레거시 — ManiFlow hip torque 트랙 ⏸ 방향 전환으로 종료
+기존 gait 파일은 걷기(motion 0)와 달리기(motion 1)다. 재생 속도 변형은 같은 동작의 시간축을 바꾼다.
+새 실제 보행은 SOMA23 원본을 suit로 변환한 후보이며, 원본 시간·속도를 유지한다.
+`actor_uid`의 Axxx는 동작 수행자 코드다. 새 체형이나 새 W 모델을 뜻하지 않는다.
 
-`tasks/mimic_suit_active_cable_walk_23dof/`에 수집(collect_walk_zarr*)·
-추론(infer_maniflow_newton)·A/B 비교(compare_maniflow_control_newton)·분석
-문서(MANIFLOW_CONTROL_ANALYSIS.md, MANIFLOW_INFERENCE.md)가 남아 있다.
-run02(재수집)→run03(DAgger)→run04(substep 평균 라벨)까지 진행 후 §2.6의
-결론과 함께 종료. **단, 여기서 만든 인프라는 현역**: `JointTorqueOverride`,
-`get_substep_mean_dof_forces()`, ManiFlow loader — 모두 LLP가 사용 중.
+### 3.5 통합 평가
 
-### 3.4 mimic tracker — 🔁 재학습 중 (2026-09-12; 가중치는 2026-09-03 삭제)
-
-**2026-09-11 방향 재조정**: 새 로봇이 넘어오기 전까지 **이전 인체모델(Newton
-suit skeleton)** 위에서 통합 시스템을 완성하기로 했다(§3.5). 착용자 대역이 필요하므로
-삭제했던 tracker를 같은 레시피로 다시 학습한다 —
-`examples/experiments/assist_skeleton/train_tracker_walk.sh` (walk 단일 모션부터,
-robot `skeleton_torque_suit_passive_cable`, Newton 120 Hz/6, 4096 env). 현재 코드가
-만드는 config가 보관된 v18_2 `resolved_configs.yaml`과 env/agent 동일함을
-`--create-config-only`로 확인했다. warm-start 계보(v17/v18)가 없어 처음부터 학습하며
-약 5.5 s/epoch. 이어서 15모션은 `train_tracker_motions15.sh`(walk에서 warm start).
-결과는 `results/mimic_suit_passive_walk/`(로컬); 보관 시 `checkpoints/<ver>/`+INFO.md.
-
-2026-09-03에 삭제한 내용 (§7):
-
-| 삭제된 체크포인트 | 원래 내용 |
-|-------------------|-----------|
-| `checkpoints/v18_2_newton_suit_passive_cable/` | suit(passive cable) 15모션(11+koo_4), Newton, epoch 5000, 성공률 100% |
-| `checkpoints/v18_newton_suit_passive_cable/` | v18_2의 이전 버전 |
-| `tasks/mimic_suit_active_cable_walk_23dof/output_newton_flat/score_based.ckpt` | walk 전용 (active cable) — β 실험(§2.6)에 사용 |
-
-**남아 있는 것 = 재현 기록**: 각 디렉터리의 `INFO.md`, `resolved_configs*.yaml`,
-`experiment_config.py`, `tasks/*/`의 학습·재생·녹화 스크립트, `MANIFLOW_*.md`
-분석 문서. 즉 "어떤 설정으로 무엇을 얻었는지"는 남고 가중치만 없다.
-
-suit 에셋(`mjcf/skeleton_torque_suit*.xml`, `31dof/`)과 suit 모션 파일(27 DOF,
-`data/motion_for_trackers/`)은 **보존**했다.
-
-⚠️ 비착용(plain) skeleton 로봇은 **에셋이 레포에 없다**:
-`skeleton.py`/`skeleton_torque.py`가 참조하는 `mjcf/skeleton_torque.xml`(및
-`mjcf/31dof/skeleton_torque.xml`)이 존재하지 않음 (suit 계열 XML만 존재).
-robot config 이름의 `passive_cable`/`active_cable`은 suit MJCF의 slide1–4
-관절(슈트 하드웨어 모델링)을 토크 0으로 둘지/정책이 구동할지의 차이일 뿐이다 —
-보조 토크는 항상 hip 관절 qfrc 주입이었다.
-
-### 3.5 통합 시스템 — HLP + LLP → 스켈레톤 assist ✅ 폐루프 동작 (2026-09-12)
-
-`examples/experiments/assist_skeleton/README.md`가 상세 문서. 요지:
-
-- **독립 제어기** `protomotions/assist/AssistController` — env 비의존. 입력 = 고관절
-  각·각속도 + 몸통 pitch/roll 스트림(10 ms), 출력 = assist 토크. 내부에서 HLP
-  링버퍼→25 ms 재표집→ManiFlow→chunk, LLP 히스토리·미래 창·이전 action 조립→actor.
-  `python -m protomotions.assist.verify_controller`로 진자 학습 env와 **bit-exact**
-  일치 확인(action 차이 0.0, RNG 페어링 시 HLP knot 2e-5°).
-- **시간 구조**: tracker env 50 ms(관측이 dt에 묶임) 안에서 LLP 10 ms →
-  `SubstepHookMixin`이 물리 400 Hz 서브스텝 루프에서 4 서브스텝마다 콜백.
-- **착용자 대역 두 가지**: `mocap_pd`(골반 고정 + 관절 PD가 mocap 추종, tracker 불필요;
-  PD 게인은 진자 플랜트와 같은 ω_n/ζ가 되도록 ×12.4/×6.2) / `tracker`(보행).
-- **HLP 관측**: hip flexion = 관절각, trunk = pelvis 자세 × lumbar FK(추출기와 동일),
-  영점 = 클립 평균을 SEED 평균에 맞추는 오프셋.
-
-**결과 (walk 30 s, LLP v3 그대로, 착용자 hip 파워 A→B)**:
-
-| 착용자 대역 | assist 배율 | 절감 | assist↔τ_agent 상관 |
-|---|---|---|---|
-| 골반 고정, 관절 다리 | 1 / 3 | −4.5 % / −4.0 % | 0.19 |
-| 골반 고정, 강체 다리(무릎·발목 잠금) | 1 / 2 / 3 / 4 | −7.0 / −13.5 / −19.4 / −24.8 % | 0.80 |
-| 보행 tracker (학습 중 epoch≈2600, 30 s) | 1 | +4.2 % | −0.11 |
-
-**발견**: 진자 LLP는 강체 진자 플랜트에는 모양이 맞고(corr 0.80) 크기만 8배
-부족하다(다리 관성 3.53 vs 진자 0.43 kg·m², 출력 한계 25 N·m). 무릎이 움직이면
-(스윙 굴곡 ≤65°, 무릎 PD 반력의 hip 토크 스파이크 ±100 N·m) 맞지 않고(corr 0.19),
-보행에서는 지면 반력까지 더해져 corr≈0. → **LLP를 실제 플랜트(관절 다리 + 지면
-접촉, 실제 토크 스케일)에서 재학습**해야 한다. 또 mimic tracker는 몸체 위치만 맞추므로
-학습이 진행돼도 hip flexion의 mocap 추종은 오히려 나빠질 수 있다(10.8°→14.2°) — 착용자
-대역용 tracker에는 관절각 추종 항 강화가 필요하다. 관측 계약(hip-local)은 유지하고
-플랜트·사람 모델만 바꾸면 되며, 러너가 그 학습 환경의 평가 하네스가 된다.
-추론 시간 HLP 7.9 ms + LLP 0.4 ms (batch 2, RTX 5090).
-
-**LLP 재학습 (2026-09-12 22:00 시작, `results/llp_skel_walk_v1/`)** — "따로 보행 비슷한
-플랜트를 만들지 vs 통합 시스템에서 학습할지"에 대한 결정: **통합 시스템 그대로 학습
-env로 쓴다.** 별도 플랜트는 또 다른 근사(무릎·접촉·토크 스케일 중 무엇을 빠뜨리든
-전이 격차가 다시 생김)이고, 착용자(tracker v30/v31)·HLP·주입 경로가 이미 갖춰져
-있으며, LLP의 관측 계약(hip-local)은 그대로라 "따로 학습해 어디든 싣는다"는 원칙은
-유지된다. 구현: `SkeletonAssistEnv`(env 10 ms, action 2ch) + `SkeletonAssistControl`
-(동결 tracker 5 step마다 행동, 실 ManiFlow 배치 chunk, θ_g = mocap hip) +
-`examples/experiments/assist_skeleton/llp_walk.py`. 보상은 진자의 hip 목표 추종 대신
-**착용자 몸체 추종(tracker의 gt/rh 항)** + 파워(−0.0015) + effort + action rate.
-학습 env 점검: 내장 tracker 몸체 오차 7.9 cm(단독 7.6), 종료 0, ≈3 s/epoch @4096 env.
-**v1 교훈(850 epoch)**: 착용자 추종 *보상*(exp)을 주면 정책이 최대 토크로 착용자를
-mocap 쪽으로 끌어 추종만 개선하고 파워는 못 줄인다(−0.8 %). → v2/v3는 몸체 오차가
-무보조 수준을 넘는 만큼만 벌점(hinge) + 파워 weight ×2, 한계 25/40 N·m.
-**결과 (2026-09-13)**: 통합 시스템 평가(walk, A/B paired)에서 착용자 hip 파워
-v2(25 N·m, 1270 ep) **−20.0 %**, **v3(40 N·m, 2500 ep 수렴) −31~−32 %** (60 s·다른
-구간·시드 일관, corr ≈0.5, 낙상 0) — 오라클 상한(β·τ_agent 주입: 25 N·m −18 %,
-40 N·m −26 %) 이상. 진자 LLP는 같은 조건에서 +4 %. 대가: hip mocap 오차 +0.6°,
-몸체 추종은 무보조 수준 유지. 토크는 보행 위상에 맞춘 bang-bang(±한계) 형태라
-실기기용은 부드러움 항 강화 필요. **착용자 특이성**: v3를 다른 tracker(v31)의 같은
-walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착용자의 운동 패턴에 맞춘
-정책이라, 실사용에는 착용자 다양성(tracker 앙상블·게인 랜덤화·모션 다양성) 학습이
-필요하다. **v4(15모션, v31 tracker, 1890 ep 수렴)**: 14모션 시간 가중 **−21.8 %**, 낙상 0
-(highknee −28, run −26, walk −20, stepinplace3 −36 %; 느린 동작도 −3~−15 %, squat만 +5 %).
-**v5(착용자 앙상블 v30+v31 × walk, 1780 ep 수렴)**: 한 정책이 v30 walk **−31.7 %**, v31 walk
-**−25.6 %** (v3는 −31.7/−2.4) — 착용자 다양성은 학습 분포로 해결된다. 세 LLP는
-`checkpoints/llp_v{3,4,5}_*`에 보관(INFO.md). 표: README.
-상세: `examples/experiments/assist_skeleton/README.md` "LLP 재학습".
-
-**보행 집중 단계 (2026-09-13)** — 목표를 우선 **보행 계열 동작**으로 좁혔다
-(`make_gait_motions.py`: walk 0.75 + run 0.25; walk_koo는 walk와 바이트 단위로 동일한
-중복이었고 squat·제자리 걸음·한 걸음·런지는 제외). 착용자는 v31 tracker.
-`llp_gait_v6`(기본 변화율 벌점)와 `llp_gait_smooth_v7`(변화율 벌점 ×10)를 병렬 학습.
-
-**토크 거칠기 — "bang-bang"이라는 표현은 과했다.** 실측(v5, v31 walk 20 s): 한계값에
-붙어 있는 시간은 **3 %**뿐이고, 대신 **1초에 6.3번 부호가 바뀌고 변화율 RMS가
-520 N·m/s**다. 즉 포화된 사각파가 아니라 *빠르게 떠는* 토크다. 지표를 analysis에
-넣었다(`assist_slew_rms_Nm_s`, `assist_saturation_pct`, `assist_sign_flips_per_s`).
-사후 저역통과(`--torque-lpf-hz`, `AssistControllerConfig.torque_lpf_hz`)의 대가:
-
-| 필터 | 파워 절감 | 토크 RMS | 변화율 RMS | 부호 전환 | τ_agent 상관 |
-|---|---|---|---|---|---|
-| 없음 | −25.5 % | 20.6 N·m | 520 N·m/s | 6.3 /s | 0.39 |
-| 12 Hz | −23.5 % | 19.5 | 430 | 5.6 | 0.46 |
-| 6 Hz | −19.0 % | 17.9 | 357 | 4.6 | 0.55 |
-| 3 Hz | −11.9 % | 15.3 | 255 | 4.4 | 0.65 |
-
-12 Hz까지는 값이 거의 유지되고 6 Hz 아래에서 무너진다 — 보조가 버는 성분이 걸음
-주파수(0.9 Hz)보다 훨씬 높은 대역에 있다. 구동기 대역이 12 Hz 이상이면 사후 필터로
-충분하고, 그 아래라면 학습 단계에서 변화율 벌점을 키우는 쪽(v7)이 맞다.
-
-**인체 모델 렌더링 (2026-09-13)**: `skeleton_torque_suit.xml`에 해부학적 뼈 메시를
-합쳤다(그리기 전용 contype=0 + 기존 캡슐 충돌 그대로). MuJoCo 기준 body/DOF/질량/관성과
-충돌 geom 33개가 모두 동일하고 폐루프 A/B 수치도 재현되므로 이전 체크포인트가 전부
-유효하다. Newton은 headless일 때 시각 geom을 읽지 않는다(`parse_visuals=not headless`) —
-읽으면 env당 90개가 늘어 4096 env 학습이 3.5 → 14 s/epoch, 11.7 → 18.2 GB로 나빠진다.
+`run_system.py` → W1/모션 로드 → 영점 보정 → `AssistController` → 서브스텝 보조 주입 → A/B 토크 계측.
+무보조 A와 보조 B는 같은 초기 조건으로 시작한다. 토크 창 정렬과 물리 실행 산포를 검사한다.
+새 모션의 착용자만 검사할 때는 `evaluate_native_wearer.py`를 사용한다. 짧은 클립을 이어 붙이지 않는다.
 
 ---
 
@@ -351,6 +193,27 @@ walk 클립에 올리면 −31.7 % → −2.4 % (보정 무관) — 특정 착�
 | `protomotions/envs/control/skeleton_assist_control.py` | `TrackerPolicy`/`TrackerMimicControl`/`SkeletonAssistControl` — 내장 tracker, 실 HLP chunk, hip 부분집합 컨텍스트 |
 | `examples/experiments/assist_skeleton/llp_walk.py`, `check_train_env.py` | LLP 재학습 실험 파일 / 학습 env 점검 |
 
+**L13/R/L14 전신 걷기 추가학습 (2026-10-11)** — 결과와 현재 판정은
+`HANDOFF.md`, `experiment_summary.html`을 우선한다. 정상 걷기 개발 통과와
+다른 속도·구간의 일반화 판정을 구별한다.
+
+| 파일 | 역할 |
+|------|------|
+| `protomotions/envs/base_env/paired_skeleton_assist_env.py` | 독립 무보조 A / 보조 B 전신 시뮬레이션. 같은 초기 상태·모션·난수, paired 부담·동작 비악화 보상. A 정보는 actor에 넣지 않음 |
+| `protomotions/agents/ppo/assist_finetune.py` | actor만 전이, critic/optimizer 새 초기화. 진자 −굴곡 → 전신 +굴곡 좌표를 정규화·첫층·출력층까지 등가 변환. 전신 소스 +굴곡은 그대로 복사 |
+| `examples/experiments/assist_skeleton/llp_walk_finetune.py` | L13: W1/실제 HLP 동결, 137차원 actor, 100 Hz, gain 1 / 최종 ±100 N·m |
+| `examples/experiments/assist_skeleton/llp_walk_finetune_relative.py` | L13R: 낮은 부하에서의 부담 증가도 반영하는 상대 국소 비용. 계수는 학습 구간 rollout에서 평균을 맞춤 |
+| `examples/experiments/assist_skeleton/llp_walk_tempo.py` | L14: .90/1/1.10 시간배율 혼합, 몸체 오차 여유를 기존 평가 기준인 1 mm로 정렬 |
+| `examples/experiments/assist_skeleton/verify_walk_finetune.py` | 실제 물리에서 초기 actor 등가, zero-assist RMS, 부분 reset, A/B 종료, 실제 학습 motion IDs 검사 |
+| `examples/experiments/assist_skeleton/run_walk_{finetune,relative,tempo}_sequence.py` | 소스 해시 고정, 학습·독립 40초 평가 순차 실행, 중단 로그 보존 |
+| `examples/experiments/assist_skeleton/validate_walk_finetune.py` | 고정 후보와 같은 seed/start/motion의 L9 비교, 완료된 정확히 같은 조건만 재사용 |
+
+현재 paired 전신 env는 headless / flat / scene 없음만 지원한다. 두 env가 contact
+label을 각각 smoothing하므로 motion library는 독립 사본이어야 한다. 재개 시 내부
+평가를 비활성화한 recipe는 강제 내부 평가도 건너뛰고 외부 `run_system.py` 평가를 쓴다.
+단일 GPU NCCL 통신이 정지한 이 환경에서는 `train_agent.py --distributed-backend gloo`로
+실제 학습을 검증했다. 기본 backend 선택은 변경하지 않았다.
+
 **ManiFlow 통합 레이어** (`protomotions/maniflow/` — 시뮬 쪽에서 maniflow를
 직접 import하지 않고 반드시 이 패키지를 경유):
 
@@ -391,119 +254,61 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 
 ## 5. 재현 명령어
 
+레포 루트, sbc 환경에서 기존 기준 모델을 평가하는 예다. 새 학습 시작 명령이 아니다.
+
 ```bash
-# ── LLP 학습 (sbc env, 물리 400 Hz / policy 100 Hz) ──
-python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \
-    --experiment-path examples/experiments/assist_pendulum/mlp.py \
-    --experiment-name assist_pendulum --motion-file none \
-    --num-envs 4096 --batch-size 16384
-
-# ── LLP 평가 (베이스라인 = assist 차단) ──
-python protomotions/inference_agent.py --checkpoint results/assist_pendulum_v2/last.ckpt \
-    --simulator newton --num-envs 16 --headless --full-eval
-#   baseline: --overrides "env.assist_torque_limit=0"
-
-# ── LLP 시각화 / paired 비교 ──
-python examples/experiments/assist_pendulum/play.py --checkpoint results/assist_pendulum_v2/last.ckpt
-python examples/experiments/assist_pendulum/compare_rollout.py --checkpoint results/assist_pendulum_v2/last.ckpt
-
-# ── 통합 시스템 (스켈레톤, §3.5) ──
-python -m protomotions.assist.verify_controller --checkpoint results/assist_pendulum_v3/last.ckpt
-python examples/experiments/assist_skeleton/run_system.py --human mocap_pd --seconds 30
-python examples/experiments/assist_skeleton/run_system.py --human tracker \
-    --tracker-checkpoint results/mimic_suit_passive_walk/last.ckpt --seconds 30
-bash examples/experiments/assist_skeleton/train_tracker_walk.sh      # 착용자 tracker 재학습
-
-# ── HLP 오프라인 교차평가 (maniflow env, ManiFlow_Policy repo에서) ──
-python scripts/compare_hip_imu_reference.py \
-    --zarr_path ManiFlow/data/hip-flexion-etri-suit14-40fps.zarr \
-    --denoise_steps 3
+/home/bak/miniconda3/envs/sbc/bin/python examples/experiments/assist_skeleton/run_system.py \
+    --human tracker --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
+    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 \
+    --seconds 40 --calibration wearer --seed 42
 ```
 
----
-
-## 6. 로드맵 (2026 하반기)
-
-| Phase | 내용 | 상태 |
-|-------|------|------|
-| **A** | 프레임워크 문서화(본 문서) + CLAUDE.md 현행화 | ✅ 2026-08-20 |
-| **B** | `ManiFlowAngleEstimator` 온라인 래퍼 신설 + **오프라인 등가성 검증** (suit14에서 compare 스크립트 수치 MAE 0.95° 재현) — 스트리밍 검증 PASS: MAE 0.940°/0.961°, R² 0.991/0.992, lead별 MAE까지 기준과 Δ≤0.004° (`results/angle_estimator_verify/2026-08-24_16-04-52/`) | ✅ 2026-08-24 |
-| **C** | 진자에서 **실 HLP 연결** — ① SEED 궤적 로더(`motion_intent.py`, HLP val 분할 재현) ② 소스 옵션화(`MotionAssistTargetControl` 상속, 부모 파일 무변경) ③ v3 재학습(의도는 **합성 sine 유지** — 넓은 궤적 분포가 LLP 일반화에 유리, mocap은 평가용) ④ A/B/C 평가 | ✅ 2026-09-08 |
-| **D** | **skeleton 확장 — 통합 시스템** (2026-09-11 재조정: 새 로봇 대기 중 **이전 인체모델(Newton suit skeleton)** 로 진행). ✅ 독립 제어기 `AssistController` + 등가성 검증 ✅ 서브스텝 훅 러너(A/B paired, 두 착용자 대역) ✅ 뷰어·녹화 ✅ tracker 재학습(v30 walk, v31 15모션 — `checkpoints/`) ✅ **LLP 재학습**: 통합 env(동결 tracker + 실 HLP)에서 walk v3 **−31 %**, 15모션 v4 **−22 %**(14모션 가중), 착용자 앙상블 v5 **−32/−26 %**(두 착용자), 낙상 0 — `checkpoints/llp_v{3,4,5}_*` ✅ 토크 거칠기 정량화 + 출력 저역통과·변화율 한계(제어기 내장) ✅ 뼈 메시 인체 모델 ⏭ 보행 집중 v6/v7 학습 중, 관절각 추종 강화 tracker, 실기기 규약 정리. 유지되는 설계: hip-local 관측, hip flexion 2ch qfrc, HLP 온라인(trunk = pelvis×lumbar FK) | 시스템 ✅ 2026-09-12 / LLP 재학습 예정 |
-| 증강 (선택) | Kimodo 등 모션 생성 모델 → HLP 재학습 데이터 + LLP θ_g 풀 양쪽에 추가. skeleton 단계에서 특정 동작 예측 약점 확인 시 착수 | 보류 |
-| 정리 (병행) | git zarr 18.9 GB 완전 제거(히스토리 재작성 포함, §7) — 대용량 데이터 HF 전환은 계속 | ✅ 2026-08-31 |
-
-**Phase C 결과 (2026-09-08)** — 합성 sine으로 학습한 v3를 mocap 의도 궤적
-위에서 평가. 세 조건 모두 θ_g 완전 동일(paired):
-
-| 데이터 | A 사람 단독 [W] | B 에뮬 chunk | C **실 ManiFlow** |
-|--------|----------------|--------------|-------------------|
-| SEED 미학습분 (val, 32env×30 s) | 12.2 | 6.31 (**−48.3 %**) | 7.43 (**−39.1 %**) |
-| ETRI suit14 (28env×25 s) | 49.7 | 28.96 (**−41.7 %**) | 32.76 (**−34.1 %**) |
-
-추종 오차도 두 경우 모두 개선(SEED 0.86°→0.38°, suit14 1.56°→0.95°),
-낙상/발산 종료 0건. **결론: 에뮬레이션으로 학습한 정책이 실 HLP에서도
-동작한다** — 절감 폭은 B의 8할 수준으로 줄지만 유지된다.
-
-**남은 격차의 원인 = 오차의 "구조"** (크기가 아님). SEED val에서 실 HLP는
-에뮬보다 오히려 **정확한데**(150 ms에서 2.03° vs 3.12°) 절감은 더 낮았다.
-오차를 "의도 궤적을 얼마나 늦게 본 것인가"로 환산하면:
-
-| 조건 | 50 ms lead 등가지연 | 150 ms lead | 속도 상관 (50 ms) |
-|------|--------------------|-------------|------------------|
-| B 에뮬 | 4.0 ms | 0.8 ms | −0.20 |
-| C 실 HLP | **7.1 ms** | **5.0 ms** | **−0.40** |
-
-즉 실 HLP 오차는 무작위가 아니라 **체계적 지연**이라 같은 크기라도 assist
-타이밍을 더 망친다. → 다음 개선안: 에뮬레이션의 `chunk_drift_std`(무작위)를
-줄이고 `chunk_delay_max`(지연)를 5~10 ms 수준으로 올려 재학습.
-
-사람 의도(θ_g)를 mocap으로 바꾸는 것은 평가의 전제 조건 — HLP는 locomotion으로
-학습됐으므로 합성 sine 궤적에서는 예측이 성립하지 않는다 (§2.1).
+새 보행 무보조 평가의 저장 소스·설정·요약은 `results/native_walk_validation_20261013/`에 있다.
+학습 재현은 각 run의 resolved config와 소스 스냅샷을 사용한다. 옛 학습 명령을 현재 계획으로 실행하지 않는다.
 
 ---
 
-## 7. 레포 위생 현황
+## 6. 다음 검증의 순서
 
-- **zarr 18.9 GB 완전 제거 완료** (2026-08-31 재작성 / 2026-09-03 push·GC 완료,
-  업로더인 협업 연구원님 승인): untrack + 로컬 사본 삭제 + **git 히스토리
-  재작성**(filter-repo, `tasks/mimic_suit_active_cable_walk_23dof/zarr_data/`
-  전 히스토리 제거).
-  - **2026-09-03 마무리**: `origin/main`에 force push 완료
-    (`--force-with-lease`, 원격 110 커밋 → 로컬 90 커밋으로 교체).
-    재작성으로 **전 커밋 해시가 변경**됨 — 협업자는 재클론 필요(다른 레포로
-    이동해 실질적 영향 없음 확인). 이어서 `git reflog expire --expire=now --all
-    && git gc --prune=now` 실행: 재작성 전 옛 팩 18 GB(고아 데이터)가 남아 있던
-    것을 제거해 **`.git` 22 GB → 4.0 GB** 달성 (objects 312 MB + LFS 3.6 GB
-    = 체크포인트 실물, 보존). `git fsck --connectivity-only` 통과.
-  - 재작성 전 백업: `~/Projects/AI-SBC-PROTOMOTIONS-backup-20260831.git`
-    (18 GB, bare. 안정화 확인됐으므로 삭제 가능).
-  - GitHub 쪽 용량은 원격 GC 시점까지 즉시 줄지 않을 수 있음(필요 시 Support 요청).
-- 대용량 데이터는 향후 HF(또는 사내 스토리지)로: repo에는 다운로드
-  스크립트/경로만 커밋.
-- **현재 용량 실측** (2026-09-03):
-  - `data/seed/` 260 GB — BONES-SEED BVH 원본+변환본. **git 미추적**(로컬 전용),
-    ManiFlow 학습 데이터라 유지.
-  - `tasks/` — 정리 전 2.4 GB(그중 2.0 GB가 LFS 추적). 2026-09-03에 `.ckpt`와
-    `recordings/**`를 삭제해 스크립트·INFO.md·분석 md·`resolved_configs*.yaml`
-    만 남았다(수백 KB). `.gitignore`가 막는 것은
-    `maniflow_infer_results/`·`maniflow_control_results/`·`zarr_data/`뿐.
-  - `checkpoints/` — 가중치는 2026-09-03에 전부 삭제(아래). 남은 것은 각
-    디렉터리의 `INFO.md`·`resolved_configs*.yaml`·`experiment_config.py`뿐.
-- **suit 바이너리 2.6 GB 정리 완료** (2026-09-03): suit 단계를 다른 로봇 +
-  IsaacLab으로 옮기기로 정해져 mimic 체크포인트가 재사용 불가 → LFS 바이너리
-  **129개 삭제** (`checkpoints/v18` 4개 + `v18_2` 5개 + `tasks/*/output_*` .ckpt
-  24개 + `tasks/*/recordings/**` 96개). `INFO.md`·`resolved_configs*.yaml`·
-  `experiment_config.py`·스크립트·분석 md는 **전부 보존**(재현 기록).
-  - **LFS는 filter-repo가 필요 없다** — git 히스토리에 들어 있는 것은 129바이트
-    포인터뿐이고(`git cat-file -s HEAD:<ckpt>` = 129) 실제 바이너리는
-    `.git/lfs`와 GitHub LFS 저장소에 있다. 따라서 일반 `git rm` + `git push`
-    (force 불필요) + `git lfs prune`으로 회수된다. 히스토리 재작성이 필요한
-    것은 **LFS를 쓰지 않은** 대용량 파일(zarr 같은)뿐.
-  - GitHub LFS 저장소 용량은 미참조 객체를 자동 삭제하지 않으므로 즉시 줄지
-    않는다(필요 시 Support 요청).
+현재 실행할 과제는 HANDOFF에서 관리한다. 연구 순서는 다음과 같다.
+
+1. 실제 보행 자료와 착용자의 무보조 추종을 확보한다.
+2. 그 조건에서 보조 전후의 고관절·전신 부담과 동작 유지를 비교한다.
+3. 걷기 범위를 확보한 뒤 달리기와 다른 동작으로 넓힌다.
+
+기존 걷기 한 패턴의 개선을 다양한 사람·계단·험지·실기기 검증으로 읽지 않는다.
+
+---
+
+## 7. 문서와 산출물 관리
+
+- HANDOFF에는 현재 결론과 다음 작업만 남긴다. 실험 결론은 `experiment_summary.html`에 갱신한다.
+- 모델 이름과 경로는 `AI_SBC_VERSIONS.md`, 실행 근거는 `results/<실험>/`에 저장한다.
+- 보관 모델은 `checkpoints/<버전>/`와 INFO.md로 관리하며 가중치는 LFS 대상이다.
+- 과거 문서는 `docs/archive/20261013/`에 보존했다. 그 안의 중간 상태는 현재 지시가 아니다.
+- 대용량 원본, 가중치, 실패 기록은 문서가 오래됐다는 이유만으로 삭제하지 않는다.
+
+---
 
 ## 8. 함정 모음 (디버깅 시 먼저 볼 것)
+
+- **이전 GPU 오류를 현재 접근 제한으로 단정하지 않는다 (2026-10-13).**
+  현재 세션의 권한 설정부터 확인하고 `nvidia-smi` → sbc 절대경로 Python의 실제 CUDA 계산 →
+  평가 명령으로 확인한다. Full access에서는 보통 실행으로 진행하고 승인 대기를 만들어내지 않는다.
+  실행이 실패하면 그 명령·인터프리터·오류를 기록한다. 오래된 sandbox/Fabric/NVML 오류는
+  현재 GPU 상태의 증거가 아니다. 10월 13일 Full access에서 실제 Newton 평가 32조건을 완료했다.
+  HANDOFF 최신 인계와 과거 일지(archive/20261013/NEXT_SESSION.md) §2-AA 참조.
+
+- **모션 재생 속도 변경을 실제 속도별 보행으로 해석하지 않는다 (2026-10-12).**
+  L14의 .85–1.15배 데이터는 전신 위치·관절각·접촉 배열을 그대로 두고 시간 간격과 속도만 바꿨다.
+  몸체 이동도 느려지지만 참조 보폭·발 높이·접촉 비율은 유지한다. 실제로 속도에 맞춰 보폭과
+  자세를 바꾼 보행의 성공/실패를 입증하지 않는다. 기존 수치와 실패 판정은 보존하되,
+  이 인공 조건의 통과를 다른 실제 동작 평가의 절대 선행 조건으로 삼지 않는다.
+  사용자는 실제 데이터 점검을 우선하도록 선택했다. 로컬 SEED 원본 후보가 있지만 SOMA23→suit
+  전신 변환·착용자 무보조 추종·클립/인물 분할 검증이 필요하다. HLP 원본 목록에 포함된 후보를
+  전체 시스템 미사용 평가라고 부르지 않는다. [데이터 점검 보고서](walking_data_audit.html),
+  과거 일지(archive/20261013/NEXT_SESSION.md) §2-Y 참조.
 
 - **paired 비교의 RNG 함정**: `_lazy_init_assist`의 게인 랜덤화가 첫 step에서
   RNG를 소비 → 같은 seed여도 두 조건이 다른 궤적을 받음. rollout 전에 lazy
@@ -515,8 +320,8 @@ python scripts/compare_hip_imu_reference.py \
   → BUILT_IN_PD + qfrc 경로를 사용하는 것이 현 구조의 이유 중 하나.
 - **Newton 마커**: `_update_simulator_markers`가 no-op — viewer의
   `log_lines/log_arrows` + `_render_hook`으로 직접 그려야 함 (play.py 참조).
-- **fps 정합**: SEED 변환본·모델·suit 데이터 모두 **40 fps(25 ms)** 통일
-  (2026-08-13). 30 fps 혼용 시 시간축 4/3 왜곡 — 과거 평가 일부가 이 상태였음.
+- **fps 정합**: 원본/변환 모션은 40 Hz, 현재 H1 입력은 100 Hz다. 저장된 시간 간격과
+  모델의 입력 계약을 각각 읽고 명시적으로 재표집한다. 과거 H0의 40 Hz 계약을 H1에 적용하지 않는다.
 - **zarr 버전**: 수집(sbc, zarr 3)은 v2 포맷 강제 기록, 학습(maniflow, 2.12)은
   v2만 읽음. 추출기의 `zarr_format` 설정을 건드리지 말 것.
 - **`resolved_configs.pt`는 pickle** — `weights_only=False`로 로드. resume은
@@ -877,3 +682,35 @@ override해 `ManiFlowChunkSource`(§4.1)로 실제 예측을 넣는다.
       DiTX transformer 6블록 / hidden 256 / 10.5M 파라미터
 - [ ] walking workspace + dataset이 zarr를 (n_obs 10, horizon 16) 창으로 자르는 방식
 - 확인: 래퍼의 히스토리 프라이밍(첫 관측을 10칸 복제)은 학습의 무엇과 대응인가
+
+## 10. 사용자용 보고서 작성 원칙
+
+사용자 지시(2026-10-11): 사용자는 대화 중간의 설명을 읽지 않고 보고서만 볼 수 있다.
+**보고서는 대화와 다른 문서를 읽지 않아도 이해할 수 있어야 한다.**
+ASD-STE100의 명확한 문장과 일관된 용어 원칙을 참고한다.
+참고: [ASD-STE100 공식 설명](https://www.asd-ste100.org/STE_faq.html).
+한국어 보고서를 영어 표준 전체에 적합하다고 표현하지 않는다.
+
+- 한 문장에는 한 가지 핵심 내용을 쓴다. 주체와 동작을 직접 쓴다.
+- 같은 대상에는 같은 이름을 사용한다. 대화에서 설명했어도 보고서에서 다시 정의한다.
+- 약어는 처음 사용할 때 전체 이름과 역할을 설명한다. 불필요한 약어는 쓰지 않는다.
+- 표 제목, 행 이름, 그래프 축과 범례에도 독자가 이해할 설명 이름을 사용한다.
+  예: `L13R_e300` → **부담 비율 반영 · 학습 300회**.
+  `R`은 Relative(상대값)다. 무보조 토크 크기에 대한 부담 증가 비율을 비용에 반영한 실험이다.
+  `e300`은 이 실험의 학습 반복 300회 시점이다. 반복 1회의 데이터 양도 설명한다.
+- “독립 비악화 검증” 같은 압축된 표현 대신 실제 절차를 쓴다.
+  예: **학습을 멈춘 모델로 별도 시뮬레이션을 실행했다. 보조 전후의 토크와 걷기 동작을 비교했다.**
+  별도 실행인지, 학습에 쓰지 않은 데이터인지도 구분한다.
+- 각 결과에 비교 대상, 평가 조건, 단위, 값의 부호와 계산 방법을 설명한다.
+  변화량과 감소량의 부호가 반대이면 해당 표와 그래프에서 각각 설명한다.
+- “통과”에는 적용한 기준을 쓴다. 일부 조건 통과를 모든 조건의 개선으로 표현하지 않는다.
+- 측정 결과, 원인에 대한 해석, 아직 확인하지 못한 내용을 구분한다.
+- 원본 실험 이름, 경로, 해시는 재현용 부록에 보존한다. 설명 이름을 바꿔도 원본 결과는 바꾸지 않는다.
+- HTML 그림은 파일 안에 넣는다. 생성 뒤 긴 이름의 잘림, 숫자의 보존, 외부 이미지 의존성을 확인한다.
+
+이 원칙을 적용한 보고서: [`walking_finetune_report.html`](walking_finetune_report.html).
+
+HTML 보고서의 입구는 [reports.html](reports.html)이다. 최근 결과·비교 기준·원인 진단·과거 참고 자료를 구분한다.
+종료된 연구의 상세 보고서는 `docs/archive/reports/`에 두고 이전 주소에는 이동 안내를 남긴다.
+보고서를 다시 생성한 뒤 `python docs/organize_reports.py`를 실행하면 공통 탐색·결론·펼침 구성을 적용한다.
+표·SVG·이미지·원본 JSON·스크립트·선택/저장 버튼의 원문을 보존하는지 함께 검사한다.

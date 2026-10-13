@@ -27,6 +27,7 @@ Newton 배열에서 직접 읽는다.
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -53,6 +54,7 @@ def main():
     p.add_argument("--steps", type=int, default=1500, help="10 ms step 수 (1500 = 15 s)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default="docs/pendulum_v4_env_check.png")
+    p.add_argument("--diagnostics-json", default=None)
     args, rest = p.parse_known_args()
 
     spec = importlib.util.spec_from_file_location("exp", args.experiment)
@@ -134,6 +136,28 @@ def main():
     print(f"  |θ̈| RMS {rms(acc):.1f} rad/s², 최대 {np.abs(acc).max():.0f}   ← 스켈레톤: 48 / 408 (mocap 19 / 72)")
     print(f"  |θ_g − θ| 평균 {np.degrees(np.abs(g - q).mean()):.2f}°, p95 {np.degrees(np.percentile(np.abs(g - q), 95)):.1f}°  (v3 진자 2.9°)")
     print(f"  |τ·ω| 평균 {np.abs(tau * w).sum(-1).mean():.1f} W (v3 12 W),  τ² 평균 {(tau ** 2).sum(-1).mean():.0f} (N·m)²  → 보상 weight 크기 판단용")
+
+    if args.diagnostics_json:
+        # Read back applied simulator gains, not just the requested config.
+        floor = float(getattr(cfgs["env"], "human_stiffness_floor", 0.0))
+        heavy = I_eff >= 3.0
+        soft_heavy = heavy & (ke >= 150) & (ke <= 250) & (kd >= 15) & (kd <= 25)
+        diag = {"seed": args.seed, "num_envs": n, "steps": args.steps,
+                "omega_n_range": cfgs["env"].omega_n_range,
+                "stiffness_floor": floor,
+                "applied_kp_min": float(ke.min()), "applied_kp_max": float(ke.max()),
+                "applied_wn_min": float(wn.min()), "applied_wn_max": float(wn.max()),
+                "applied_zeta_min": float((kd/(2*torch.sqrt(ke*I_eff))).min()),
+                "applied_zeta_max": float((kd/(2*torch.sqrt(ke*I_eff))).max()),
+                "heavy_hip_count": int(heavy.sum()), "soft_heavy_hip_count": int(soft_heavy.sum()),
+                "resets": resets, "tracking_failures": term_err, "velocity_failures": term_vel,
+                "tracking_error_mean_deg": float(np.degrees(np.abs(g-q).mean())),
+                "wearer_rms_Nm": rms(tau)}
+        if floor and float(ke.min()) < floor-1e-4:
+            raise RuntimeError("Stiffness floor did not reach simulator gains")
+        target = Path(args.diagnostics_json)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(diag, indent=2, allow_nan=False)+"\n")
 
     # 그림: env 0의 6 s
     import matplotlib

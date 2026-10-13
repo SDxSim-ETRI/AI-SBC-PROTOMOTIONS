@@ -494,6 +494,8 @@ class AssistContext:
     tau_agent: Tensor = FieldPath()
     tau_assist: Tensor = FieldPath()
     gain_scale: Tensor = FieldPath()
+    # L12: independently simulated unassisted state, consumed by reward only.
+    reference_dof_pos: Tensor = FieldPath()
     # 보조 관절 부분집합 상태 (전신 로봇에서 LLP가 hip 2ch만 볼 때; 진자에서는 None)
     dof_pos: Tensor = FieldPath()
     dof_vel: Tensor = FieldPath()
@@ -513,6 +515,7 @@ class AssistContext:
         dof_vel: Optional[Tensor] = None,
         historical_dof_pos: Optional[Tensor] = None,
         historical_dof_vel: Optional[Tensor] = None,
+        reference_dof_pos: Optional[Tensor] = None,
     ):
         """Initialize AssistContext.
 
@@ -532,6 +535,7 @@ class AssistContext:
         self.tau_agent = tau_agent
         self.tau_assist = tau_assist
         self.gain_scale = gain_scale
+        self.reference_dof_pos = reference_dof_pos
         # 보조 관절 부분집합 (skeleton: hip flexion r/l). None이면 전 관절 = 보조 관절
         self.dof_pos = dof_pos
         self.dof_vel = dof_vel

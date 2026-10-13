@@ -39,6 +39,23 @@ A, B = 0, 1
 SIDES = ("R", "L")
 
 
+def assist_output_limit(meta):
+    """Torque bound after the runner's output scale, in the trace's N·m units."""
+    limit = float(meta["torque_limit"])
+    if meta.get("oracle") in ("beta", "phase"):
+        if meta.get("oracle_limit") is not None:
+            limit = float(meta["oracle_limit"])
+    else:
+        limit = min(limit, float(meta.get("policy_torque_limit", limit)))
+    return abs(float(meta.get("assist_scale", 1.0))) * limit
+
+
+def assist_saturation_pct(torque, meta):
+    """Fraction above 95% of the scaled bound; disabled assistance is not saturated."""
+    limit = assist_output_limit(meta)
+    return 100.0 * float(np.mean(np.abs(torque) > 0.95 * limit)) if limit > 0 else 0.0
+
+
 def _rms(x):
     return float(np.sqrt(np.mean(np.square(x)))) if x.size else float("nan")
 
@@ -113,9 +130,8 @@ def compute_metrics(tr, meta):
         "total_torque_conservation_rms_Nm": _rms(conservation),
         # 토크가 얼마나 거칠게 변하는가 (구동기·착용감 관점)
         "assist_slew_rms_Nm_s": float(_rms(np.diff(tau_assist_prev[:, B], axis=0)) / dt),
-        "assist_saturation_pct": float(
-            100.0 * np.mean(np.abs(tau_assist_prev[:, B]) > 0.95 * meta["torque_limit"])
-        ),
+        "assist_output_limit_Nm": assist_output_limit(meta),
+        "assist_saturation_pct": assist_saturation_pct(tau_assist_prev[:, B], meta),
         "assist_sign_flips_per_s": float(
             np.mean(np.sum(np.diff(np.sign(tau_assist_prev[:, B]), axis=0) != 0, axis=0))
             / max(dt * (len(idx) - 1), 1e-9)
