@@ -20,7 +20,7 @@ inference_agent.py의 구성 경로를 최소한으로 복제: resolved_configs_
 """
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 from lightning.fabric import Fabric
@@ -33,6 +33,7 @@ def build_env_agent(
     num_envs: int,
     headless: bool = True,
     overrides: Optional[Dict[str, object]] = None,
+    config_transform: Optional[Callable[[Dict[str, object]], None]] = None,
 ):
     """체크포인트에서 env + agent 재구성.
 
@@ -41,6 +42,8 @@ def build_env_agent(
         num_envs: 병렬 env 수.
         headless: False면 Newton viewer 창 표시.
         overrides: {"env.assist_torque_limit": 0.0} 형식의 config override.
+        config_transform: Optional in-memory transform after scalar overrides,
+            before constructing components. Use for typed evaluation configs.
 
     Returns:
         (env, agent)
@@ -78,6 +81,9 @@ def build_env_agent(
             motion_lib_config,
             scene_lib_config,
         )
+
+    if config_transform is not None:
+        config_transform(resolved)
 
     fabric = Fabric(
         accelerator="gpu", devices=1, num_nodes=1, loggers=[], callbacks=[]

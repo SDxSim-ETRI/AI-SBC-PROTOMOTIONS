@@ -79,6 +79,16 @@ class MotionAssistTargetControlConfig(AssistTargetControlConfig):
             커진다 (lead별 MAE 0.36°@25 ms → 3.11°@150 ms).
         maniflow_ckpt: HLP 체크포인트 (None이면 flexion40 run에서 자동 탐색).
         maniflow_denoise_steps: denoise 스텝 (권장 3).
+        intent_pools: env 단위 의도 집단 (2026-10-21). 비어 있으면 기존 동작.
+            항목 = (이름, env 비율, 소스 "synthetic"|"motion", 관성 배율 lo, hi,
+            ((동작 그룹, 시간 비율), ...)). env는 한 집단에 고정 배정되고, AssistEnv가
+            그 집단의 관성 배율 범위로 대퇴 관성을 뽑는다 (관성은 env 수명 동안 고정).
+        motion_groups: (그룹 이름, `content_type_of_movement` 정규식) — 처음 맞는 그룹.
+        motion_accel_frac: 실현 가능성 검사. 클립의 |θ̈| 99 백분위 × hip 관성이
+            frac × 착용자 토크 한계를 넘는 클립은 그 env에서 뽑지 않는다 (0 = 검사 안 함).
+            합성 궤적의 진폭 상한(`intent_accel_frac`)과 같은 원리다.
+        motion_accel_check_dofs: 검사할 관절 (비면 전 관절).
+        intent_pool_seed: 집단 배정 전용 seed.
     """
 
     _target_: str = (
@@ -100,6 +110,12 @@ class MotionAssistTargetControlConfig(AssistTargetControlConfig):
 
     maniflow_ckpt: Optional[str] = None
     maniflow_denoise_steps: int = 3
+
+    intent_pools: tuple = ()
+    motion_groups: tuple = ()
+    motion_accel_frac: float = 0.0
+    motion_accel_check_dofs: tuple = ()
+    intent_pool_seed: int = 0
 
 
 class MotionAssistTargetControl(AssistTargetControl):
@@ -138,17 +154,110 @@ class MotionAssistTargetControl(AssistTargetControl):
             config.hlp_dt = self._chunk_src.knot_dt
             config.chunk_knots = self._chunk_src.num_knots
 
+        # env 단위 의도 집단 (합성/동작 혼합). 부모 __init__의 reset 전에 배정한다.
+        self._pools = tuple(getattr(config, "intent_pools", ()) or ())
+        self._mixed = bool(self._pools)
+        self._motion_env: Optional[Tensor] = None
+        self.env_pool: Optional[Tensor] = None
+        self.env_inertia_range: Optional[Tensor] = None
+        self.pool_summary: list = []
+        if self._mixed:
+            self._setup_pools(config, env)
+
         super().__init__(config, env)
+
+    def _setup_pools(self, config: MotionAssistTargetControlConfig, env: "BaseEnv") -> None:
+        """env를 집단에 정확한 비율로 고정 배정하고, 동작 집단의 클립 확률을 정한다."""
+        import numpy as np
+
+        from protomotions.envs.control.motion_intent import group_clip_probabilities
+
+        n, dev = env.num_envs, env.device
+        fractions = [float(p[1]) for p in self._pools]
+        if any(f < 0 for f in fractions) or abs(sum(fractions) - 1.0) > 1e-6:
+            raise ValueError(f"intent_pools fractions must be nonnegative and sum to 1: {fractions}")
+        sources = [str(p[2]) for p in self._pools]
+        if any(src not in ("synthetic", "motion") for src in sources):
+            raise ValueError(f"intent_pools sources must be synthetic|motion: {sources}")
+        counts = [int(round(f * n)) for f in fractions]
+        counts[-1] = n - sum(counts[:-1])
+        gen = torch.Generator().manual_seed(int(getattr(config, "intent_pool_seed", 0)))
+        perm = torch.randperm(n, generator=gen)
+        pool = torch.empty(n, dtype=torch.long)
+        start = 0
+        for i, c in enumerate(counts):
+            pool[perm[start : start + c]] = i
+            start += c
+        self.env_pool = pool.to(dev)
+        is_motion = torch.tensor([src == "motion" for src in sources], dtype=torch.bool)
+        self._motion_env = is_motion.to(dev)[self.env_pool]
+        ranges = torch.tensor([[float(p[3]), float(p[4])] for p in self._pools], dtype=torch.float32)
+        if bool((ranges[:, 0] <= 0).any()) or bool((ranges[:, 1] < ranges[:, 0]).any()):
+            raise ValueError("intent_pools inertia ranges must satisfy 0 < lo <= hi")
+        self.env_inertia_range = ranges.to(dev)[self.env_pool]
+        self.pool_summary = [
+            dict(name=str(p[0]), fraction=float(p[1]), source=str(p[2]), envs=int(c),
+                 inertia_scale=[float(p[3]), float(p[4])], weights=[list(w) for w in p[5]])
+            for p, c in zip(self._pools, counts)
+        ]
+        if not bool(is_motion.any()):
+            return
+        if self._intent is None:
+            raise ValueError("motion intent pools require intent_source='motion_data'")
+        if self._chunk_src is not None:
+            raise ValueError("mixed intent pools support emulated chunks only")
+        table = self._intent.table
+        if table.clip_type is None:
+            raise ValueError("motion intent pools require motion_metadata_parquet")
+        lengths = table.clip_len.cpu().numpy()
+        rows = []
+        for summary, p in zip(self.pool_summary, self._pools):
+            if str(p[2]) == "motion":
+                probs, group_index = group_clip_probabilities(
+                    table.clip_type, lengths, config.motion_groups, p[5], self._intent.min_frames
+                )
+                names = [str(g[0]) for g in config.motion_groups]
+                summary["group_clips"] = {
+                    name: int((group_index == j).sum()) for j, name in enumerate(names)
+                }
+            else:
+                probs = np.full(table.num_clips, 1.0 / table.num_clips)
+            rows.append(probs)
+        self._intent.configure_sampling(torch.tensor(np.stack(rows)), self.env_pool)
+        logger.info("intent pools: %s", self.pool_summary)
+
+    def update_motion_feasibility(self, effort_limit: Tensor, inertia: Tensor) -> int:
+        """착용자 토크 한계·hip 관성이 정해진 뒤 클립 실현 가능성 상한을 건다.
+
+        Returns:
+            다시 뽑은 슬롯 수 (첫 step에서만 0이 아닐 수 있다).
+        """
+        frac = float(getattr(self.config, "motion_accel_frac", 0.0))
+        if self._intent is None or frac <= 0.0:
+            return 0
+        cap = frac * effort_limit / inertia
+        if self._motion_env is not None:
+            cap = torch.where(self._motion_env.unsqueeze(1), cap, torch.full_like(cap, float("inf")))
+        dofs = tuple(getattr(self.config, "motion_accel_check_dofs", ()) or ()) or tuple(range(self.n_dofs))
+        fixed = self._intent.set_accel_cap(cap, dofs)
+        if fixed:
+            all_ids = torch.arange(self.env.num_envs, device=self.env.device)
+            self._refresh_chunk(all_ids, self._episode_time())
+        return fixed
 
     # ------------------------------------------------------------------
     # 훅 1: 의도 궤적
     # ------------------------------------------------------------------
     def _target_at(self, t: Tensor, env_ids: Optional[Tensor] = None) -> Tensor:
-        """mocap 의도 궤적 (없으면 부모의 합성 sine)."""
+        """mocap 의도 궤적 (없으면 부모의 합성 sine, 집단 혼합이면 env별 선택)."""
         if self._intent is None:
             return super()._target_at(t, env_ids)
-        theta = self._intent.theta_at(t, env_ids)
-        return theta.clamp(self._target_low, self._target_high)
+        theta = self._intent.theta_at(t, env_ids).clamp(self._target_low, self._target_high)
+        if not self._mixed:
+            return theta
+        synthetic = super()._target_at(t, env_ids)
+        motion = self._motion_env if env_ids is None else self._motion_env[env_ids]
+        return torch.where(motion.view(-1, 1, 1), theta, synthetic)
 
     # ------------------------------------------------------------------
     # 훅 2: chunk 생성
@@ -193,6 +302,10 @@ class MotionAssistTargetControl(AssistTargetControl):
 
         if self._intent is not None:
             self._intent.reset(env_ids)
+        if self._mixed:
+            # 합성 세그먼트도 함께 초기화 (chunk는 env별로 고른 의도에서 뜬다)
+            super().reset(env_ids)
+            return
         # 실 HLP: 링 버퍼를 리셋 직후 상태로 채운다 (edge padding)
         if self._chunk_src is not None:
             dof_pos, trunk = self._hlp_observation(t0, env_ids)
@@ -220,6 +333,9 @@ class MotionAssistTargetControl(AssistTargetControl):
             return
 
         self._intent.step(t)
+        if self._mixed:
+            super().step()  # 합성 세그먼트 승격 + chunk 갱신
+            return
         refresh = (self.env.progress_buf % self.config.chunk_refresh_steps) == 0
         env_ids = refresh.nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
@@ -232,4 +348,5 @@ class MotionAssistTargetControl(AssistTargetControl):
         """mocap 클립 전환(crossfade) 중인 env — 평가 마스킹용 (관측 아님)."""
         if self._intent is None:
             return None
-        return self._intent.in_transition(self._episode_time())
+        moving = self._intent.in_transition(self._episode_time())
+        return moving if self._motion_env is None else moving & self._motion_env

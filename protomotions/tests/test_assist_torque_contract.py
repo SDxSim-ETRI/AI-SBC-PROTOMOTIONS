@@ -60,3 +60,52 @@ def test_independently_bounded_sources_do_not_share_wearer_limit():
     assert torch.equal(inj.set_torques(combined), torch.tensor([[150., -150.]]))
     assert torch.equal(inj.set_torques(combined, clamp_to_effort_limits=False), combined)
     assert torch.equal(writes[-1][:, 0], combined)
+
+
+def test_combined_human_actuator_limit_and_source_accounting():
+    from protomotions.envs.base_env.assist_env import AssistEnv
+
+    # Row 0 is unsaturated. Row 1 needs net braking even though FF alone is
+    # positive and large: separately saturating PD and FF would cancel it.
+    env = AssistEnv.__new__(AssistEnv)
+    env.config = SimpleNamespace(assist_torque_limit=20., clamp_combined_injection=False,
+        assist_component_name="assist", human_velocity_feedforward=True,
+        human_feedforward_inside_pd=True)
+    q = torch.tensor([[0.1, 0.1], [1., 1.]])
+    velocity = torch.zeros_like(q)
+    target = torch.zeros_like(q)
+    target_velocity = torch.tensor([[1., 1.], [20., 20.]])
+    env._human_kp = torch.full_like(q, 300.)
+    env._human_kd = torch.full_like(q, 10.)
+    env._effort_limit = torch.full_like(q, 150.)
+    env._human_ff_enabled = None
+    env._gain_scheduled = False
+    env._assist_limit = None
+    env._current_raw_action = torch.zeros_like(q)
+    env._current_processed_action = torch.zeros_like(q)
+    comp = SimpleNamespace(get_pd_targets_and_vel=lambda: (target, target_velocity),
+                           external_torque=lambda: torch.full_like(q, 180.),
+                           _tau_agent=torch.zeros_like(q), _tau_assist=torch.zeros_like(q))
+    env.control_manager = SimpleNamespace(components={"assist": comp})
+    env._lazy_init_assist = lambda: None
+    env._build_global_context = lambda: SimpleNamespace()
+    env._process_action = lambda action, context: {"processed_action": action*20}
+    writes, human = [], []
+    def inject(torque, clamp_to_effort_limits):
+        assert not clamp_to_effort_limits
+        writes.append(torque.clone())
+        return torque
+    def simulate(pd_target, markers_callback):
+        human.append((env._human_kp*(pd_target-q)-env._human_kd*velocity).clamp(-150,150))
+    env._torque_override = SimpleNamespace(set_torques=inject)
+    env.simulator = SimpleNamespace(step=simulate, user_requested_reset=False,
+        get_substep_mean_dof_forces=lambda: human[-1])
+    env.post_physics_step = lambda: None
+    env.get_obs = lambda: {}
+    env.rew_buf = torch.zeros(2)
+    env.reset_buf = env.terminate_buf = torch.zeros(2,dtype=torch.bool)
+    AssistEnv.step(env, torch.ones_like(q))
+    torch.testing.assert_close(comp._tau_agent, torch.tensor([[-20.,-20.],[-100.,-100.]]))
+    torch.testing.assert_close(writes[-1], torch.full_like(q, 200.))
+    torch.testing.assert_close(comp._tau_assist, torch.full_like(q, 20.))
+    assert env.extras["assist/injection_error_max_Nm"] == 0

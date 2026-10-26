@@ -496,6 +496,10 @@ class AssistContext:
     gain_scale: Tensor = FieldPath()
     # L12: independently simulated unassisted state, consumed by reward only.
     reference_dof_pos: Tensor = FieldPath()
+    # R1 (2026-10-20): unassisted twin wearer torque of the same step and its
+    # causal 50 ms mean square; reward-only, never an actor/critic input.
+    reference_tau_agent: Tensor = FieldPath()
+    reference_tau_sq_window: Tensor = FieldPath()
     # 보조 관절 부분집합 상태 (전신 로봇에서 LLP가 hip 2ch만 볼 때; 진자에서는 None)
     dof_pos: Tensor = FieldPath()
     dof_vel: Tensor = FieldPath()
@@ -516,6 +520,8 @@ class AssistContext:
         historical_dof_pos: Optional[Tensor] = None,
         historical_dof_vel: Optional[Tensor] = None,
         reference_dof_pos: Optional[Tensor] = None,
+        reference_tau_agent: Optional[Tensor] = None,
+        reference_tau_sq_window: Optional[Tensor] = None,
     ):
         """Initialize AssistContext.
 
@@ -536,6 +542,8 @@ class AssistContext:
         self.tau_assist = tau_assist
         self.gain_scale = gain_scale
         self.reference_dof_pos = reference_dof_pos
+        self.reference_tau_agent = reference_tau_agent
+        self.reference_tau_sq_window = reference_tau_sq_window
         # 보조 관절 부분집합 (skeleton: hip flexion r/l). None이면 전 관절 = 보조 관절
         self.dof_pos = dof_pos
         self.dof_vel = dof_vel

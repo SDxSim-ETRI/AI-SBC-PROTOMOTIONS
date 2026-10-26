@@ -36,6 +36,7 @@ Newton + BUILT_IN_PD 전용. control_components에 AssistTargetControl
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -71,6 +72,9 @@ class AssistEnvConfig(EnvConfig):
     # built-in PD(Kp(θ_g−θ) − Kd·θ̇) 위에 τ_ff = Kd·θ̇_g를 qfrc로 가산해 구현.
     # False면 순수 위치 PD (v1 동작).
     human_velocity_feedforward: bool = False
+    # Route FF through the built-in actuator so its effort limit applies to the
+    # complete human PD+FF torque. False preserves historical external-FF runs.
+    human_feedforward_inside_pd: bool = False
     # L11: fixed per-environment mixture of position-PD and velocity-FF wearers.
     # Zero preserves the old FF path without consuming an extra random draw.
     human_feedforward_disable_prob: float = 0.0
@@ -105,6 +109,12 @@ class AssistEnvConfig(EnvConfig):
     # 보조 토크 한계를 env마다 U[lo, hi]로 뽑아 clamp 한다 (정책은 관측 못 함 — 자기 토크의 효과를 히스토리로
     # 봐야 한다). (0, 0)이면 비활성 = assist_torque_limit 하나. 배포 때는 하드웨어 한계로 clamp (controller).
     assist_limit_range: tuple = (0.0, 0.0)
+    # R1 (2026-10-20): PairedAssistEnv only — causal window (policy steps) of the unassisted
+    # twin's squared wearer torque used as the scale of the relative burden cost.
+    paired_reference_window_steps: int = 5
+    # 2026-10-21 다리별 학습: 보조를 넣는 관절 (비면 전 관절). 나머지 관절의 보조는 0이다.
+    # 보상·종료의 관절 범위는 각 MdpComponent의 joint_mask로 따로 정한다.
+    assist_active_joints: tuple = ()
 
 
 class AssistEnv(BaseEnv):
@@ -162,7 +172,10 @@ class AssistEnv(BaseEnv):
         kd = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
         self._ke_base = ke[:, self._dof_sim_idx].clone()
         self._kd_base = kd[:, self._dof_sim_idx].clone()
+        self._human_kp = self._ke_base.clone()
         self._human_kd = self._kd_base.clone()
+        if self.config.human_feedforward_inside_pd and (self._human_kp <= 0).any():
+            raise ValueError("Human FF inside the PD actuator requires positive stiffness")
         probability = float(getattr(self.config, "human_feedforward_disable_prob", 0.0))
         if not 0.0 <= probability <= 1.0:
             raise ValueError("human_feedforward_disable_prob must be in [0, 1]")
@@ -187,6 +200,21 @@ class AssistEnv(BaseEnv):
                 self._ke_base, self._kd_base, self._effort_limit, self.hip_inertia_eff()
             )
 
+    def _active_joint_mask(self) -> Optional[Tensor]:
+        """(1, d) 0/1 보조 관절 마스크. 전 관절이면 None."""
+        joints = tuple(getattr(self.config, "assist_active_joints", ()) or ())
+        if not joints:
+            return None
+        mask = getattr(self, "_active_mask", None)
+        if mask is None:
+            n_dofs = self.robot_config.number_of_actions
+            if any(not 0 <= int(j) < n_dofs for j in joints):
+                raise ValueError(f"assist_active_joints {joints} outside 0..{n_dofs - 1}")
+            mask = torch.zeros(1, n_dofs, device=self.device)
+            mask[0, [int(j) for j in joints]] = 1.0
+            self._active_mask = mask
+        return mask
+
     def _randomize_inertia(self) -> Tensor:
         """대퇴 body 질량·관성을 env·dof별 배율로 바꾼다 (Newton body_* 속성, 1회).
 
@@ -194,10 +222,16 @@ class AssistEnv(BaseEnv):
         """
         cfg = self.config
         n_dofs = self.robot_config.number_of_actions
-        lo, hi = getattr(cfg, "inertia_scale_range", (1.0, 1.0))
-        scale = lo + (hi - lo) * torch.rand(self.num_envs, n_dofs, device=self.device)
-        if hi <= lo and abs(lo - 1.0) < 1e-9:
-            return torch.ones(self.num_envs, n_dofs, device=self.device)
+        per_env = getattr(self.assist_component, "env_inertia_range", None)
+        if per_env is not None:
+            # 의도 집단별 관성 범위 (MotionAssistTargetControl.intent_pools)
+            lo_t, hi_t = per_env[:, :1], per_env[:, 1:]
+            scale = lo_t + (hi_t - lo_t) * torch.rand(self.num_envs, n_dofs, device=self.device)
+        else:
+            lo, hi = getattr(cfg, "inertia_scale_range", (1.0, 1.0))
+            scale = lo + (hi - lo) * torch.rand(self.num_envs, n_dofs, device=self.device)
+            if hi <= lo and abs(lo - 1.0) < 1e-9:
+                return torch.ones(self.num_envs, n_dofs, device=self.device)
 
         import warp as wp
         from newton.solvers import SolverNotifyFlags
@@ -295,7 +329,8 @@ class AssistEnv(BaseEnv):
         s_kp, s_kd = self.assist_component.gain_schedule()
         ke_t = wp.to_torch(self._ke_wp).view(self.num_envs, -1)
         kd_t = wp.to_torch(self._kd_wp).view(self.num_envs, -1)
-        ke_t[:, self._dof_sim_idx] = self._ke_base * s_kp
+        self._human_kp = self._ke_base * s_kp
+        ke_t[:, self._dof_sim_idx] = self._human_kp
         kd_now = self._kd_base * s_kd
         kd_t[:, self._dof_sim_idx] = kd_now
         self._human_kd = kd_now
@@ -365,6 +400,10 @@ class AssistEnv(BaseEnv):
                 -self.config.assist_torque_limit,
                 self.config.assist_torque_limit,
             )
+        active = self._active_joint_mask()
+        if active is not None:
+            tau_assist = tau_assist * active
+            self.requested_assist_torque = self.requested_assist_torque * active
         self._current_processed_action[:] = tau_assist
 
         comp = self.assist_component
@@ -376,10 +415,19 @@ class AssistEnv(BaseEnv):
         if use_ffwd:
             pd_targets, target_vel = comp.get_pd_targets_and_vel()
             tau_ff = self._human_kd * target_vel  # 사람 몫의 피드포워드
-            if getattr(self, "_effort_limit", None) is not None:
-                tau_ff = torch.clamp(tau_ff, -self._effort_limit, self._effort_limit)
-            if self._human_ff_enabled is not None:
-                tau_ff = tau_ff * self._human_ff_enabled
+            if self.config.human_feedforward_inside_pd:
+                if self._human_ff_enabled is not None:
+                    tau_ff = tau_ff * self._human_ff_enabled
+                # kp*(q_goal + FF/kp - q) - kd*qdot is exactly PD+FF.
+                # The solver clips this single human actuator at each substep;
+                # external assistance and disturbances remain independent.
+                pd_targets = pd_targets + tau_ff / self._human_kp
+                tau_ff = None  # Already included in measured actuator force.
+            else:
+                if getattr(self, "_effort_limit", None) is not None:
+                    tau_ff = torch.clamp(tau_ff, -self._effort_limit, self._effort_limit)
+                if self._human_ff_enabled is not None:
+                    tau_ff = tau_ff * self._human_ff_enabled
         else:
             pd_targets = comp.get_pd_targets()
             tau_ff = None

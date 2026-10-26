@@ -70,6 +70,19 @@ python examples/experiments/assist_skeleton/run_system.py \
 HLP 계산 시간은 별도 기록한다. `--hlp-latency-ms 0`은 계산 지연을 물리 시간에 추가하지 않는 설정이다.
 `--oracle`과 `--mask-window`는 참조·착용자 토크를 사용하는 원인 진단용이다.
 
+`--swing-gate 0.20`은 배포 가능한 유각 브레이크 게이트다 (2026-10-14, `protomotions/assist/controller.py`).
+각 hip 관절각이 자기 중간값(지수이동평균)을 굴곡 방향으로 지나는 순간부터 같은 hip의 직전 교차 간격 × 0.20
+동안 신전 보조를 0으로 둔다 — 관절각 외 정보는 쓰지 않는다. 걷기에서 유각 중·후반(참조 위상 68–92 %)의
+다리 감속은 무릎 결합·중력이 내고 착용자 hip 토크는 ≈0인데, 진자에서 배운 L1은 감속을 보고 브레이크를 걸어
+착용자가 같은 크기로 맞서던 구간을 끊는다. W1 평가: 걷기 τ² −18.7 → −26.5 %, 달리기 −24.3 → −31.0 %
+(`docs/ai_sbc/walking_swing_gate.html`).
+
+```bash
+python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20                 # 걷기
+python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20 --motion-id 1   # 달리기
+python examples/experiments/assist_skeleton/report_swing_gate.py --out docs/ai_sbc/walking_swing_gate.html
+```
+
 ## 파일 역할
 
 | 파일 | 역할 |

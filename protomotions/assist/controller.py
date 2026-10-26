@@ -48,7 +48,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -90,7 +90,20 @@ class AssistControllerConfig:
             같은 필터를 쓴다.
         torque_slew_limit: 출력 변화율 한계 [N·m/s]. None이면 끔. 구동기의
             토크 상승률 한계를 그대로 모사한다 (저역통과 뒤에 적용).
+        swing_gate_fraction: 유각 브레이크 게이트. 각 hip의 관절각이 자기 중간값을
+            굴곡 방향으로 지나는 순간(≈ 유각 중반, 다리가 몸통을 지나는 때)부터
+            보행 주기의 이 비율만큼 신전(−) 보조를 0으로 둔다. 0이면 끔(기본).
+            근거: 걷기에서 유각 중·후반의 다리 감속은 무릎 결합·중력이 내고 착용자
+            hip 토크는 ≈0인데, 진자에서 배운 정책은 감속을 보고 브레이크를 건다
+            (2026-10-14 위상 분석). 주기는 같은 hip의 직전 두 교차 간격, 중간값은
+            관절각의 지수이동평균 — 관절각 외 정보는 쓰지 않는다.
+        swing_gate_mean_tau: 중간값 지수이동평균의 시정수 [s].
+        swing_gate_period_range: 교차 간격이 이 범위 [s] 안일 때만 주기로 인정.
         measure_timing: True면 HLP 예측·LLP 추론 시간을 기록 (CUDA sync 포함).
+        llp_left_checkpoint: 다리별로 따로 학습한 LLP(2026-10-21)를 쓸 때 왼쪽 모델.
+            주면 `llp_checkpoint`는 오른쪽 모델이고, 둘을 `LLPLegPair`로 묶는다.
+        llp_share_legs: 단일 관절로 학습한 `llp_checkpoint` 하나를 양쪽 다리에 같은 가중치로
+            적용한다 (`LLPSharedLeg`, 2026-10-21).
     """
 
     llp_checkpoint: str
@@ -104,7 +117,12 @@ class AssistControllerConfig:
     obs_horizon_ms: Optional[float] = None
     torque_lpf_hz: float = 0.0
     torque_slew_limit: Optional[float] = None
+    swing_gate_fraction: float = 0.0
+    swing_gate_mean_tau: float = 1.5
+    swing_gate_period_range: Tuple[float, float] = (0.5, 2.0)
     measure_timing: bool = False
+    llp_left_checkpoint: Optional[str] = None
+    llp_share_legs: bool = False
 
 
 class AssistController:
@@ -121,7 +139,17 @@ class AssistController:
         self.device = torch.device(device)
 
         # --- LLP ---
-        self.llp = LLPPolicy(config.llp_checkpoint, self.device)
+        if config.llp_share_legs:
+            from protomotions.assist.llp_pair import LLPSharedLeg
+
+            assert not config.llp_left_checkpoint, "weight sharing uses one checkpoint"
+            self.llp = LLPSharedLeg(config.llp_checkpoint, self.device)
+        elif config.llp_left_checkpoint:
+            from protomotions.assist.llp_pair import LLPLegPair
+
+            self.llp = LLPLegPair(config.llp_checkpoint, config.llp_left_checkpoint, self.device)
+        else:
+            self.llp = LLPPolicy(config.llp_checkpoint, self.device)
         lay: LLPObsLayout = self.llp.layout
         self.layout = lay
         self.dt = float(config.dt) if config.dt is not None else lay.dt
@@ -220,6 +248,15 @@ class AssistController:
                     "LLP 미래 창을 %.0f ms까지만 사용 (표본 %d/%d 이후 고정)",
                     float(config.obs_horizon_ms), self._horizon_idx + 1, lay.obs_future_samples,
                 )
+
+        # 유각 브레이크 게이트 상태 (데이터 flexion 규약, +굴곡). 갱신은 observe()에서.
+        self._gate_fraction = float(config.swing_gate_fraction or 0.0)
+        self._gate_alpha = self.dt / max(float(config.swing_gate_mean_tau), self.dt)
+        self._gate_mean = torch.zeros(n, d, device=self.device)
+        self._gate_above = torch.zeros(n, d, dtype=torch.bool, device=self.device)
+        self._gate_t_cross = torch.full((n, d), -float("inf"), device=self.device)
+        self._gate_period = torch.full((n, d), float("nan"), device=self.device)
+        self._gate_active = torch.zeros(n, d, dtype=torch.bool, device=self.device)
 
         # 검증용: True면 내부 HLP 갱신을 건너뛰고 set_chunk()로 받은 chunk를 쓴다
         self.external_chunk = False
@@ -347,6 +384,13 @@ class AssistController:
         self._pending_tau[ids] = 0.0
         self._pending_due[ids] = -1
         self._k[ids] = 0
+        if self._gate_fraction > 0.0:
+            q_flex = hip_pos.to(device=self.device, dtype=torch.float32) * float(self.config.joint_sign)
+            self._gate_mean[ids] = q_flex
+            self._gate_above[ids] = False
+            self._gate_t_cross[ids] = -float("inf")
+            self._gate_period[ids] = float("nan")
+            self._gate_active[ids] = False
         self.hlp.reset(ids, q, self._trunk(trunk, ids.numel(), self.device))
         if not self.external_chunk:
             lat, self._latency_steps = self._latency_steps, 0  # 첫 chunk는 즉시 (에피소드 시작)
@@ -366,6 +410,8 @@ class AssistController:
         self._a = self._a.roll(shifts=1, dims=1)
         self._a[:, 0] = self._pending_raw
         self._tau_prev = self._pending_tau
+        if self._gate_fraction > 0.0:
+            self._update_swing_gate(hip_pos)
         self.hlp.observe(q, self._trunk(trunk, self.num_envs, self.device))
         if not self.external_chunk:
             self._deliver_due_chunks()
@@ -433,7 +479,36 @@ class AssistController:
         self.chunk_age = t - self._chunk_t0
         self.last_raw_action = raw
         self.last_tau_llp = tau_llp
-        return self._to_joint(tau_llp)
+        tau_joint = self._to_joint(tau_llp)
+        if self._gate_fraction > 0.0:
+            # 게이트 창 안에서는 신전(데이터 규약 −) 보조만 0으로. 굴곡 보조는 그대로.
+            extension = tau_joint * float(self.config.joint_sign) < 0.0
+            tau_joint = torch.where(self._gate_active & extension, torch.zeros_like(tau_joint), tau_joint)
+        return tau_joint
+
+    def _update_swing_gate(self, hip_pos: Tensor) -> None:
+        """관절각만으로 유각 브레이크 창을 갱신 (observe마다 한 번).
+
+        굴곡 방향 중간값 교차 = 창 시작, 같은 hip의 직전 교차 간격 = 주기.
+        """
+        q_flex = hip_pos.to(device=self.device, dtype=torch.float32) * float(self.config.joint_sign)
+        t = (self._k.float() * self.dt).unsqueeze(1)  # (N, 1)
+        above = q_flex > self._gate_mean
+        cross = above & ~self._gate_above
+        lo, hi = self.config.swing_gate_period_range
+        interval = t - self._gate_t_cross
+        period_ok = (interval >= lo) & (interval <= hi)
+        self._gate_period = torch.where(cross & period_ok, interval, self._gate_period)
+        self._gate_t_cross = torch.where(cross, t.expand_as(cross), self._gate_t_cross)
+        self._gate_above = above
+        self._gate_mean = self._gate_mean + self._gate_alpha * (q_flex - self._gate_mean)
+        valid = torch.isfinite(self._gate_period)
+        self._gate_active = valid & ((t - self._gate_t_cross) < self._gate_fraction * self._gate_period)
+
+    @property
+    def swing_gate_active(self) -> Tensor:
+        """마지막 observe 기준 게이트 창 (N, 2) bool."""
+        return self._gate_active
 
     def set_hlp_calibration(self, offset: Sequence[float]) -> None:
         """HLP 관측 4ch 영점 오프셋 [rad]을 바꾼다 (실기기 착용 직후 영점조정에 대응).

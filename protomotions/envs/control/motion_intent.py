@@ -63,13 +63,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 모델·데이터 공통 프레임 레이트 (2026-08-13 통일, 프레임워크 문서 §8)
+# 모델·데이터 공통 프레임 레이트 (2026-08-13 통일, 프레임워크 문서 §8).
+# zarr에 `fps` 속성이 있으면 그 값을 쓴다 (100 fps 데이터 = H1 학습 데이터, 2026-10-21).
 MOTION_FPS = 40.0
 # 클립 전환 crossfade 길이 [s]
 MOTION_BLEND_S = 0.5
-# 클립에서 실제로 쓸 최소 프레임 수 (= 1.5 s). 전환 예약이 항상 조회 지평선
-# (chunk span + 관측 창 ≈ 0.55 s)보다 앞서도록 보장한다.
+# 클립에서 실제로 쓸 최소 길이 (1.5 s; 40 fps에서 60프레임). 전환 예약이 항상 조회
+# 지평선(chunk span + 관측 창 ≈ 0.55 s)보다 앞서도록 보장한다.
 MOTION_MIN_CLIP_FRAMES = 60
+MOTION_MIN_CLIP_S = MOTION_MIN_CLIP_FRAMES / MOTION_FPS
+# 클립별 각가속도 대표값: 5프레임 이동평균 뒤 2차 차분 |θ̈|의 99 백분위 [rad/s²]
+MOTION_ACCEL_SMOOTH_FRAMES = 5
+MOTION_ACCEL_PERCENTILE = 99.0
 
 _STATE_KEY = "data/state"
 _EPISODE_ENDS_KEY = "meta/episode_ends"
@@ -154,12 +159,19 @@ class MotionClipTable:
         clip_start: (C,) int64 — 각 클립의 첫 프레임 인덱스.
         clip_len: (C,) int64 — 각 클립의 프레임 수.
         names: 클립 이름 (진단용).
+        fps: 프레임 레이트 (zarr `fps` 속성, 없으면 `MOTION_FPS`).
+        clip_type: 클립별 `content_type_of_movement` (metadata를 줬을 때만).
+        clip_accel99: (C, 2) 고관절 2ch의 |θ̈| 99 백분위 [rad/s²]
+            (`with_accel99=True`일 때만). 실현 가능성 검사용.
     """
 
     frames: Tensor
     clip_start: Tensor
     clip_len: Tensor
     names: List[str]
+    fps: float = MOTION_FPS
+    clip_type: Optional[List[str]] = None
+    clip_accel99: Optional[Tensor] = None
 
     @property
     def num_clips(self) -> int:
@@ -168,11 +180,14 @@ class MotionClipTable:
 
 def _load_clip_metadata(
     z, metadata_parquet: str, type_filter: Optional[str], n_clips: int
-) -> np.ndarray:
+) -> Tuple[np.ndarray, List[str]]:
     """metadata parquet의 `content_type_of_movement`로 클립 마스크 생성.
 
     `motion_names`(basename, 보통 `.motion` 확장자 포함)를 parquet의
     `filename` 열과 1:1 조인한다. 매칭 실패분은 제외하고 개수를 로깅한다.
+
+    Returns:
+        (mask, kinds) — kinds는 클립별 동작 종류 (미매칭은 "").
     """
     import pandas as pd
 
@@ -196,12 +211,14 @@ def _load_clip_metadata(
         wanted = {s.strip() for s in type_filter.split(",") if s.strip()}
 
     mask = np.zeros(n_clips, dtype=bool)
+    kinds = [""] * n_clips
     unmatched = 0
     for i, stem in enumerate(stems):
         kind = lookup.get(stem)
         if kind is None:
             unmatched += 1
             continue
+        kinds[i] = str(kind)
         mask[i] = True if wanted is None else (str(kind) in wanted)
     if unmatched:
         logger.warning(
@@ -210,7 +227,28 @@ def _load_clip_metadata(
             n_clips,
             os.path.basename(metadata_parquet),
         )
-    return mask
+    return mask, kinds
+
+
+def clip_accel_percentile(
+    x: np.ndarray,
+    fps: float,
+    smooth_frames: int = MOTION_ACCEL_SMOOTH_FRAMES,
+    percentile: float = MOTION_ACCEL_PERCENTILE,
+) -> np.ndarray:
+    """한 클립의 채널별 |θ̈| 백분위 [rad/s²]. x (T, k) → (k,).
+
+    mocap 차분 잡음이 최댓값을 지배하지 않도록 이동평균 뒤 2차 차분의 백분위를 쓴다.
+    """
+    if x.shape[0] < smooth_frames + 2:
+        return np.zeros(x.shape[1], dtype=np.float32)
+    kernel = np.ones(smooth_frames, dtype=np.float64) / smooth_frames
+    smooth = np.stack(
+        [np.convolve(x[:, j].astype(np.float64), kernel, mode="valid") for j in range(x.shape[1])],
+        axis=1,
+    )
+    accel = np.abs(np.diff(smooth, n=2, axis=0)) * fps * fps
+    return np.percentile(accel, percentile, axis=0).astype(np.float32)
 
 
 def load_motion_clips(
@@ -223,13 +261,14 @@ def load_motion_clips(
     flexion_sign: float = -1.0,
     target_low: Optional[Tensor] = None,
     target_high: Optional[Tensor] = None,
-    min_frames: int = MOTION_MIN_CLIP_FRAMES,
+    min_frames: Optional[int] = None,
+    with_accel99: bool = False,
     device: torch.device = torch.device("cpu"),
 ) -> MotionClipTable:
     """zarr에서 클립을 필터링해 `MotionClipTable`로 올린다.
 
     필터 순서: split(HLP 학습/미학습) → metadata(동작 종류) → 길이
-    (`min_frames`) → 관절 범위(로봇 한계를 넘는 클립 제외).
+    (`min_frames`, 기본 1.5 s 분량) → 관절 범위(로봇 한계를 넘는 클립 제외).
 
     Args:
         split: "all" | "train" | "val" — HLP의 validation 분할 기준
@@ -242,6 +281,9 @@ def load_motion_clips(
             왜곡하지 않기 위함).
     """
     z = _open_zarr(zarr_path)
+    fps = float(z.attrs.get("fps", MOTION_FPS))
+    if min_frames is None:
+        min_frames = int(round(MOTION_MIN_CLIP_S * fps))
     ends = np.asarray(z[_EPISODE_ENDS_KEY][:], dtype=np.int64)
     n_clips = int(ends.shape[0])
     starts = np.concatenate([[0], ends[:-1]]).astype(np.int64)
@@ -255,8 +297,10 @@ def load_motion_clips(
         keep &= val_mask if split == "val" else ~val_mask
     n_after_split = int(keep.sum())
 
+    kinds_all = None
     if metadata_parquet:
-        keep &= _load_clip_metadata(z, metadata_parquet, type_filter, n_clips)
+        meta_mask, kinds_all = _load_clip_metadata(z, metadata_parquet, type_filter, n_clips)
+        keep &= meta_mask
     elif type_filter:
         raise ValueError("type_filter를 쓰려면 metadata_parquet도 지정해야 한다")
     n_after_meta = int(keep.sum())
@@ -296,6 +340,12 @@ def load_motion_clips(
     names_all = list(z.attrs.get("motion_names", []))
     names = [str(names_all[i]) if i < len(names_all) else f"clip{i}" for i in kept]
 
+    accel99 = None
+    if with_accel99:
+        accel99 = torch.from_numpy(np.stack(
+            [clip_accel_percentile(state[starts[i] : ends[i], :2], fps) for i in kept]
+        )).to(device=device)
+
     frames = torch.from_numpy(frames_np).to(device=device, dtype=torch.float32)
     logger.info(
         "MotionIntentSource: %s split=%s → clips %d→%d (split %d, meta %d, len %d, "
@@ -309,7 +359,7 @@ def load_motion_clips(
         n_after_len,
         n_after_range,
         frames.shape[0],
-        frames.shape[0] / MOTION_FPS,
+        frames.shape[0] / fps,
         frames.numel() * 4 / 1e6,
     )
     return MotionClipTable(
@@ -317,7 +367,53 @@ def load_motion_clips(
         clip_start=torch.from_numpy(new_starts).to(device=device),
         clip_len=torch.from_numpy(kept_lengths).to(device=device),
         names=names,
+        fps=fps,
+        clip_type=None if kinds_all is None else [kinds_all[i] for i in kept],
+        clip_accel99=accel99,
     )
+
+
+def group_clip_probabilities(
+    clip_type: Sequence[str],
+    clip_len: np.ndarray,
+    groups: Sequence[Tuple[str, str]],
+    weights: Sequence[Tuple[str, float]],
+    min_frames: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """동작 그룹 가중치를 **시간 비율**로 맞추는 클립 확률.
+
+    그룹은 (이름, 정규식) 순서대로 `content_type_of_movement`에 처음 맞는 것이다.
+    클립 c를 뽑으면 평균 (len_c + min_frames)/2 프레임 동안 쓰이므로(시작 위치 균등),
+    p_c = w_g / Σ_{c'∈g} r_{c'} 로 두면 그룹 g가 차지하는 시간 비율이 w_g가 된다.
+
+    Returns:
+        (probs (C,), group_index (C,)) — 그룹에 속하지 않으면 −1.
+    """
+    import re
+
+    patterns = [(str(name), re.compile(str(rx))) for name, rx in groups]
+    names = [name for name, _ in patterns]
+    group_index = np.full(len(clip_type), -1, dtype=np.int64)
+    for i, kind in enumerate(clip_type):
+        for j, (_, rx) in enumerate(patterns):
+            if rx.search(str(kind)):
+                group_index[i] = j
+                break
+    remaining = (np.asarray(clip_len, dtype=np.float64) + float(min_frames)) / 2.0
+    probs = np.zeros(len(clip_type), dtype=np.float64)
+    for name, w in weights:
+        if name not in names:
+            raise ValueError(f"unknown motion group {name!r}; known {names}")
+        if float(w) <= 0.0:
+            continue
+        member = group_index == names.index(name)
+        if not member.any():
+            raise ValueError(f"motion group {name!r} has no clips")
+        probs[member] = float(w) / remaining[member].sum()
+    total = probs.sum()
+    if total <= 0.0:
+        raise ValueError("motion group weights select no clips")
+    return probs / total, group_index
 
 
 def _smoothstep(x: Tensor) -> Tensor:
@@ -342,21 +438,31 @@ class MotionIntentSource:
         device: torch.device,
         default_dof_pos: Tensor,
         *,
-        fps: float = MOTION_FPS,
+        fps: Optional[float] = None,
         flexion_sign: float = -1.0,
         start_blend: float = 0.6,
         blend_s: float = MOTION_BLEND_S,
-        min_frames: int = MOTION_MIN_CLIP_FRAMES,
+        min_frames: Optional[int] = None,
         seed: int = 0,
     ):
         self.table = table
         self.num_envs = num_envs
         self.device = torch.device(device)
-        self.fps = float(fps)
+        self.fps = float(table.fps if fps is None else fps)
         self.flexion_sign = float(flexion_sign)
         self.start_blend = float(start_blend)
         self.blend_s = float(blend_s)
-        self.min_frames = int(min_frames)
+        self.min_frames = int(
+            round(MOTION_MIN_CLIP_S * self.fps) if min_frames is None else min_frames
+        )
+        # 집단별 가중 샘플링·실현 가능성 (configure_sampling / set_accel_cap). 없으면 균등.
+        self._pool_probs: Optional[Tensor] = None
+        self._env_pool: Optional[Tensor] = None
+        self._fallback_clip: Optional[Tensor] = None
+        self._accel_cap: Optional[Tensor] = None
+        self._cap_channels: List[int] = [0, 1]
+        self.max_tries = 16
+        self.fallback_count = 0
 
         n = num_envs
         dev = self.device
@@ -411,6 +517,7 @@ class MotionIntentSource:
             flexion_sign=config.flexion_sign,
             target_low=low,
             target_high=high,
+            with_accel99=float(getattr(config, "motion_accel_frac", 0.0)) > 0.0,
             device=env.device,
         )
         return cls(
@@ -440,7 +547,10 @@ class MotionIntentSource:
         if m == 0:
             return
         c = self.table.num_clips
-        clip = torch.randint(0, c, (m,), generator=self._gen, device=self.device)
+        if self._pool_probs is None:
+            clip = torch.randint(0, c, (m,), generator=self._gen, device=self.device)
+        else:
+            clip = self._sample_pool_clips(env_ids)
         start = self.table.clip_start[clip]
         length = self.table.clip_len[clip]
         span = (length - self.min_frames).clamp(min=0)
@@ -453,6 +563,91 @@ class MotionIntentSource:
         self._frame_hi[slot, env_ids] = start + length - 1
         self._t0[slot, env_ids] = t0
         self._hold[slot, env_ids] = False
+
+    # ------------------------------------------------------------------
+    # 집단별 가중 샘플링 + 실현 가능성 (2026-10-21)
+    # ------------------------------------------------------------------
+    def configure_sampling(self, pool_probs: Tensor, env_pool: Tensor) -> None:
+        """env 집단별 클립 확률을 정한다 (이후 배정부터 적용).
+
+        Args:
+            pool_probs: (P, C) 집단별 클립 확률, 각 행의 합 1.
+            env_pool: (n,) env별 집단 번호 0..P−1.
+        """
+        probs = pool_probs.to(device=self.device, dtype=torch.float32)
+        if probs.shape[1] != self.table.num_clips:
+            raise ValueError(f"pool_probs columns {probs.shape[1]} != clips {self.table.num_clips}")
+        if not torch.allclose(probs.sum(dim=1), torch.ones(probs.shape[0], device=self.device)):
+            raise ValueError("each pool_probs row must sum to 1")
+        pools = env_pool.to(device=self.device, dtype=torch.long)
+        if pools.shape != (self.num_envs,) or int(pools.min()) < 0 or int(pools.max()) >= probs.shape[0]:
+            raise ValueError("env_pool must assign every env to a valid pool")
+        self._pool_probs = probs
+        self._env_pool = pools
+        # 모든 시도가 실현 불가능할 때 쓰는 대체: 집단 안에서 가장 느린 클립
+        if self.table.clip_accel99 is not None:
+            need = self.table.clip_accel99.max(dim=1).values
+            masked = torch.where(probs > 0, need.unsqueeze(0), torch.full_like(probs, float("inf")))
+            self._fallback_clip = masked.argmin(dim=1)
+        else:
+            self._fallback_clip = probs.argmax(dim=1)
+
+    def set_accel_cap(self, cap: Tensor, channels: Sequence[int] = (0, 1)) -> int:
+        """env별 허용 |θ̈| [rad/s²] (n, 2)를 정하고, 이미 배정된 클립 중 불가능한 것을 다시 뽑는다.
+
+        에피소드 시작 직후(관성·게인이 정해지는 첫 step)에만 부른다 — 슬롯 0은 그때 기본 자세
+        hold라 다시 뽑아도 궤적이 끊기지 않는다.
+
+        Returns:
+            다시 뽑은 슬롯 수.
+        """
+        if self.table.clip_accel99 is None:
+            raise ValueError("set_accel_cap requires a table loaded with with_accel99=True")
+        self._accel_cap = cap.to(device=self.device, dtype=torch.float32)
+        self._cap_channels = [int(c) for c in channels]
+        all_ids = torch.arange(self.num_envs, device=self.device)
+        fixed = 0
+        for slot in (0, 1):
+            bad = (~self._hold[slot]) & ~self._feasible(self._clip[slot], all_ids)
+            ids = bad.nonzero(as_tuple=False).flatten()
+            if ids.numel():
+                self._assign_clip(slot, ids, self._t0[slot, ids].clone())
+                fixed += int(ids.numel())
+        return fixed
+
+    def _feasible(self, clip: Tensor, env_ids: Tensor) -> Tensor:
+        """클립의 |θ̈| 99 %가 env 허용치 이하인지 (검사 채널 전부)."""
+        if self._accel_cap is None or self.table.clip_accel99 is None:
+            return torch.ones(clip.shape[0], dtype=torch.bool, device=self.device)
+        ch = self._cap_channels
+        need = self.table.clip_accel99[clip][:, ch]
+        cap = self._accel_cap[env_ids][:, ch]
+        return (need <= cap).all(dim=1)
+
+    def _sample_pool_clips(self, env_ids: Tensor) -> Tensor:
+        """집단 확률로 뽑고, 실현 불가능한 것은 최대 `max_tries`번 다시 뽑는다.
+
+        거절 표본추출이므로 결과는 "그 env에서 가능한 클립만으로 다시 정규화한 집단 확률"과 같다.
+        """
+        m = int(env_ids.numel())
+        pools = self._env_pool[env_ids]
+        clip = torch.zeros(m, dtype=torch.long, device=self.device)
+        todo = torch.ones(m, dtype=torch.bool, device=self.device)
+        for _ in range(self.max_tries):
+            for p in range(self._pool_probs.shape[0]):
+                sel = todo & (pools == p)
+                k = int(sel.sum())
+                if k:
+                    clip[sel] = torch.multinomial(
+                        self._pool_probs[p], k, replacement=True, generator=self._gen
+                    )
+            todo = todo & ~self._feasible(clip, env_ids)
+            if not bool(todo.any()):
+                break
+        if bool(todo.any()):
+            clip[todo] = self._fallback_clip[pools[todo]]
+            self.fallback_count += int(todo.sum())
+        return clip
 
     def _slot_end_time(self, slot: int, env_ids: Optional[Tensor] = None) -> Tensor:
         """슬롯 클립이 소진되는 에피소드 시각 [s]."""

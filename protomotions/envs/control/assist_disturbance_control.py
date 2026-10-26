@@ -152,6 +152,8 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         all_ids = torch.arange(self.env.num_envs, device=self.env.device)
         for slot in (0, 1):
             self._clamp_intent_amplitude(slot, all_ids)
+        # 동작 데이터 의도도 같은 원리로: 이 다리가 따라갈 수 없는 클립은 뽑지 않는다
+        self.update_motion_feasibility(self._effort_limit, self._inertia)
 
     def _clamp_intent_amplitude(self, slot: int, env_ids: Tensor) -> None:
         """a·(2πf)² + a₂·(4πf)² ≤ intent_accel_frac × effort / I 가 되게 a, a₂를 비례 축소."""

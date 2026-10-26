@@ -21,14 +21,27 @@ E = ∫|τ_agent·θ̇| dt 를 최소화하는 방향으로 학습하되, 목표
 차단).
 """
 
+from typing import Optional, Sequence
+
 import torch
 from torch import Tensor
+
+
+def _joint_weights(like: Tensor, joint_mask: Sequence[float]) -> Optional[Tensor]:
+    """관절 마스크 (num_dofs,) 텐서. 비어 있으면 None (전 관절)."""
+    if not joint_mask:
+        return None
+    w = torch.as_tensor(tuple(joint_mask), dtype=like.dtype, device=like.device)
+    if w.numel() != like.shape[-1]:
+        raise ValueError(f"joint_mask has {w.numel()} entries for {like.shape[-1]} joints")
+    return w
 
 
 def compute_human_power_rew(
     tau_agent: Tensor,
     dof_vel: Tensor,
     use_torque_squared: bool = False,
+    joint_mask: Sequence[float] = (),
 ) -> Tensor:
     """사람 기계적 파워 |τ_agent·θ̇| (음수 weight로 사용).
 
@@ -36,13 +49,14 @@ def compute_human_power_rew(
         tau_agent: 사람 PD 토크 계측 [num_envs, num_dofs].
         dof_vel: 관절 각속도 [num_envs, num_dofs].
         use_torque_squared: True면 τ² (근활성 프록시)로 대체.
+        joint_mask: 관절별 0/1 (비면 전 관절). 다리별 학습에서 담당 관절만 센다.
 
     Returns:
         [num_envs] 파워 합 (항상 >= 0).
     """
-    if use_torque_squared:
-        return (tau_agent * tau_agent).sum(dim=-1)
-    return (tau_agent * dof_vel).abs().sum(dim=-1)
+    value = tau_agent * tau_agent if use_torque_squared else (tau_agent * dof_vel).abs()
+    w = _joint_weights(value, joint_mask)
+    return value.sum(dim=-1) if w is None else (value * w).sum(dim=-1)
 
 
 def compute_assist_opposition_cost(tau_agent: Tensor, tau_assist: Tensor) -> Tensor:
@@ -80,6 +94,7 @@ def compute_target_tracking_rew(
     dof_pos: Tensor,
     theta_g: Tensor,
     tracking_coef: float = 40.0,
+    joint_mask: Sequence[float] = (),
 ) -> Tensor:
     """의도 궤적 추종 보상 exp(-k * mean(err²)).
 
@@ -87,24 +102,30 @@ def compute_target_tracking_rew(
         dof_pos: 현재 관절 각 [num_envs, num_dofs].
         theta_g: 의도 궤적 목표 [num_envs, num_dofs].
         tracking_coef: 오차 감쇠 계수 k.
+        joint_mask: 관절별 0/1 (비면 전 관절) — 평균을 담당 관절에서만 낸다.
 
     Returns:
         [num_envs] (0, 1] 보상.
     """
-    err2 = (dof_pos - theta_g).square().mean(dim=-1)
+    sq = (dof_pos - theta_g).square()
+    w = _joint_weights(sq, joint_mask)
+    err2 = sq.mean(dim=-1) if w is None else (sq * w).sum(dim=-1) / w.sum()
     return torch.exp(-tracking_coef * err2)
 
 
-def compute_assist_effort_rew(tau_assist: Tensor) -> Tensor:
+def compute_assist_effort_rew(tau_assist: Tensor, joint_mask: Sequence[float] = ()) -> Tensor:
     """assist 토크 사용량 Στ² (음수 weight로 사용 — 배터리/현실성 정칙화).
 
     Args:
         tau_assist: 인가된 assist 토크 [num_envs, num_dofs].
+        joint_mask: 관절별 0/1 (비면 전 관절).
 
     Returns:
         [num_envs] 토크 제곱 합.
     """
-    return (tau_assist * tau_assist).sum(dim=-1)
+    sq = tau_assist * tau_assist
+    w = _joint_weights(sq, joint_mask)
+    return sq.sum(dim=-1) if w is None else (sq * w).sum(dim=-1)
 
 
 def compute_paired_tracking_rew(
