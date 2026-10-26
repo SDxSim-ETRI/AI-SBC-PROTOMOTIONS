@@ -29,7 +29,7 @@ trunk_roll]`(rad)로 학습됐다. suit 데이터 경로에서
 영점 보정: SEED와 ETRI suit 규약은 채널별 상수만큼 다르다(프레임워크 문서
 §3.1). 온라인에서는 재생 중인 클립의 채널 평균을 SEED 학습 데이터 평균에
 맞추는 오프셋(`calibration_offset_from_motion`)을 HLP 관측에 가산한다 —
-Phase C 평가(eval_abc `--align-ref-zarr`)와 같은 정렬 방식.
+Phase C 평가(`runtime.py abc --align-ref-zarr`)와 같은 정렬 방식.
 """
 
 from typing import Optional, Sequence, Tuple
@@ -126,7 +126,7 @@ def motion_channel_mean(
         fixed_root: True면 pelvis 자세를 identity로 둔다 (골반 고정 대역은 루트가
             직립 고정이라 trunk pitch에 mocap 골반 기울기가 들어오지 않는다).
         motion_index: 특정 클립만 쓸 때의 인덱스. None이면 파일의 전 클립 평균
-            (여러 모션으로 학습·평가할 때 — eval_abc의 데이터셋 평균 정렬과 같은 뜻).
+            (여러 모션으로 학습·평가할 때 — `runtime.py abc`의 데이터셋 평균 정렬과 같은 뜻).
     """
     m = torch.load(motion_file, map_location="cpu", weights_only=False)
     dps, grs = m["dps"].float(), m["grs"].float()

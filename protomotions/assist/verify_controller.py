@@ -53,7 +53,7 @@ import torch  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "examples" / "experiments" / "assist_pendulum"))
-from runtime_utils import build_env_agent  # noqa: E402
+from runtime import build_env_agent  # noqa: E402
 
 from protomotions.assist.controller import AssistController, AssistControllerConfig  # noqa: E402
 

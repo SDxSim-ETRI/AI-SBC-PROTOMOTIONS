@@ -15,7 +15,7 @@
 #
 """LLP 재학습 — 보행 착용자(동결 mimic tracker) 위의 스켈레톤 hip assist (Newton).
 
-진자 v3(`assist_pendulum/mlp_v3.py`)와 관측 계약·보상 구조를 유지하고 플랜트와
+진자 v3(`assist_pendulum/mlp.py`의 `_env_hlp_chunk_format` 단계)와 관측 계약·보상 구조를 유지하고 플랜트와
 착용자만 바꾼다:
 
 | 항목 | 진자 v3 | 이 실험 |
