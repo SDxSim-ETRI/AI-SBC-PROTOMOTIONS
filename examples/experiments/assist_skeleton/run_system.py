@@ -110,8 +110,6 @@ def parse_args(argv=None):
     p.add_argument("--motion-id", type=int, default=0)
     p.add_argument("--start-time", type=float, default=0.0, help="클립 시작 시각 [s]")
     p.add_argument("--llp-checkpoint", default=DEFAULT_LLP_CHECKPOINT)
-    p.add_argument("--llp-left-checkpoint", default=None,
-                   help="다리별 LLP(2026-10-21): 왼쪽 모델. 주면 --llp-checkpoint는 오른쪽 모델")
     p.add_argument("--llp-share-legs", action="store_true",
                    help="단일 관절로 학습한 --llp-checkpoint 하나를 양쪽 다리에 같은 가중치로 적용 (2026-10-21)")
     p.add_argument("--hlp-checkpoint", default=DEFAULT_HLP_CHECKPOINT,
@@ -661,7 +659,6 @@ def main():
             swing_gate_fraction=args.swing_gate,
             swing_gate_mean_tau=args.swing_gate_mean_tau,
             measure_timing=True,
-            llp_left_checkpoint=args.llp_left_checkpoint,
             llp_share_legs=args.llp_share_legs,
         ),
         num_envs=2,
@@ -780,8 +777,6 @@ def main():
         "motion_id": args.motion_id,
         "start_time": args.start_time,
         "llp_checkpoint": str(Path(args.llp_checkpoint).resolve()),
-        "llp_left_checkpoint": (str(Path(args.llp_left_checkpoint).resolve())
-                                if args.llp_left_checkpoint else None),
         "llp_share_legs": bool(args.llp_share_legs),
         "llp_epoch": ctrl.llp.epoch,
         "hlp_checkpoint": ctrl.hlp_checkpoint,

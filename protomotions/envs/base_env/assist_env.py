@@ -109,9 +109,6 @@ class AssistEnvConfig(EnvConfig):
     # 보조 토크 한계를 env마다 U[lo, hi]로 뽑아 clamp 한다 (정책은 관측 못 함 — 자기 토크의 효과를 히스토리로
     # 봐야 한다). (0, 0)이면 비활성 = assist_torque_limit 하나. 배포 때는 하드웨어 한계로 clamp (controller).
     assist_limit_range: tuple = (0.0, 0.0)
-    # R1 (2026-10-20): PairedAssistEnv only — causal window (policy steps) of the unassisted
-    # twin's squared wearer torque used as the scale of the relative burden cost.
-    paired_reference_window_steps: int = 5
     # 2026-10-21 다리별 학습: 보조를 넣는 관절 (비면 전 관절). 나머지 관절의 보조는 0이다.
     # 보상·종료의 관절 범위는 각 MdpComponent의 joint_mask로 따로 정한다.
     assist_active_joints: tuple = ()

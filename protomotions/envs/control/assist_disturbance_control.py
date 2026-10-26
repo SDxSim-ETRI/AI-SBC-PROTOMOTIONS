@@ -41,6 +41,14 @@
 
 θ_g 다양화(계단·램프·비주기)는 부모 config의 `blend_range`·`hold_prob`로 실험 파일에서
 넓힌다 — 코드 변경 없음. 관성·기본 임피던스 랜덤화는 `AssistEnv`(v4 필드) 몫.
+
+2026-10 진자 연구의 두 외란 변형도 이 클래스의 method로 들어 있다 (기본값은 모두 꺼짐이며, 꺼진
+기능은 난수를 소비하지 않아 옛 체크포인트의 RNG·궤적이 그대로다):
+4. **구조화 사건** (`structured_probability`) — 입각 하중을 각도 의존 힘장으로 바꾸고 수동 감쇠 사건을
+   더한다. 사건 시각은 경과 시간만으로 뽑아 짝 플랜트가 같은 난수를 쓴다. `human_target_hold_steps`는
+   착용자 PD/FF 명령의 sample-and-hold 주기.
+5. **유각 감속·반전 충격** (`phase_probability`) — 합성 의도의 감속·반전 시각에 실제 각속도에 비례한
+   유한 소산 펄스. 접촉·관성 변화 모델이 아니다.
 """
 
 import math
@@ -103,6 +111,22 @@ class DisturbedAssistTargetControlConfig(MotionAssistTargetControlConfig):
     # 의도 실현 가능성: 필요 각가속도 ≤ 이 비율 × (착용자 토크 한계 / hip 관성). 0이면 안 묶음.
     intent_accel_frac: float = 0.5
 
+    # 구조화 사건 (2026-10-14 연구, 0이면 꺼짐)
+    structured_probability: float = 0.0   # 구조화 에피소드일 확률
+    damping_probability: float = 0.75     # 감쇠 사건이 실제 계수를 가질 확률
+    damping_max: float = 30.0             # 감쇠 계수 상한 [N·m·s/rad]
+    damping_torque_limit: float = 80.0    # 감쇠 토크 clamp [N·m]
+    human_target_hold_steps: int = 1      # 착용자 명령 sample-and-hold 주기 [policy step], 1 = 매 step
+
+    # 유각 감속·반전 충격 (2026-10-15 일반화 연구, 0이면 꺼짐)
+    phase_probability: float = 0.0
+    swing_damping_max: float = 20.0
+    swing_zero_probability: float = 0.25
+    swing_duration_range: Tuple[float, float] = (0.06, 0.18)
+    shock_duration_range: Tuple[float, float] = (0.02, 0.05)
+    shock_damping_max: float = 35.0
+    phase_torque_limit: float = 60.0
+
 
 class DisturbedAssistTargetControl(MotionAssistTargetControl):
     """의도·chunk는 부모, 여기서는 외란 스케줄만 관리한다."""
@@ -129,7 +153,37 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         self._tau_ext = z(n, d)
         self._kp_scale = torch.ones(n, d, device=dev)
         self._kd_scale = torch.ones(n, d, device=dev)
+        # 구조화 사건·명령 홀드 상태
+        self._structured = torch.zeros(n, 1, dtype=torch.bool, device=dev)
+        for name in ("_field_center", "_field_slope", "_field_bias", "_damp_start", "_damp_end", "_damp_next",
+                     "_damp_c", "_tau_field", "_tau_damping", "_held_target", "_held_velocity"):
+            setattr(self, name, z(n, d))
+        self._hold_step = torch.full((n,), -1, dtype=torch.long, device=dev)
+        # 유각 감속·반전 충격 상태
+        self._phase_enabled = torch.zeros(n, d, dtype=torch.bool, device=dev)
+        self._decelerating = torch.zeros(n, d, dtype=torch.bool, device=dev)
+        for name in ("_previous_intent_velocity", "_swing_start", "_swing_end", "_swing_c",
+                     "_shock_start", "_shock_end", "_shock_c", "_tau_swing", "_tau_shock"):
+            setattr(self, name, z(n, d))
+        self._validate_event_config(config, env)
         super().__init__(config, env)  # 마지막에 self.reset(all) 호출
+
+    @staticmethod
+    def _validate_event_config(config, env) -> None:
+        g = lambda name, default: getattr(config, name, default)  # noqa: E731  (옛 pickle엔 필드가 없다)
+        for name in ("structured_probability", "damping_probability", "phase_probability", "swing_zero_probability"):
+            if not 0 <= g(name, 0.0) <= 1:
+                raise ValueError(f"{name} must be in [0, 1]")
+        for name in ("damping_max", "damping_torque_limit", "swing_damping_max", "shock_damping_max", "phase_torque_limit"):
+            if not 0 <= g(name, 0.0) < float("inf"):
+                raise ValueError(f"Invalid {name}")
+        if g("human_target_hold_steps", 1) < 1:
+            raise ValueError("human_target_hold_steps must be positive")
+        dt = getattr(env, "dt", None)
+        for name, default in (("swing_duration_range", (0.06, 0.18)), ("shock_duration_range", (0.02, 0.05))):
+            lo, hi = g(name, default)
+            if not (dt is None or dt <= lo) or not lo <= hi < float("inf"):
+                raise ValueError(f"Invalid {name}")
 
     # ------------------------------------------------------------------
     def set_wearer_gains(
@@ -214,6 +268,38 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         self._rb_c[env_ids] = 0.0
         self._rb_end[env_ids] = -1.0
         self._tau_brake[env_ids] = 0.0
+        self._reset_structured(env_ids)
+        self._reset_phase(env_ids)
+
+    def _reset_structured(self, env_ids: Tensor) -> None:
+        cfg: DisturbedAssistTargetControlConfig = self.config
+        self._hold_step[env_ids] = -1
+        self._tau_field[env_ids] = 0
+        self._tau_damping[env_ids] = 0
+        prob = float(getattr(cfg, "structured_probability", 0.0))
+        if not len(env_ids) or prob == 0:
+            return
+        m, d = len(env_ids), self.n_dofs
+        self._structured[env_ids] = self._u(0, 1, m, 1) < prob
+        self._field_center[env_ids] = self._u(*cfg.offset_range, m, d)
+        # 무차원 계수: 이미 묶인 하중 사건 크기에 비례해 쓴다
+        self._field_slope[env_ids] = self._u(-1, 1, m, d) / self._u(0.15, 0.6, m, d)
+        self._field_bias[env_ids] = self._u(-0.25, 0.25, m, d)
+        self._damp_start[env_ids] = -1
+        self._damp_end[env_ids] = -1
+        self._damp_c[env_ids] = 0
+        self._damp_next[env_ids] = cfg.start_blend + self._u(*cfg.stance_gap_range, m, d)
+
+    def _reset_phase(self, env_ids: Tensor) -> None:
+        self._phase_enabled[env_ids] = False
+        self._decelerating[env_ids] = False
+        for name in ("_previous_intent_velocity", "_swing_c", "_shock_c", "_tau_swing", "_tau_shock"):
+            getattr(self, name)[env_ids] = 0
+        for name in ("_swing_start", "_swing_end", "_shock_start", "_shock_end"):
+            getattr(self, name)[env_ids] = -1
+        prob = float(getattr(self.config, "phase_probability", 0.0))
+        if prob > 0 and len(env_ids):
+            self._phase_enabled[env_ids] = self._u(0, 1, len(env_ids), self.n_dofs) < prob
 
     def step(self) -> None:
         super().step()
@@ -267,6 +353,92 @@ class DisturbedAssistTargetControl(MotionAssistTargetControl):
         in_p = (t >= self._pt_start) & (t <= self._pt_end)
         tau_p = torch.where(in_p, self._pt_amp * torch.sin(math.pi * (t - self._pt_start) / span), torch.zeros_like(t))
         self._tau_ext = tau_load + tau_p + self._reversal_brake(t[:, 0])
+        self._structured_events(t)
+        self._phase_events()
+
+    def _structured_events(self, t: Tensor) -> None:
+        """구조화 에피소드: 입각 하중을 각도 의존 힘장으로 바꾸고 수동 감쇠 사건을 더한다 (꺼지면 난수 소비 없음)."""
+        cfg: DisturbedAssistTargetControlConfig = self.config
+        if float(getattr(cfg, "structured_probability", 0.0)) == 0:
+            return
+        due = (t >= self._damp_next) & (t > self._damp_end)
+        if due.any():
+            count = int(due.sum())
+            duration = self._u(*cfg.stance_dur_range, count)
+            self._damp_start[due] = t[due]
+            self._damp_end[due] = t[due] + duration
+            self._damp_next[due] = self._damp_end[due] + self._u(*cfg.stance_gap_range, count)
+            self._damp_c[due] = self._u(0, cfg.damping_max, count) * (
+                self._u(0, 1, count) < cfg.damping_probability)
+        hist = self.env.state_history
+        q, velocity = hist.dof_pos[:, 0], hist.dof_vel[:, 0]
+        amplitude = self._ev_load.abs()
+        slope_limit = 0.5 * self._kp_base * self._kp_scale
+        slope = (amplitude * self._field_slope).clamp(-slope_limit, slope_limit)
+        field = (slope * (q - self._field_center) + self._field_bias * amplitude).clamp(-amplitude, amplitude)
+        load_gate = self._gate(t, self._ev_start, self._ev_end, cfg.stance_ramp)
+        self._tau_field = self._structured * load_gate * field
+        damping_gate = self._gate(t, self._damp_start, self._damp_end, cfg.stance_ramp)
+        self._tau_damping = self._structured * (-damping_gate * self._damp_c * velocity).clamp(
+            -cfg.damping_torque_limit, cfg.damping_torque_limit)
+        # 옛 하중을 겹치지 않고 바꾼다; 게인 스케줄·섭동은 그대로. 비구조화 에피소드는 원래 힘을 유지.
+        self._tau_ext = (self._tau_ext - self._structured * load_gate * self._ev_load
+                         + self._tau_field + self._tau_damping)
+
+    def _phase_events(self) -> None:
+        """합성 의도의 감속·반전 시각에 실제 각속도 비례 소산 펄스 (꺼지면 난수 소비 없음)."""
+        cfg: DisturbedAssistTargetControlConfig = self.config
+        if float(getattr(cfg, "phase_probability", 0.0)) == 0:
+            return
+        time = self._episode_time()
+        dt = self.env.dt
+        q = self._target_at(torch.stack((time - dt, time, time + dt), dim=1))
+        velocity = (q[:, 2] - q[:, 0]) / (2 * dt)
+        acceleration = (q[:, 2] - 2 * q[:, 1] + q[:, 0]) / dt ** 2
+        t = time[:, None].expand_as(velocity)
+        eligible = self._phase_enabled & (t > cfg.start_blend)
+        decelerating = (velocity * acceleration < 0) & (velocity.abs() > .3)
+        onset = eligible & decelerating & ~self._decelerating & (t > self._swing_end)
+        if onset.any():
+            count = int(onset.sum())
+            self._swing_start[onset] = t[onset]
+            self._swing_end[onset] = t[onset] + self._u(*cfg.swing_duration_range, count)
+            self._swing_c[onset] = self._u(0, cfg.swing_damping_max, count) * (
+                self._u(0, 1, count) >= cfg.swing_zero_probability)
+        reversal = eligible & (velocity * self._previous_intent_velocity < 0) & (t > self._shock_end)
+        if reversal.any():
+            count = int(reversal.sum())
+            self._shock_start[reversal] = t[reversal]
+            self._shock_end[reversal] = t[reversal] + self._u(*cfg.shock_duration_range, count)
+            self._shock_c[reversal] = self._u(0, cfg.shock_damping_max, count)
+        actual_velocity = self.env.state_history.dof_vel[:, 0]
+        for event, ramp in (("swing", .02), ("shock", .01)):
+            gate = self._gate(t, getattr(self, f"_{event}_start"), getattr(self, f"_{event}_end"), ramp)
+            torque = (-gate * getattr(self, f"_{event}_c") * actual_velocity).clamp(
+                -cfg.phase_torque_limit, cfg.phase_torque_limit)
+            setattr(self, f"_tau_{event}", torque)
+            self._tau_ext = self._tau_ext + torque
+        self._decelerating.copy_(decelerating)
+        self._previous_intent_velocity.copy_(velocity)
+
+    def get_pd_targets_and_vel(self):
+        """착용자 PD/FF 명령; `human_target_hold_steps` > 1이면 그 주기로 sample-and-hold."""
+        hold = int(getattr(self.config, "human_target_hold_steps", 1))
+        if hold == 1:
+            return super().get_pd_targets_and_vel()
+        step = self.env.progress_buf
+        due = (self._hold_step < 0) | (step - self._hold_step >= hold)
+        if due.any():
+            target, velocity = super().get_pd_targets_and_vel()
+            self._held_target[due] = target[due]
+            self._held_velocity[due] = velocity[due]
+            self._hold_step[due] = step[due]
+        return self._held_target, self._held_velocity
+
+    def get_pd_targets(self):
+        if int(getattr(self.config, "human_target_hold_steps", 1)) == 1:
+            return super().get_pd_targets()
+        return self.get_pd_targets_and_vel()[0]
 
     def _reversal_brake(self, t: Tensor) -> Tensor:
         """의도가 반전에 다가올 때 실제 각속도에 비례한 외부 점성 토크 (n, d). 꺼져 있으면 0."""

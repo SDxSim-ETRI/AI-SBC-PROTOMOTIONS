@@ -88,8 +88,8 @@ class SingleJointMLP(SharedJointMLP):
     The bilateral action layout is kept so the deployed controller and the
     environment need no new interface. The other joint's mean action is a
     constant zero (no parameters), and the environment applies no assistance
-    there (`AssistEnv.assist_active_joints`). Left and right are trained as
-    separate runs and combined at deployment (`LLPLegPair`).
+    there (`AssistEnv.assist_active_joints`). At deployment the one trained joint
+    model serves both legs (`LLPPolicy(share_legs=True)`).
     """
 
     def __init__(self, config: SingleJointMLPConfig):

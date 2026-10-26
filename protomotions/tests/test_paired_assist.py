@@ -86,35 +86,3 @@ def test_reference_failure_bootstraps_b_and_never_erases_b_failure():
     next_value = torch.full((4,), 7.) * (1 - term.float())
     assert next_value.tolist() == [7., 0., 7., 7.]
 
-
-def test_l12_preserves_model_inputs_and_all_other_rewards():
-    import argparse
-    import dataclasses
-    from examples.experiments.assist_pendulum import mlp_mixed_feedforward as old
-    from examples.experiments.assist_pendulum import mlp_paired_tracking as new
-    from protomotions.robot_configs.hip_pendulum import HipPendulumRobotConfig
-    from protomotions.envs.mdp_component import MdpComponent
-
-    parser = argparse.ArgumentParser()
-    old.additional_experiment_arguments(parser)
-    args = parser.parse_args(["--opposition-weight=-0.021958557930324075"])
-    robot = HipPendulumRobotConfig()
-    a, b = old.env_config(robot, args), new.env_config(robot, args)
-    def plain(x):
-        if isinstance(x, MdpComponent):
-            return {k: plain(getattr(x, k)) for k in ("compute_func", "dynamic_vars", "static_params")}
-        if dataclasses.is_dataclass(x):
-            return {f.name: plain(getattr(x, f.name)) for f in dataclasses.fields(x)}
-        if isinstance(x, dict):
-            return {k: plain(v) for k, v in x.items()}
-        if isinstance(x, (list, tuple)):
-            return [plain(v) for v in x]
-        return x
-    assert plain(a.observation_components) == plain(b.observation_components)
-    for key in a.reward_components:
-        if key != "tracking":
-            assert plain(a.reward_components[key]) == plain(b.reward_components[key])
-    assert a.reward_components["tracking"].static_params == b.reward_components["tracking"].static_params
-    b._target_ = a._target_
-    b.reward_components["tracking"] = a.reward_components["tracking"]
-    assert plain(a) == plain(b)

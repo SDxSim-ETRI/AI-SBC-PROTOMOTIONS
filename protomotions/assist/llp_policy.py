@@ -89,11 +89,19 @@ def _static_param(component, name: str, default):
 
 
 class LLPPolicy:
-    """`assist_pendulum` 체크포인트의 actor (deterministic, mean action)."""
+    """`assist_pendulum` 체크포인트의 actor (deterministic, mean action).
 
-    def __init__(self, checkpoint: str, device: torch.device):
+    `share_legs=True`: 단일 관절 진자로 학습한 정책 하나를 양쪽 다리에 같은 가중치로 적용한다
+    (2026-10-21 가중치 공유). `SingleJointMLP`(한쪽 관절로 학습) 또는 `SharedJointMLP` 체크포인트의
+    관절 모델을 다리마다 그 다리의 관측(각도·속도 히스토리, 미래 목표, 이전 명령)으로 한 번씩 돌린다.
+    두 다리는 서로의 관측을 보지 않는다.
+    """
+
+    def __init__(self, checkpoint: str, device: torch.device, share_legs: bool = False):
         self.checkpoint = Path(checkpoint)
+        self.checkpoints = (self.checkpoint,)
         self.device = torch.device(device)
+        self.share_legs = bool(share_legs)
         resolved_path = self.checkpoint.parent / "resolved_configs_inference.pt"
         assert resolved_path.exists(), f"resolved configs not found: {resolved_path}"
         resolved = torch.load(resolved_path, map_location="cpu", weights_only=False)
@@ -175,6 +183,11 @@ class LLPPolicy:
         self.actor = actor.to(self.device).eval()
         self.mu_key = agent_cfg.model.actor.mu_key
         self.epoch = int(state.get("epoch", -1))
+        if self.share_legs:
+            from protomotions.agents.common.shared_joint_mlp import SharedJointMLP
+
+            if not isinstance(self.actor.mu, SharedJointMLP):
+                raise ValueError(f"weight sharing needs a per-joint actor, got {type(self.actor.mu).__name__}")
 
     # ------------------------------------------------------------------
     def obs_dims(self) -> Dict[str, int]:
@@ -205,6 +218,12 @@ class LLPPolicy:
             batch_size=batch,
             device=self.device,
         )
+        if self.share_legs:
+            from protomotions.agents.common.shared_joint_mlp import SharedJointMLP
+
+            # SingleJointMLP.forward는 학습 관절 하나만 내므로, 같은 관절 모델을 두 관절에 돌리는
+            # SharedJointMLP.forward를 쓴다.
+            return SharedJointMLP.forward(self.actor.mu, td)[self.mu_key]
         td = self.actor.mu(td)
         return td[self.mu_key]
 

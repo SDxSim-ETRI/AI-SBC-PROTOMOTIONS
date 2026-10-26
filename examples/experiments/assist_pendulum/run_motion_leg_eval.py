@@ -42,7 +42,7 @@ PYTHON = sys.executable
 STUDY = ROOT / "results/llp20_motion_20261021"
 PENDULUM_EVAL = "examples/experiments/assist_pendulum/evaluate_motion_leg.py"
 RUNNER = "examples/experiments/assist_skeleton/run_system.py"
-BASE = "results/llp_pendulum20_C0_20261014_nativeff/epoch_2000.ckpt"
+BASE = "results/llp_relative_R0_s0_20261020/epoch_6000.ckpt"  # 플랜트·관측 config의 출처 (2026-10-26: 보관 체크포인트로 교체)
 CONDITION_ORDER = ("A0D0", "A1D1", "A1D0", "A0D1")
 BASELINES = {
     "L1": dict(checkpoint="checkpoints/L1_llp_pendulum/last.ckpt", scale=0.5),
@@ -71,7 +71,6 @@ EVAL_SOURCES = (
     "examples/experiments/assist_skeleton/analysis.py",
     "protomotions/assist/controller.py",
     "protomotions/assist/llp_policy.py",
-    "protomotions/assist/llp_pair.py",
     "protomotions/tests/test_llp_shared_leg.py",
     "protomotions/assist/skeleton_features.py",
     "protomotions/agents/common/shared_joint_mlp.py",
@@ -80,7 +79,6 @@ EVAL_SOURCES = (
     "protomotions/envs/control/assist_motion_control.py",
     "protomotions/envs/control/assist_disturbance_control.py",
     "protomotions/envs/control/motion_intent.py",
-    "protomotions/envs/control/pendulum_general_control.py",
     "protomotions/maniflow/angle_estimator.py",
     "protomotions/maniflow/chunk_source.py",
     "protomotions/maniflow/hybrid_control.py",

@@ -41,12 +41,10 @@ import torch  # noqa: E402
 from evaluate_research import IsolatedH1Forecast, seed_all, summarize  # noqa: E402
 from runtime_utils import build_env_agent  # noqa: E402
 
-from protomotions.assist.llp_pair import LLPLegPair, LLPSharedLeg  # noqa: E402
 from protomotions.assist.llp_policy import LLPPolicy  # noqa: E402
 from protomotions.envs.control.assist_disturbance_control import (  # noqa: E402
     DisturbedAssistTargetControlConfig,
 )
-from protomotions.envs.control.pendulum_general_control import PendulumGeneralControlConfig  # noqa: E402
 from protomotions.envs.obs.assist_obs import compute_assist_target_obs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -184,7 +182,6 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base-checkpoint", required=True)
     p.add_argument("--checkpoint", default=None, help="생략하면 무보조 짝 동일성 점검")
-    p.add_argument("--left-checkpoint", default=None, help="다리별 모델: 왼쪽 (--checkpoint = 오른쪽)")
     p.add_argument("--share-legs", action="store_true", help="단일 관절 모델 하나를 양쪽 다리에 같은 가중치로 적용")
     p.add_argument("--output-scale", type=float, default=1.)
     p.add_argument("--evaluation-limit", type=float, default=20.)
@@ -218,7 +215,7 @@ def main():
         cfg.motion_seed = args.trajectory_seed
         cfg.intent_pool_seed = args.plant_seed
     else:
-        cfg = PendulumGeneralControlConfig(**{f.name: getattr(old, f.name) for f in fields(old) if f.name != "_target_"})
+        cfg = DisturbedAssistTargetControlConfig(**{f.name: getattr(old, f.name) for f in fields(old) if f.name != "_target_"})
         cfg.structured_probability = .5 if args.condition == "phase" else 0.
         cfg.phase_probability = .5 if args.condition == "phase" else 0.
         cfg.human_target_hold_steps = 5 if args.condition == "hold50" else 1
@@ -237,13 +234,8 @@ def main():
     env._lazy_init_assist()
     ref = env.reference_env
     env.max_episode_length = args.steps + 2
-    if args.share_legs:
-        assert args.checkpoint and not args.left_checkpoint
-        policy = LLPSharedLeg(args.checkpoint, env.device)
-    elif args.left_checkpoint:
-        policy = LLPLegPair(args.checkpoint, args.left_checkpoint, env.device)
-    else:
-        policy = LLPPolicy(args.checkpoint, env.device) if args.checkpoint else None
+    assert args.checkpoint or not args.share_legs, "--share-legs needs --checkpoint"
+    policy = LLPPolicy(args.checkpoint, env.device, share_legs=args.share_legs) if args.checkpoint else None
     if policy:
         lay = policy.layout
         assert lay.action_transform == "tanh"

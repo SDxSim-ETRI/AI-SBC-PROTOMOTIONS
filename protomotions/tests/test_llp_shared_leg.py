@@ -65,11 +65,10 @@ def test_shared_forward_applies_the_trained_joint_model_to_both_legs():
 
 @pytest.mark.skipif(not SMOKE.exists(), reason="smoke checkpoint not present")
 def test_llp_shared_leg_matches_single_policy_on_its_training_joint():
-    from protomotions.assist.llp_pair import LLPSharedLeg
     from protomotions.assist.llp_policy import LLPPolicy
 
     single = LLPPolicy(str(SMOKE), torch.device("cpu"))
-    shared = LLPSharedLeg(str(SMOKE), torch.device("cpu"))
+    shared = LLPPolicy(str(SMOKE), torch.device("cpu"), share_legs=True)
     obs = {k: torch.randn(3, n) for k, n in single.obs_dims().items()}
     a, b = single.act(obs), shared.act(obs)
     assert torch.all(a[:, 1] == 0) and torch.all(b[:, 1] != 0)

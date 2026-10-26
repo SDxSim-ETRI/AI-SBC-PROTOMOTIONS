@@ -106,14 +106,6 @@ class PairedAssistEnv(AssistEnv):
         if getattr(cc, "reversal_brake_prob", 0) != 0:
             raise ValueError("State-dependent reversal brakes require a separate pairing design")
         self.reference_env = None
-        # R1: causal window of the unassisted twin's squared wearer torque for
-        # scale-free relative burden costs; allocated on first use, updated after
-        # each reference step, cleared per environment on reset.
-        self._reference_window_steps = int(getattr(config, "paired_reference_window_steps", 5))
-        if self._reference_window_steps < 1:
-            raise ValueError("paired_reference_window_steps must be positive")
-        self._reference_tau_sq_ring = None
-        self._reference_ring_count = None
         ref_config = copy.deepcopy(config)
         ref_config._target_ = "protomotions.envs.base_env.assist_env.AssistEnv"
         ref_config.assist_torque_limit = 0.0
@@ -123,12 +115,6 @@ class PairedAssistEnv(AssistEnv):
         tracking.compute_func = compute_target_tracking_rew
         tracking.dynamic_vars = {"dof_pos": EnvContext.current.dof_pos,
                                  "theta_g": EnvContext.assist.theta_g}
-        # The reference plant has no twin of its own: drop reward terms that read
-        # paired reference fields (R1 relative burden), keeping the rest identical.
-        ref_config.reward_components = {
-            name: component for name, component in ref_config.reward_components.items()
-            if not any(getattr(v, "path", "").startswith("assist.reference")
-                       for v in component.dynamic_vars.values())}
         # The terrain and empty libraries are immutable/shared; simulator, model,
         # state, control components, config and history are all separate objects.
         before = RandomState.capture(device)
@@ -150,29 +136,6 @@ class PairedAssistEnv(AssistEnv):
                         motion_lib=motion_lib, *args, **kwargs), device)
         self._current_context = None
 
-    def _ensure_reference_ring(self, like):
-        """Allocate the twin torque window on first use (construction builds a context early)."""
-        if self._reference_tau_sq_ring is None:
-            n, d = like.shape
-            self._reference_tau_sq_ring = torch.zeros(n, self._reference_window_steps, d,
-                                                      device=like.device, dtype=like.dtype)
-            self._reference_ring_count = torch.zeros(n, dtype=torch.long, device=like.device)
-
-    def _push_reference_torque(self):
-        """Append this step's reference wearer torque squared (no random draws)."""
-        tau_sq = self.reference_env.assist_component._tau_agent.detach().square()
-        self._ensure_reference_ring(tau_sq)
-        self._reference_tau_sq_ring = torch.roll(self._reference_tau_sq_ring, 1, dims=1)
-        self._reference_tau_sq_ring[:, 0] = tau_sq
-        self._reference_ring_count = torch.clamp(
-            self._reference_ring_count + 1, max=self._reference_tau_sq_ring.shape[1])
-
-    def reference_tau_sq_window(self):
-        """Causal mean of the twin's squared wearer torque over available samples (n, d)."""
-        self._ensure_reference_ring(self.reference_env.assist_component._tau_agent)
-        count = self._reference_ring_count.clamp(min=1).to(self._reference_tau_sq_ring.dtype)
-        return self._reference_tau_sq_ring.sum(dim=1) / count.unsqueeze(1)
-
     def _lazy_init_assist(self):
         if self._torque_override is not None:
             return
@@ -183,32 +146,20 @@ class PairedAssistEnv(AssistEnv):
         ctx = super()._build_global_context()
         if self.reference_env is not None:
             ctx.assist.reference_dof_pos = self.reference_env.simulator.get_robot_state().dof_pos.detach()
-            ctx.assist.reference_tau_agent = self.reference_env.assist_component._tau_agent.detach()
-            ctx.assist.reference_tau_sq_window = self.reference_tau_sq_window()
         return ctx
 
     def reset(self, env_ids=None, *args, **kwargs):
         self._lazy_init_assist()
         _, result = paired_call(lambda: self.reference_env.reset(env_ids, *args, **kwargs),
                                 lambda: super(PairedAssistEnv, self).reset(env_ids, *args, **kwargs), self.device)
-        if self._reference_tau_sq_ring is not None:
-            ids = slice(None) if env_ids is None else env_ids
-            self._reference_tau_sq_ring[ids] = 0.0
-            self._reference_ring_count[ids] = 0
         return result
-
-    def _assisted_step(self, action):
-        # The reference plant has already advanced; record its torque before the
-        # assisted rewards are computed. This consumes no random numbers.
-        self._push_reference_torque()
-        return super().step(action)
 
     def step(self, action):
         self._lazy_init_assist()
         # PPO can update this via its episode-length curriculum each epoch.
         self.reference_env.max_episode_length = self.max_episode_length
         _, result = paired_call(lambda: self.reference_env.step(torch.zeros_like(action)),
-                                lambda: self._assisted_step(action), self.device)
+                                lambda: super(PairedAssistEnv, self).step(action), self.device)
         own_done = self.reset_buf.clone()
         self.reset_buf[:], self.terminate_buf[:] = combine_pair_endings(
             own_done, self.terminate_buf, self.reference_env.reset_buf)

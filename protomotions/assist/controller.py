@@ -100,10 +100,8 @@ class AssistControllerConfig:
         swing_gate_mean_tau: 중간값 지수이동평균의 시정수 [s].
         swing_gate_period_range: 교차 간격이 이 범위 [s] 안일 때만 주기로 인정.
         measure_timing: True면 HLP 예측·LLP 추론 시간을 기록 (CUDA sync 포함).
-        llp_left_checkpoint: 다리별로 따로 학습한 LLP(2026-10-21)를 쓸 때 왼쪽 모델.
-            주면 `llp_checkpoint`는 오른쪽 모델이고, 둘을 `LLPLegPair`로 묶는다.
         llp_share_legs: 단일 관절로 학습한 `llp_checkpoint` 하나를 양쪽 다리에 같은 가중치로
-            적용한다 (`LLPSharedLeg`, 2026-10-21).
+            적용한다 (`LLPPolicy(share_legs=True)`, 2026-10-21).
     """
 
     llp_checkpoint: str
@@ -121,7 +119,6 @@ class AssistControllerConfig:
     swing_gate_mean_tau: float = 1.5
     swing_gate_period_range: Tuple[float, float] = (0.5, 2.0)
     measure_timing: bool = False
-    llp_left_checkpoint: Optional[str] = None
     llp_share_legs: bool = False
 
 
@@ -139,17 +136,7 @@ class AssistController:
         self.device = torch.device(device)
 
         # --- LLP ---
-        if config.llp_share_legs:
-            from protomotions.assist.llp_pair import LLPSharedLeg
-
-            assert not config.llp_left_checkpoint, "weight sharing uses one checkpoint"
-            self.llp = LLPSharedLeg(config.llp_checkpoint, self.device)
-        elif config.llp_left_checkpoint:
-            from protomotions.assist.llp_pair import LLPLegPair
-
-            self.llp = LLPLegPair(config.llp_checkpoint, config.llp_left_checkpoint, self.device)
-        else:
-            self.llp = LLPPolicy(config.llp_checkpoint, self.device)
+        self.llp = LLPPolicy(config.llp_checkpoint, self.device, share_legs=config.llp_share_legs)
         lay: LLPObsLayout = self.llp.layout
         self.layout = lay
         self.dt = float(config.dt) if config.dt is not None else lay.dt
