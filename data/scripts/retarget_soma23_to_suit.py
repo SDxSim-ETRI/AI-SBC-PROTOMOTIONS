@@ -23,7 +23,7 @@ per clip places the lowest foot collision surface on the floor; it does not
 lock feet, stitch clips, rescale time, or certify dynamic feasibility.
 
 Run with the sbc interpreter, from the repository root. The candidate manifest
-comes from the source audit documented in docs/NEXT_SESSION.md, section 2-Y.
+comes from the source audit documented in docs/ai_sbc/NEXT_SESSION.md, section 2-Y.
 """
 
 import argparse

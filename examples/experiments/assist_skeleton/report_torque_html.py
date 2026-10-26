@@ -300,6 +300,6 @@ document.querySelectorAll('.download').forEach(b=>b.addEventListener('click',()=
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default="results/llp_wide100_sequence/comparison.json")
-    parser.add_argument("--out", default="docs/l6_l7_torque_report.html")
+    parser.add_argument("--out", default="docs/ai_sbc/l6_l7_torque_report.html")
     args = parser.parse_args()
     build_report(args.manifest, args.out)

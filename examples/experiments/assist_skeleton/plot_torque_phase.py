@@ -104,7 +104,7 @@ def main():
 
     fig.suptitle("보조 토크는 착용자 토크가 큰 곳이 아니라 파워가 큰 곳에서 나온다", fontsize=13, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.97))
-    out = "docs/torque_phase.png"
+    out = "docs/ai_sbc/torque_phase.png"
     fig.savefig(out, dpi=135)
     print("saved", out)
 

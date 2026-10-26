@@ -53,7 +53,7 @@ def main():
     p.add_argument("--num-envs", type=int, default=64)
     p.add_argument("--steps", type=int, default=1500, help="10 ms step 수 (1500 = 15 s)")
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--out", default="docs/pendulum_v4_env_check.png")
+    p.add_argument("--out", default="docs/ai_sbc/pendulum_v4_env_check.png")
     p.add_argument("--diagnostics-json", default=None)
     args, rest = p.parse_known_args()
 

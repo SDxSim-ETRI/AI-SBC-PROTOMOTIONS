@@ -161,6 +161,15 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/action/action_functions.py` | `normalized_torque_action` (tanh × torque_scale) |
 | `protomotions/robot_configs/hip_pendulum.py` | 로봇 정의 (factory.py에 등록) + `protomotions/data/assets/mjcf/hip_pendulum.xml` |
 | `protomotions/simulator/newton/fixed_base.py` | `FixedBaseNewtonSimulator` — 고정 베이스용 root write/velocity 무해화 |
+| `examples/experiments/assist_pendulum/{mlp_general,evaluate_general,run_general}.py` | 현재 ±23 N·m 무작위 초기화 G0–G4, seed 재현, 실제 H1 평가·항별 보상 계측. L1은 ×0.5 유지 |
+| `protomotions/envs/control/pendulum_general_control.py` | 합성 의도 감속·반전과 연결한 수동 감쇠 외란. actor 위상 게이트 없음. 관성 변경·발 접촉 모델은 아님 |
+| `examples/experiments/assist_pendulum/mlp_research.py` | 진자 전용 C0/S1/A1/T1: 공통 보조 20 N·m·사람 PD+FF 전체 한계, 운동 의존 외란·공유 관절 actor·목표 유지 독립 비교 |
+| `protomotions/envs/control/pendulum_research_control.py` | 양방향 각도 의존 하중·수동 감쇠·10/50 ms PD/FF 목표 유지. 발 접촉·보행 위상 입력 없음 |
+| `protomotions/agents/common/shared_joint_mlp.py` | 외부 관측 형식은 그대로 두고 다리별 입력과 출력을 분리하는 공유 가중치 actor |
+| `examples/experiments/assist_pendulum/{evaluate_research,run_research_sequence}.py` | 고정 코호트 쌍 평가·첫 실패 계측 / 직렬 학습·평가 실행 및 소스 보존 |
+| `examples/experiments/assist_pendulum/mlp_pendulum_adapt.py`, `protomotions/agents/ppo/pendulum_adapt.py` | L1 actor만 동일 좌표로 가져와 진자에서 추가학습. critic/optimizer 새 초기화. 합성/H1 입력 비교 |
+| `protomotions/envs/control/pendulum_h1_control.py` | 동결 H1을 진자 학습에 연결. H1 RNG 분리, 기존 합성 예측 RNG 소비 유지, 부분 reset 이력 분리 |
+| `examples/experiments/assist_pendulum/run_limit_control.py` | 기존/수정 토크 처리 × 학습 한계 20/40 × seed 0/1. 저장 설정 차이 검사 후 각 6,000 epoch 처음부터 학습. 고정 마지막 모델을 모두 적용 한계 20으로 평가 |
 | `examples/experiments/assist_pendulum/mlp.py` | 실험 config (chunk 파라미터, 보상 weight, PPO 구조 전부 여기) |
 | `examples/experiments/assist_pendulum/{play,compare_rollout,runtime_utils}.py` | 시각화(θ_g 고스트/토크 화살표) / paired 비교 / ckpt 재구성 유틸 |
 
@@ -273,9 +282,9 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 
 현재 실행할 과제는 HANDOFF에서 관리한다. 연구 순서는 다음과 같다.
 
-1. 실제 보행 자료와 착용자의 무보조 추종을 확보한다.
-2. 그 조건에서 보조 전후의 고관절·전신 부담과 동작 유지를 비교한다.
-3. 걷기 범위를 확보한 뒤 달리기와 다른 동작으로 넓힌다.
+1. [진자 사전학습 개선안](pendulum_pretrain_discussion.md)을 먼저 실행한다. 진자 환경의 20 N·m 대조군, 외란, 관절별 정책을 비교한다.
+2. 진자에서 선택한 정책을 기존 W1에 연결해 전이를 평가한다. 전신 보행 학습은 이번 단계에 포함하지 않는다.
+3. 새 실제 보행의 무보조 추종 확보와 전신 추가학습은 후속 과제로 둔다. 새 자료의 보조 평가는 무보조 검증 뒤에 한다.
 
 기존 걷기 한 패턴의 개선을 다양한 사람·계단·험지·실기기 검증으로 읽지 않는다.
 
@@ -286,7 +295,7 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 - HANDOFF에는 현재 결론과 다음 작업만 남긴다. 실험 결론은 `experiment_summary.html`에 갱신한다.
 - 모델 이름과 경로는 `AI_SBC_VERSIONS.md`, 실행 근거는 `results/<실험>/`에 저장한다.
 - 보관 모델은 `checkpoints/<버전>/`와 INFO.md로 관리하며 가중치는 LFS 대상이다.
-- 과거 문서는 `docs/archive/20261013/`에 보존했다. 그 안의 중간 상태는 현재 지시가 아니다.
+- 과거 문서는 `docs/ai_sbc/archive/20261013/`에 보존했다. 그 안의 중간 상태는 현재 지시가 아니다.
 - 대용량 원본, 가중치, 실패 기록은 문서가 오래됐다는 이유만으로 삭제하지 않는다.
 
 ---
@@ -305,7 +314,7 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
   몸체 이동도 느려지지만 참조 보폭·발 높이·접촉 비율은 유지한다. 실제로 속도에 맞춰 보폭과
   자세를 바꾼 보행의 성공/실패를 입증하지 않는다. 기존 수치와 실패 판정은 보존하되,
   이 인공 조건의 통과를 다른 실제 동작 평가의 절대 선행 조건으로 삼지 않는다.
-  사용자는 실제 데이터 점검을 우선하도록 선택했다. 로컬 SEED 원본 후보가 있지만 SOMA23→suit
+  실제 데이터 점검은 진자 학습 개선 이후의 과제다. 로컬 SEED 원본 후보가 있지만 SOMA23→suit
   전신 변환·착용자 무보조 추종·클립/인물 분할 검증이 필요하다. HLP 원본 목록에 포함된 후보를
   전체 시스템 미사용 평가라고 부르지 않는다. [데이터 점검 보고서](walking_data_audit.html),
   과거 일지(archive/20261013/NEXT_SESSION.md) §2-Y 참조.
@@ -711,6 +720,6 @@ ASD-STE100의 명확한 문장과 일관된 용어 원칙을 참고한다.
 이 원칙을 적용한 보고서: [`walking_finetune_report.html`](walking_finetune_report.html).
 
 HTML 보고서의 입구는 [reports.html](reports.html)이다. 최근 결과·비교 기준·원인 진단·과거 참고 자료를 구분한다.
-종료된 연구의 상세 보고서는 `docs/archive/reports/`에 두고 이전 주소에는 이동 안내를 남긴다.
-보고서를 다시 생성한 뒤 `python docs/organize_reports.py`를 실행하면 공통 탐색·결론·펼침 구성을 적용한다.
+종료된 연구의 상세 보고서는 `docs/ai_sbc/archive/reports/`에 두고 이전 주소에는 이동 안내를 남긴다.
+보고서를 다시 생성한 뒤 `python docs/ai_sbc/organize_reports.py`를 실행하면 공통 탐색·결론·펼침 구성을 적용한다.
 표·SVG·이미지·원본 JSON·스크립트·선택/저장 버튼의 원문을 보존하는지 함께 검사한다.

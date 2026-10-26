@@ -27,7 +27,7 @@
 6. 학습 궤적 — epoch별 스켈레톤 전이 지표 + 진자 안 보상 항 (tensorboard)
 
 실행 (sbc env):
-    python examples/experiments/assist_skeleton/report_checkpoint_html.py --out docs/llp_v13_report.html \\
+    python examples/experiments/assist_skeleton/report_checkpoint_html.py --out docs/ai_sbc/llp_v13_report.html \\
         --name "v13" --walk "results/oracle/*_tracker_v4new6k_m0" --run "results/oracle/*_tracker_v4new6k_m1" \\
         --ref-walk "v10=results/oracle/*_tracker_base" "β 오라클=results/oracle/*_tracker_beta05" \\
         --ref-run "v10=results/oracle/2026-09-16_19-48-34_tracker_v10_m1" \\

@@ -21,7 +21,7 @@ receding-horizon으로 돌리기 위한 래퍼. ``ManiFlowTorqueEstimator``와 �
 history 관리 구조를 쓰되, 관측이 ``RobotState``가 아니라 **각도 4채널 벡터**라는
 점이 다르다 (진자 env·skeleton env·실기기 IMU가 각자 방식으로 이 4ch를 구성).
 
-관측/출력 계약 (flexion40 모델, ``docs/AI_SBC_FRAMEWORK.md`` §3.1):
+관측/출력 계약 (flexion40 모델, ``docs/ai_sbc/AI_SBC_FRAMEWORK.md`` §3.1):
 
     obs(4)    = [hip_flexion_r, hip_flexion_l, trunk_pitch, trunk_roll]
                 (rad, skeleton hinge 규약; pitch=앞숙임+, roll=오른쪽+)

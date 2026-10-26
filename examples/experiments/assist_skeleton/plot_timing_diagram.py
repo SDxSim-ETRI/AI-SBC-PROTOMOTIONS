@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""HLP(느린 예측기) + LLP(빠른 제어기) 타이밍 그림 → `docs/hlp_llp_timing.png`.
+"""HLP(느린 예측기) + LLP(빠른 제어기) 타이밍 그림 → `docs/ai_sbc/hlp_llp_timing.png`.
 
 예측 범위를 정하는 부등식을 그림으로 옮긴 것:
     예측 범위 ≥ 갱신 주기 + 연산 시간 + 원하는 선행
@@ -88,6 +88,6 @@ ax.text(T0, 10.1,
         "예측 범위 ≥ 갱신 주기(10) + 연산 시간(5) + 원하는 선행(20) = 35 ms  →  10 ms 격자 6점 = 50 ms (여유 15 ms)",
         fontsize=11.5, color=INK, fontweight="bold")
 fig.tight_layout()
-out = "docs/hlp_llp_timing.png"
+out = "docs/ai_sbc/hlp_llp_timing.png"
 fig.savefig(out, dpi=140, bbox_inches="tight")
 print("saved", out)

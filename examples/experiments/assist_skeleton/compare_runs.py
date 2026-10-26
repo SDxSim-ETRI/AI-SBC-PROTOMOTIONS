@@ -21,7 +21,7 @@
 
 실행 (sbc env):
     python examples/experiments/assist_skeleton/compare_runs.py results/oracle/*_tracker_*
-    python examples/experiments/assist_skeleton/compare_runs.py --plot docs/oracle.png results/oracle/*
+    python examples/experiments/assist_skeleton/compare_runs.py --plot docs/ai_sbc/oracle.png results/oracle/*
 """
 
 import json

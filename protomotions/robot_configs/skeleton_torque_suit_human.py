@@ -18,7 +18,7 @@
 `skeleton_torque_suit_passive_cable`과 같되 고관절(굴곡·내전·회전)의 effort_limit만 600 → 200이다.
 
 왜: 착용자 v32(hip 한계 600)는 tracker가 50 ms마다 내는 PD 목표각을 토크 손잡이로 써서 착지마다
-−332 N·m(3.7 N·m/kg)를 낸다 — 문헌의 보행 hip 모멘트 피크는 약 1 N·m/kg다(`docs/NEXT_SESSION.md`
+−332 N·m(3.7 N·m/kg)를 낸다 — 문헌의 보행 hip 모멘트 피크는 약 1 N·m/kg다(`docs/ai_sbc/NEXT_SESSION.md`
 §2-E). 보조 정책의 τ² 절감률이 이 "사람보다 3.7배 센" 착용자 기준으로 재어지고, 진자 학습 분포
 (하중 ≤120 N·m)와도 어긋난다. 200 N·m(2.2 N·m/kg)는 달리기까지 덮으면서 슬램은 막는 값이다.
 

@@ -9,27 +9,35 @@ ProtoMotions3 is a GPU simulation and reinforcement learning framework for human
 This fork hosts AI-SBC hip assistance: HLP predicts future hip angles, LLP produces assist torque,
 and a frozen mimic tracker acts as the simulated wearer. Python 3.8+, Apache-2.0.
 
-Start with [docs/HANDOFF.md](docs/HANDOFF.md) for the current conclusion and next task.
+Start with [docs/ai_sbc/HANDOFF.md](docs/ai_sbc/HANDOFF.md) for the current conclusion and next task.
 
 | Need | Document |
 |---|---|
-| Experiment conclusions | [docs/experiment_summary.html](docs/experiment_summary.html) |
-| Detailed reports | [docs/reports.html](docs/reports.html) |
-| Model names and paths | [docs/AI_SBC_VERSIONS.md](docs/AI_SBC_VERSIONS.md) |
-| Design, code map and debugging | [docs/AI_SBC_FRAMEWORK.md](docs/AI_SBC_FRAMEWORK.md) |
+| Experiment conclusions | [docs/ai_sbc/experiment_summary.html](docs/ai_sbc/experiment_summary.html) |
+| Detailed reports | [docs/ai_sbc/reports.html](docs/ai_sbc/reports.html) |
+| Model names and paths | [docs/ai_sbc/AI_SBC_VERSIONS.md](docs/ai_sbc/AI_SBC_VERSIONS.md) |
+| Design, code map and debugging | [docs/ai_sbc/AI_SBC_FRAMEWORK.md](docs/ai_sbc/AI_SBC_FRAMEWORK.md) |
 | Integrated evaluation commands | [examples/experiments/assist_skeleton/README.md](examples/experiments/assist_skeleton/README.md) |
 | ManiFlow interface | [protomotions/maniflow/README.md](protomotions/maniflow/README.md) |
 
 Keep status in HANDOFF, conclusions in the summary, and reproducible paths in the version table.
-Do not append session diaries to these instructions or READMEs. `docs/archive/` is historical evidence,
-not current execution instructions. HTML report regeneration is followed by `python docs/organize_reports.py`.
+Do not append session diaries to these instructions or READMEs. `docs/ai_sbc/archive/` is historical evidence,
+not current execution instructions. HTML report regeneration is followed by `python docs/ai_sbc/organize_reports.py`.
+AI-SBC documents live in `docs/ai_sbc/`; the rest of `docs/` is the upstream Sphinx source. Only the files
+whitelisted in `.gitignore` are versioned; reports, figures and the archive stay local unless added there.
 
 ## Current research baseline
 
 - H1: ManiFlow angle predictor, 100 Hz input, current through 50 ms prediction.
 - L1: pendulum-trained assist policy, `checkpoints/L1_llp_pendulum/last.ckpt`.
   W1 comparison uses output scale 0.5 (about ±20 N·m), 10 ms control.
+  The hip-angle swing-brake gate (`--swing-gate 0.20`, `AssistController.swing_gate_fraction`, off by default)
+  is a diagnostic reference, not a deployment candidate: hand-made phase rules are excluded;
+  see `docs/ai_sbc/walking_swing_gate.html`.
 - W1: frozen suit wearer, `checkpoints/W1_wearer_human/last.ckpt`.
+- Current priority: maximize LLP performance using pendulum-only training at 20 N·m, scale 1;
+  follow `docs/ai_sbc/pendulum_pretrain_discussion.md`. Compare pendulum disturbances and per-joint policies.
+  W1 is for transfer evaluation. Native walking validation and full-body fine-tuning are later tasks.
 - `Axxx` denotes the source motion performer's `actor_uid`, not an experiment or model version.
 - L13R/L14 are research candidates for the existing walk. New native walking clips still need
   unassisted wearer tracking validation. Follow HANDOFF before resuming training.

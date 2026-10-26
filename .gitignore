@@ -33,3 +33,16 @@ AGENTS.md
 
 # 파생 모션 부분집합 — examples/experiments/assist_skeleton/make_gait_motions.py로 재생성
 data/motion_for_trackers/skeleton_torque_suit_gait.pt
+
+# AI-SBC 문서: 아래 목록만 버전 관리, 나머지 보고서·그림·보관본은 로컬에만 둔다
+/docs/ai_sbc/*
+!/docs/ai_sbc/HANDOFF.md
+!/docs/ai_sbc/AI_SBC_FRAMEWORK.md
+!/docs/ai_sbc/AI_SBC_VERSIONS.md
+!/docs/ai_sbc/experiment_summary.html
+!/docs/ai_sbc/pendulum_pretrain_discussion.md
+!/docs/ai_sbc/organize_reports.py
+!/docs/ai_sbc/reports.html
+!/docs/ai_sbc/report_catalog.json
+!/docs/ai_sbc/l1_w1_report.html
+!/docs/ai_sbc/l1_w1_baseline.json

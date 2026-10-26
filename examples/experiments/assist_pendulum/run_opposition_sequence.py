@@ -128,7 +128,7 @@ def main():
             records[f"eval_{tag}"] = json.loads(done.read_text())
             save_json(out / "comparison.json", records)
             build_report(out / "comparison.json", out / "comparison.html")
-            build_report(out / "comparison.json", ROOT / "docs/l6_l7_torque_report.html")
+            build_report(out / "comparison.json", ROOT / "docs/ai_sbc/l6_l7_torque_report.html")
     status("complete; awaiting analysis before the next hypothesis")
 
 

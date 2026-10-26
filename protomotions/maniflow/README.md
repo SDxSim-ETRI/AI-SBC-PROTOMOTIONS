@@ -4,8 +4,8 @@
 보조 토크는 별도로 학습한 LLP가 만든다. 시뮬레이션 코드는 이 패키지를 통해 접근하며
 외부 `maniflow.*`를 직접 import하지 않는다.
 
-현재 모델 경로는 [버전표](../../docs/AI_SBC_VERSIONS.md), 시스템 설계는
-[프레임워크](../../docs/AI_SBC_FRAMEWORK.md), 실행은
+현재 모델 경로는 [버전표](../../docs/ai_sbc/AI_SBC_VERSIONS.md), 시스템 설계는
+[프레임워크](../../docs/ai_sbc/AI_SBC_FRAMEWORK.md), 실행은
 [통합 평가 README](../../examples/experiments/assist_skeleton/README.md)를 참조한다.
 
 ## 입력·출력과 시간
@@ -78,6 +78,6 @@ current_and_future = prediction[:, estimator.n_obs_steps - 1:]
 ## 과거 토크 직접 예측 연구
 
 88채널 상태 → 고관절 6채널 토크를 예측하던 모델은 현재 HLP와 별개다.
-채널 순서·이전 제어 예제는 [이전 README](../../docs/archive/20261013/maniflow_README.md)에 보존했다.
+채널 순서·이전 제어 예제는 [이전 README](../../docs/ai_sbc/archive/20261013/maniflow_README.md)에 보존했다.
 관련 `tasks/mimic_suit_active_cable_walk_23dof/` 스크립트가 래퍼를 사용하므로
 `torque_estimator.py`와 공개 import를 임의로 삭제하지 않는다.

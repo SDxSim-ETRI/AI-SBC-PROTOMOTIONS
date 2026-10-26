@@ -1,8 +1,8 @@
 # AI-SBC 전신 보조 평가와 실행
 
-현재 작업은 [HANDOFF](../../../docs/HANDOFF.md), 결과는 [보고서 목록](../../../docs/reports.html),
-모델 경로는 [버전표](../../../docs/AI_SBC_VERSIONS.md)를 기준으로 한다.
-이 문서는 실행법과 파일 역할만 다룬다. 초기 실험 일지는 [보관본](../../../docs/archive/20261013/assist_skeleton_README.md)에 있다.
+현재 작업은 [HANDOFF](../../../docs/ai_sbc/HANDOFF.md), 결과는 [보고서 목록](../../../docs/ai_sbc/reports.html),
+모델 경로는 [버전표](../../../docs/ai_sbc/AI_SBC_VERSIONS.md)를 기준으로 한다.
+이 문서는 실행법과 파일 역할만 다룬다. 초기 실험 일지는 [보관본](../../../docs/ai_sbc/archive/20261013/assist_skeleton_README.md)에 있다.
 
 ## 기본 비교 기준
 
@@ -77,12 +77,12 @@ HLP 계산 시간은 별도 기록한다. `--hlp-latency-ms 0`은 계산 지연�
 | `run_system.py`, `analysis.py`, `viz.py` | 통합 비교 실행, 지표·그림, 시각화 |
 | `evaluate_native_wearer.py` | 새 보행의 무보조 착용자 평가 |
 | `diagnose_walking.py`, `fullbody_diagnostic.py`, `phase_screen.py` | 구간별 방해와 전신 물리 진단 |
-| `report_*.py` | 저장한 결과의 보고서 생성. 생성 뒤 `python docs/organize_reports.py` 실행 |
+| `report_*.py` | 저장한 결과의 보고서 생성. 생성 뒤 `python docs/ai_sbc/organize_reports.py` 실행 |
 | `llp_walk_finetune*.py`, `llp_walk_tempo.py` | 전신 추가학습 실험 구성 |
 | `run_walk_*_sequence.py`, `validate_walk_finetune.py` | 해당 실험의 실행·평가 절차 재현 |
 | `tracker_human.py`, `train_tracker_human.sh` | W1 착용자 학습 구성·실행 |
 | `llp_walk.py`, 초기 tracker 스크립트 | 과거 실험 재현 및 일부 공통 구성 제공 |
 
 공통 제어기는 `protomotions/assist/`, ManiFlow 연결은 `protomotions/maniflow/`에 있다.
-구체적인 코드 흐름과 주의점은 [프레임워크 문서](../../../docs/AI_SBC_FRAMEWORK.md)를 참조한다.
+구체적인 코드 흐름과 주의점은 [프레임워크 문서](../../../docs/ai_sbc/AI_SBC_FRAMEWORK.md)를 참조한다.
 학습 스크립트가 남아 있다는 이유로 종료된 실험을 다시 시작하지 않는다.
