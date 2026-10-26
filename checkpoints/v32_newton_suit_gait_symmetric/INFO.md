@@ -8,7 +8,7 @@
 | 로봇 | `skeleton_torque_suit_passive_cable` (27 DOF) |
 | 시뮬레이터 | Newton, 평지, 물리 120 Hz / decimation 6 (env 20 Hz), 4096 env, batch 16384 |
 | 모션 | 보행 계열 `skeleton_torque_suit_gait.pt` (walk 0.75 + run 0.25) |
-| 레시피 | `examples/experiments/assist_skeleton/tracker_gait_sym.py` — mimic 보상 + **`dof_pos_rew`(관절각 추종, weight 0.5, coefficient −15)** |
+| 레시피 | `results/mimic_suit_gait_sym/scripts/tracker_gait_sym.py`(2026-10-26 보관) — mimic 보상 + **`dof_pos_rew`(관절각 추종, weight 0.5, coefficient −15)** |
 | 결과 | 성공률 1.0, 몸체 오차 **6.8 cm**(v31 8.4), 관절 오차 **8.6°**(v31 9.8) |
 | **걸음 대칭** | 고관절 가동범위 좌우 차이 walk **3.1°** (v31 21.9°), run 12.7° (v31 14.7°) — mocap 자체 차이는 4.7° |
 | hip mocap 추종 | walk **6.3°** (v31 9.8), run **6.0°** (v31 12.2) |
@@ -29,7 +29,7 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --llp-checkpoint <llp>/last.ckpt \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 --seconds 40
 # 재학습
-bash examples/experiments/assist_skeleton/train_tracker_gait_sym.sh
+bash results/mimic_suit_gait_sym/scripts/train_tracker_gait_sym.sh
 ```
 
 ## 주의

@@ -6,7 +6,7 @@
 | 보관일 | 2026-09-14 |
 | Epoch | 1901 (평가 파워 1400 epoch부터 평탄: 165.1 → 162.4 W) |
 | 학습 env | `SkeletonAssistEnv` (env 10 ms, 물리 400 Hz/4), 착용자 = 동결 mimic tracker v31(5 step마다), HLP = 실 ManiFlow(배치, 20 ms마다), 4096 env |
-| 학습 모션 | **보행 계열만** — walk 0.75 + run 0.25 (`make_gait_motions.py`; squat·제자리 걸음·한 걸음·런지 제외) |
+| 학습 모션 | **보행 계열만** — walk 0.75 + run 0.25 (`data/scripts/make_gait_motions.py`; squat·제자리 걸음·한 걸음·런지 제외) |
 | 설정 | assist 한계 40 N·m, `--action-rate-weight -0.005`(기본), 구동기 필터 없음 |
 | 보상 | 몸체 오차 hinge 벌점(margin 0.09 m, w 10) + human_power −0.003 + assist_effort −5e-5 + action_rate −0.005 |
 | 결과 (40 s, v31 착용자) | walk **174 → 127 W (−27.0 %)**, run **227 → 155 W (−31.7 %)**, 낙상 0 |

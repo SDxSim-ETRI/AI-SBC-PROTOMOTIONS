@@ -84,7 +84,7 @@ LLP가 내부적으로 “감속=사람 제동”이라는 규칙을 쓴다는 �
 - 나머지: [motor20 평가 폴더](../../results/motor20_probes_20261014/evaluations/)의
   2026-10-14_17-15-57_tracker_ 접두사와 L8e4000_lim20_m0, L9e2000_lim20_m0,
   beta05_lim20_m0, beta10_lim20_m0, L13Re400_lim20_m0, L14e200_lim20_m0.
-- 계산 경로: [report_swing_gate.py](../../examples/experiments/assist_skeleton/report_swing_gate.py)의 load/bins.
+- 계산 경로: [analysis.py](../../examples/experiments/assist_skeleton/analysis.py)의 `SwingGateBins.load/bins` (보고서는 `report.py swing-gate`).
   기존 구간 “기여”는 각 bin의 τ² 차이를 25로 나눈 값이다. 정확한 시간 평균 기여를 계산할 때는 실제 표본 비중으로 가중한다.
 
 **걷기 −26%는 도전 목표로 유지한다. −28%를 상한으로 선언하지 않는다.**
@@ -342,12 +342,12 @@ Newton의 위치 PD 입력을 `θ_g + Kd/Kp * v_g`로 이동시켜 위 식을 �
 `eval_L1_separate/summary.json`, `eval_L1_combined_human/summary.json`.
 
 새 모델 이름은 `llp_pendulum20_{C0,S1,A1,T1}_20261014_nativeff`다.
-실행은 `run_research_sequence.py`, 공통 레시피는 `mlp_research.py`다.
+실행은 `run_research_sequence.py`, 공통 레시피는 `mlp_research.py`다 (2026-10-26 보관: `results/pendulum_research_20261014/scripts/`).
 첫 예산은 각 2,000 epoch, seed 0, 4,096 환경이며 1,000/2,000 epoch를 동일한 진자 조건으로 평가한다.
 상태·학습 로그·소스 사본·평가 원본은 `results/pendulum_research_nativeff_20261014/`에 남긴다.
 
 P1 외란·공유 관절 actor·목표 유지 기능은 구현했고, 기능을 끄면 기존 control 궤적/RNG와 일치한다.
-`evaluate_research.py`는 고정 길이·고정 seed 코호트의 무보조/보조 진자를 함께 적분한다.
+`evaluate_research.py`(보관; 공통 부분은 `evaluate.py`의 `PairedPendulumEvaluation`)는 고정 길이·고정 seed 코호트의 무보조/보조 진자를 함께 적분한다.
 실패 후 새 에피소드를 샘플링하지 않으므로 정책마다 평가 목표가 바뀌지 않는다.
 부담·추종은 두 진자가 모두 살아 있는 공통 구간(첫 실패 전이 포함)에 대해 집계하며,
 각 조건의 첫 실패 횟수와 제외된 노출 비율을 따로 기록한다. 생존 조건부 평균의 한계를 명시한다.
@@ -403,7 +403,7 @@ L1은 학습 예산·출력 스케일·학습 환경이 다르므로 이 표는 
 같은 보조 진자 상태 기록 중 16개 환경에 고정 H1을 적용한 오프라인 검사에서는 20 ms 실제 각도 MAE가
 H1 0.41°, 에뮬레이터 1.35°였다. 몸통 pitch/roll은 0, 진자 flexion 부호는 −1, denoise는 1 step이다.
 이는 예측 입력의 의미·오차가 다름을 확인한 결과이고, H1 폐루프 보조 성능을 검증한 결과는 아니다.
-`analyze_hlp_research.py`와 `results/pendulum_research_nativeff_20261014/H1_offline/`에 코드·원본을 남겼다.
+`analyze_hlp_research.py`(보관)와 `results/pendulum_research_nativeff_20261014/H1_offline/`에 코드·원본을 남겼다.
 
 ### 실제 H1 폐루프 진자 평가
 
@@ -435,7 +435,7 @@ W1 학습이나 W1 토크 정답은 사용하지 않았다.
 
 남길 산출물은 고정 학습/검증/최종 평가 설정, 무보조·보조 진자 기록, 외란/사람/보조 토크 분해,
 항별 보상·추종·실패율, 요청/적용 토크, 모델·코드·config 경로다.
-기존 [mlp_v4.py](../../examples/experiments/assist_pendulum/mlp_v4.py)와 L1은 보존한다.
+기존 L1 레시피([mlp.py](../../examples/experiments/assist_pendulum/mlp.py) `--recipe L1`)와 L1은 보존한다.
 
 주요 구현 위치:
 [외란](../../protomotions/envs/control/assist_disturbance_control.py),
@@ -458,4 +458,4 @@ W1 학습이나 W1 토크 정답은 사용하지 않았다.
 
 H1 생성/추론 RNG를 분리하고 기존 합성 예측 난수 소비를 유지한다. GPU 예비검사에서 무보조 물리·목표·외란 RNG 동일, 학습/평가 H1 예측 최대 차이 1.53e-7 rad, 부분 reset 이력 분리, 초기 L1 actor 출력 동일, 3 epoch 학습을 확인했다. 각 100/300/600/1,000/2,000 epoch를 기존 평가로 비교하고 통과 후보만 추가학습 seed 1 및 별도 평가 seed로 검증한다. L1 사전학습 seed는 공통이므로 추가학습 재현성으로만 해석한다.
 
-레시피: `mlp_pendulum_adapt.py`. 모델: `results/llp_pendulum20_{PA_E,PA_H1}_20261015/`. 현재 상태·원본: `results/pendulum_adaptation_20261015/`.
+레시피: `mlp_pendulum_adapt.py`(보관 `results/pendulum_adaptation_20261015/scripts/`). 모델: `results/llp_pendulum20_{PA_E,PA_H1}_20261015/`. 현재 상태·원본: `results/pendulum_adaptation_20261015/`.

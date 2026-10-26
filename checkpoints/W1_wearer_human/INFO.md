@@ -40,7 +40,7 @@ L1 출력 0.5배와 결합한 기존 걷기·달리기 비교 기준이다.
 python examples/experiments/assist_skeleton/run_system.py --seconds 40
 
 # 새 실제 보행의 무보조 추종만 확인. 출력은 새 폴더를 사용한다.
-python examples/experiments/assist_skeleton/evaluate_native_wearer.py \
+python examples/experiments/assist_skeleton/evaluate.py native-wearer \
     --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
     --motion-file results/real_walk_retarget_20261012_224957/native_pairs_v1/suit_native_walk.pt \
     --starts 0 0.5 --max-seconds 8 --out results/native_walk_check

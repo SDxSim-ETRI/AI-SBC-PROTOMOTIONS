@@ -18,7 +18,7 @@ python examples/experiments/assist_skeleton/run_system.py --human tracker \
     --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt \
     --llp-checkpoint checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt --seconds 30
 # 모션별 A/B
-python examples/experiments/assist_skeleton/eval_motions.py --llp-checkpoint checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt \
+python examples/experiments/assist_skeleton/evaluate.py motions --llp-checkpoint checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt \
     --tracker-checkpoint checkpoints/v31_newton_suit_passive_motions15/last.ckpt \
     --motion-file "data/motion_for_trackers/skeleton_torque_suit_motions_11+koo_4.pt" --calibration motion_all --out results/assist_skeleton_motions/<tag>
 # 독립 제어기로 싣기: protomotions.assist.AssistController(AssistControllerConfig(llp_checkpoint="checkpoints/llp_v5_skel_walk_ensemble_40Nm/last.ckpt", joint_sign=+1))

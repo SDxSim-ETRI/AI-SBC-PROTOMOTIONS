@@ -16,7 +16,7 @@
 """그래프 위주 보고서: LLP 20 N·m · 단일 관절 학습·양다리 가중치 공유 · 실제 동작 의도와 A·Δ 2×2 비교 (`MotionLegReport`).
 
 저장된 기록만 읽는다 (`study.py`의 연구 폴더). W1 지표는 2026-10-21 일반화 보고서와 같은 코드
-(스켈레톤 `report_generalization.digest`)로 계산하고, 저부담 구간은 같은 조건·평가 난수의 L1 ±20 무보조
+(스켈레톤 `analysis.WalkingPhaseDigest.digest`)로 계산하고, 저부담 구간은 같은 조건·평가 난수의 L1 ±20 무보조
 기록으로 정한다. 생성 뒤 `python docs/ai_sbc/organize_reports.py`를 실행한다.
 
     python examples/experiments/assist_pendulum/report.py --date 261022 [--study results/llp20_motion_20261021]

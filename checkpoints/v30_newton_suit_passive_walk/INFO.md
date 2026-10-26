@@ -11,7 +11,7 @@
 | 메모 | 성공률 1.0(3400~4400 연속), 몸체 위치 오차 7.6 cm. 삭제된 v18_2 레시피(`examples/experiments/mimic/mlp.py`)를 처음부터 재학습(2026-09-12). 학습 프로세스가 외부 종료돼 epoch 4440에서 멈췄으나 목표 상태 도달 후였음. 주의: mimic 보상은 몸체 위치만 맞추므로 hip flexion의 mocap 추종은 10~14° 벗어남 (framework doc §3.5) |
 
 ## 학습 스크립트
-`examples/experiments/assist_skeleton/train_tracker_walk.sh` / `train_tracker_motions15.sh`
+`results/mimic_suit_passive_walk/scripts/train_tracker_walk.sh` / `results/mimic_suit_passive_motions15/scripts/train_tracker_motions15.sh` (2026-10-26 보관)
 
 ## 재사용 방법
 

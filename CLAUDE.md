@@ -99,6 +99,8 @@ These files carry the design docs; read the relevant one before changing that ar
 - `protomotions/components/` — `motion_lib.py`, `pose_lib.py`, `scene_lib.py`, `terrains/`.
 - `protomotions/utils/simulator_imports.py` — IsaacGym/IsaacLab must be imported before torch.
 - `protomotions/assist/` — independent HLP + LLP controller, actor loading and skeleton features. `protomotions/simulator/newton/substep_hook.py` runs assistance inside the wearer step.
+- `examples/experiments/assist_pendulum/` — `mlp.py` (one experiment file, `--recipe L1|R0|motion_leg`; `protomotions/tests/test_pendulum_recipes.py` pins the presets to the saved configs), `runtime.py` (`PendulumRuntime`: play/compare/check-env/abc), `evaluate.py`, `study.py`, `report.py`. Pendulum disturbances live in `protomotions/envs/control/assist_disturbance_control.py` (`DisturbedAssistTargetControl`).
+- `examples/experiments/assist_skeleton/` — `run_system.py` (`SystemRunner`), `analysis.py` (metric classes), `report.py` (HTML: comparison/checkpoint/torque/swing-gate), `evaluate.py` (motions/native-wearer/wearer), `plots.py`, `viz.py`, `llp_walk.py`, `tracker_human.py`. Closed studies keep their original scripts under `results/<study>/scripts/` with a `SNAPSHOT.md` pointing at snapshot commit `8058f3c`; do not resurrect them into `examples/`.
 
 ## Gotchas
 

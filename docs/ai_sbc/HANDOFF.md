@@ -16,13 +16,13 @@ W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실
 
 **출력 20·tanh, 실제 고관절 동작 궤적, 단일 관절 학습 후 양다리 가중치 공유로 R0 레시피를 다시 학습한 네 모델(보조 토크² 벌점 A × 명령 변화 벌점 Δ)은 모두 W1에서 L1 ±20보다 덜 줄였다. 원인은 학습 때 쓰는 미래 목표 신호(의도 궤적에 고정된 에뮬레이션 예측)와 배포 때 실제 H1 예측의 차이로 보인다.** [그래프·표](261022_llp20_motion_shared/report.html). 2026-10-22 06:09 KST 계산 완료(학습 4개 각 약 2시간, 평가 74건, 진단 12건). 미완료 계산은 없다.
 
-- 학습: R0 레시피(`mlp_relative.py`)에서 세 가지를 바꿨다(`examples/experiments/assist_pendulum/mlp_motion_leg.py`). (1) 출력 20·tanh·한계 20 N·m, 평가 배율 1. (2) 의도 궤적: 환경 20 %는 기존 합성 궤적, 40 %는 가벼운 다리(hip 축 관성 0.42–0.80 kg·m²)의 달리기 60·조깅 30·점프 10 %, 40 %는 R0 관성 범위의 걷기·조깅·점프·앉기/일어서기류·기타. SEED 100 fps 고관절 동작 중 H1 학습분할만 쓰고, 다리가 따라갈 수 없는 클립(각가속도 99 % 값 × 관성 > 0.8 × 150 N·m)은 뽑지 않는다. R0 관성 분포로는 달리기를 따라갈 다리가 2 % 남짓이라 가벼운 다리 집단을 따로 뒀다. 의도 각속도 4 rad/s 초과 시간 7.7 %(R0 약 3 %). (3) 오른쪽 관절 하나만 보조·보상·관측하는 학습(= 단일 진자 학습)이고, 평가·배포는 같은 가중치를 양다리에 적용한다(`protomotions/assist/llp_pair.py`의 `LLPSharedLeg`, `run_system.py --llp-share-legs`). 학습 seed 0 하나다(처음 함께 띄운 왼쪽 관절 seed 1 학습은 사용자 결정으로 중지).
+- 학습: R0 레시피(`mlp.py --recipe R0`)에서 세 가지를 바꿨다(`examples/experiments/assist_pendulum/mlp.py --recipe motion_leg`). (1) 출력 20·tanh·한계 20 N·m, 평가 배율 1. (2) 의도 궤적: 환경 20 %는 기존 합성 궤적, 40 %는 가벼운 다리(hip 축 관성 0.42–0.80 kg·m²)의 달리기 60·조깅 30·점프 10 %, 40 %는 R0 관성 범위의 걷기·조깅·점프·앉기/일어서기류·기타. SEED 100 fps 고관절 동작 중 H1 학습분할만 쓰고, 다리가 따라갈 수 없는 클립(각가속도 99 % 값 × 관성 > 0.8 × 150 N·m)은 뽑지 않는다. R0 관성 분포로는 달리기를 따라갈 다리가 2 % 남짓이라 가벼운 다리 집단을 따로 뒀다. 의도 각속도 4 rad/s 초과 시간 7.7 %(R0 약 3 %). (3) 오른쪽 관절 하나만 보조·보상·관측하는 학습(= 단일 진자 학습)이고, 평가·배포는 같은 가중치를 양다리에 적용한다(`protomotions/assist/llp_pair.py`의 `LLPSharedLeg`, `run_system.py --llp-share-legs`). 학습 seed 0 하나다(처음 함께 띄운 왼쪽 관절 seed 1 학습은 사용자 결정으로 중지).
 - W1 고관절 τ² 감소 [(N·m)²] (평가 난수 42/7 평균, A·Δ 없음 / 둘 다 / A만 / Δ만): 기존 걷기 **149 / −123 / −132 / 81** (L1 ±20 278, R0 ±20 262), 같은 걷기 400–440 s 140 / −120 / −132 / 69 (L1 245, R0 264), 달리기 **637 / 413 / 229 / 155** (L1 756, R0 436). 새 모델은 보조 RMS 17.5–19.3 N·m로 L1 ±20보다 크고, 걷기 포화 66–72 %(L1 54 %, R0 0.5 %)다. 필요 토크 0–5 N·m에서도 19–20 N·m를 내며, A를 켠 두 모델은 걷기 필요 토크 10–40 N·m 구간의 보조 방향 일치가 50–55 %(무작위 수준)다. 낙상 0, 몸체 오차 변화 ±1 mm 이내.
 - 진자(실제 H1, 착용자 τ² 감소율): SEED 미학습 동작 L1 6.7 / R0 10.7 / 새 1.5–10.4 %; 그중 달리기 클립은 새 20–26 %(L1 21, R0 22)로 비슷하거나 크다. ETRI 13동작 L1 −6.4 / R0 2.4 / 새 −11.4–4.3 %; 스쿼트 L1 −27 / R0 −9 / 새 −37–+2 %. 2026-10-20과 같은 합성 궤적 평가(legacy) 새 12.3–16.3 %(저장 L1 20.2, R0 14.4; 무보조 τ² 2299.5로 같은 진자).
-- 원인 진단(`diagnose_motion_leg_chunk.py`): 학습 분포 진자에서 학습과 같은 에뮬레이션 예측을 주면 새 모델이 τ²를 **32–36 %** 줄여 R0 ×0.5(30 %)·L1 ×0.5(27 %)보다 크지만, 예측만 실제 H1로 바꾸면 **7–14 %**로 떨어진다(R0 13, L1 12 %). 보조와 무보조 착용자 토크의 상관은 새 0.55–0.61 → 0.19–0.24, R0 0.71 → 0.36. 학습은 됐고, 에뮬레이션 예측이 담는 착용자 추종 오차(필요 토크의 단서)에 더 의존하도록 학습된 것이 배포 H1에서 드러났다.
+- 원인 진단(`evaluate.py chunk`, 옛 diagnose_motion_leg_chunk.py): 학습 분포 진자에서 학습과 같은 에뮬레이션 예측을 주면 새 모델이 τ²를 **32–36 %** 줄여 R0 ×0.5(30 %)·L1 ×0.5(27 %)보다 크지만, 예측만 실제 H1로 바꾸면 **7–14 %**로 떨어진다(R0 13, L1 12 %). 보조와 무보조 착용자 토크의 상관은 새 0.55–0.61 → 0.19–0.24, R0 0.71 → 0.36. 학습은 됐고, 에뮬레이션 예측이 담는 착용자 추종 오차(필요 토크의 단서)에 더 의존하도록 학습된 것이 배포 H1에서 드러났다.
 - A·Δ: 방향이 평가마다 다르다. W1 걷기는 A를 끈 두 모델이 낫고, 진자 실제 동작은 A를 켠 두 모델이 낫다(SEED 10.4·8.5 vs 1.5·7.0 %). A를 켜도 보조 크기는 거의 그대로다. Δ는 학습 마지막 50 epoch의 명령 변화(Δ 끔 6.3–6.5 → Δ 켬 4.2–4.3 N·m/10 ms)와 진자 합성 평가(1.43–1.71 → 0.88–1.06)를 줄였지만 W1 달리기에서는 줄이지 못했다. 출력 10 Hz 저역통과는 모든 모델의 W1 이득을 늘렸다(걷기 L1 278 → 302, A·Δ 없음 149 → 194). 학습 seed 하나라 A·Δ의 효과로 단정하지 않는다.
 - 학습 분포의 무보조 진자 실패: 가벼운 다리가 달리기 중 입각 하중까지 받으면 착용자 토크가 한계에 걸려 10 s당 약 8 %(모든 모델 공통 기준). 시뮬레이터 SIGSEGV 3회(학습 1, W1 2)는 자동 재개·재실행으로 완료했다.
-- 원본·코드: `results/llp20_motion_20261021/`(manifest, execution_right, eval_runs, pendulum/, walking/, diagnostics/, verification.json 통과), checkpoint `results/llp20_motion_{A0D0,A1D1,A1D0,A0D1}_right_s0_20261021/epoch_6000.ckpt`, 실행 `examples/experiments/assist_pendulum/{run_motion_leg,run_motion_leg_eval,run_motion_leg_diagnostics,report_motion_leg,verify_motion_leg}.py`. W1/H1/L1/R0 동결.
+- 원본·코드: `results/llp20_motion_20261021/`(manifest, execution_right, eval_runs, pendulum/, walking/, diagnostics/, verification.json 통과), checkpoint `results/llp20_motion_{A0D0,A1D1,A1D0,A0D1}_right_s0_20261021/epoch_6000.ckpt`, 실행 `examples/experiments/assist_pendulum/study.py`(2026-10-26 통합; 당시 실행기는 `results/llp20_motion_20261021/scripts/`에 보관). W1/H1/L1/R0 동결.
 
 다음은 (1) 학습 때의 미래 목표 신호를 배포 H1과 같은 정보로 맞춰 다시 학습한다. 후보는 에뮬레이션 예측을 실제 각도 이력 기준으로 만들기(실제 각도에 고정 + H1 오차 통계) 또는 학습 중 실제 H1 연결이며, 먼저 진단 스크립트로 에뮬레이션 대 H1 차이가 줄어드는지 본다. (2) 20 N·m로 학습하면 보조가 한계에 몰리는 문제(L2–L5 교훈과 같은 양상)는 (1)과 함께 본다. (3) A·Δ 판단은 (1) 이후 학습 seed를 늘려 다시 한다. 새 학습을 자동 재개하지 않는다.
 
@@ -35,7 +35,7 @@ W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실
 - 원점과 L1 ±10/15/20을 이은 곡선(L1 출력만 줄여 얻는 이득)과 비교하면, 같은 보조 RMS에서 R0 ±20의 고관절 τ² 감소는 기존 걷기 **+40.9 (N·m)²(+18 %)**, 400–440 s 구간 **+69.0(+35 %)**, 달리기 **−227.8(−34 %)**이다. 같은 저부담 손해 기준으로는 **+7 / +24 / −33 %**다. 앞선 "+15 %"는 L1 ±10과 직접 비교한 값이고 +18 %는 곡선 보간 값이다.
 - 달리기 ±20: 이득 L1 **755.9** vs R0 **436.2 (N·m)²**, 보조 RMS 18.56 vs 13.84 N·m, 최악 위상 RMS 증가 16.83 vs 16.77 N·m(같음). 걷기에서 R0 보조는 필요 토크에 비례했지만(무보조 착용자 토크 0–5 N·m에서 7.3, 80 이상에서 15.3 N·m), 달리기에서는 14.4 → 11.3 N·m로 거꾸로다. 보조 방향 일치율은 모든 조건에서 L1과 같고 저부담에서는 둘 다 무작위(~50 %)다. 달리기는 고관절 각속도 4 rad/s 이상인 시간이 25.9 %로, 진자 평가 궤적 3.0 %, 걷기 0.1 %보다 훨씬 많다. 다만 이 분포 차이가 원인이라는 검증은 하지 않았다. 달리기의 저부담 감속 구간은 0.47초뿐이라 손해는 최악 위상으로 판단했다.
 - 좌우: R0는 세 조건 모두 오른쪽 이득이 더 크다(+121 / +168 / +231 (N·m)²). 몸체 오차 변화 −1.1 ~ +0.5 mm, 속도 변화 0.0003 m/s 이하. 시뮬레이터 SIGILL 1회(400 s 구간 R0 ±20 seed 7)는 같은 명령으로 처음부터 다시 실행했다(`runtime_failures.json`).
-- 원본·코드: `results/llp_r0_generalization_20261021/`, `examples/experiments/assist_skeleton/{evaluate_generalization,report_generalization}.py`. W1/H1/L1/R0 동결.
+- 원본·코드: `results/llp_r0_generalization_20261021/`, `results/llp_r0_generalization_20261021/scripts/{evaluate_generalization,report_generalization}.py`(2026-10-26 보관; 계산은 `assist_skeleton/analysis.py`의 `WalkingPhaseDigest`). W1/H1/L1/R0 동결.
 
 당시 다음 과제였던 "빠른 각속도를 넣은 R0 레시피 재학습"은 2026-10-22 위 실험으로 수행했다. R0 학습 seed 1 반복과 R0/R1 절의 저부담 방향 문제는 그대로 남아 있다. R0는 걷기 후보 기준, 달리기 비교 기준은 L1이다.
 
@@ -43,7 +43,7 @@ W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실
 
 **토크 경로만 바로잡은 R0는 L1과 같은 보조 크기에서 평균 이득이 15 % 크고, L1 출력 축소 곡선보다 조금 위의 이득·손해 곡선을 보인다. 그러나 저부담 상태의 방향은 여전히 무작위(부호 일치 ~50 %)이며, L1 수준의 이득을 내게 하면 저부담 손해도 L1 수준이다. L1의 포화 출력은 과거 토크 경로가 만든 학습 분포의 산물이었다.** [상위 5개 위상 그래프](261020_relative/phase_report.html) · [상세 보고서와 전체 비교표](261020_relative/report.html). 12:42 KST 계산 완료, 약 4시간. 미완료 계산은 없다.
 
-- R0 = L1 레시피(`mlp_v4.py`) + 사람 PD+FF를 한 actuator에서 한 번 제한하고 보조·외란을 독립 주입(G/F와 같은 경로). R1 = R0 + 무보조 대비 토크 증가 비용(가중치 −0.5). 학습 중 같은 목표 궤적·관성·외란을 받는 무보조 진자를 함께 계산하고, 보조 진자의 착용자 토크²가 무보조보다 커진 만큼을 (무보조 착용자 토크²의 최근 50 ms 평균 + 10²)로 나눠 벌점으로 준다. 무보조보다 줄어든 경우는 벌점 0이다. 각 seed 0·6,000 epoch·786,432,000 표본, 공동 MLP·학습 ±40 N·m·4096환경은 L1과 동일. W1/H1 동결, 기존 L1/G0/G4/F1/F2 기준선 재실행 없음. 신규 W1 8건 모두 40초 완주, 진자 6조건 완료.
+- R0 = L1 레시피(`mlp.py --recipe L1`) + 사람 PD+FF를 한 actuator에서 한 번 제한하고 보조·외란을 독립 주입(G/F와 같은 경로). R1 = R0 + 무보조 대비 토크 증가 비용(가중치 −0.5). 학습 중 같은 목표 궤적·관성·외란을 받는 무보조 진자를 함께 계산하고, 보조 진자의 착용자 토크²가 무보조보다 커진 만큼을 (무보조 착용자 토크²의 최근 50 ms 평균 + 10²)로 나눠 벌점으로 준다. 무보조보다 줄어든 경우는 벌점 0이다. 각 seed 0·6,000 epoch·786,432,000 표본, 공동 MLP·학습 ±40 N·m·4096환경은 L1과 동일. W1/H1 동결, 기존 L1/G0/G4/F1/F2 기준선 재실행 없음. 신규 W1 8건 모두 40초 완주, 진자 6조건 완료.
 - R0 ±20 N·m: 고관절 τ² 감소 **262.03** (L1 **278.04 (N·m)²**), 저부담 감속 RMS 증가 **3.27** (L1 **7.67 N·m**), 최악 위상 RMS 증가 **7.57** (L1 **14.94 N·m**), 보조 RMS **8.29** (L1 **16.90**), 포화 **0.5 %** (L1 53.8 %). ±15 N·m: **220.25 / 1.87 / 5.86 / 6.33**. 이때 R0의 보조 RMS는 L1 ±20의 절반이므로 직접 비교는 R0에 유리하다. 보조 RMS가 같은 L1 ±10(8.57 N·m: 228.55 / 2.27 / 5.92)과 비교하면 R0 ±20(0.5배)은 이득 **+33.5 (N·m)²(+15 %)**에 저부담 손해 **+1.0**, 최악 위상 **+1.65 N·m**다. 같은 저부담 손해(3.27)에서 L1 축소 곡선의 이득은 244.1로 R0가 +18 위다. 배율 1·±20 클립의 추가 평가에서는 이득 **277.05**(L1 278.04)에 손해 **8.41 / 14.69**(L1 7.67 / 14.94)로 L1과 같아진다(`results/llp_relative_20261020/walking_native/`). 사전 등록한 공동 기준(평균 이득 ≥ L1 ±20)은 미달이며 규칙에 따라 학습 seed 1 반복은 생략했다.
 - 무보조 착용자 토크 구간별로 보면 L1은 모든 구간에서 약 17 N·m(포화 54 %)를 내고, R0는 |τ_A|<5 N·m에서 7.3, 80 N·m 이상에서 15.3 N·m로 필요 토크에 비례한다. 부호 일치율은 같고 저부담 구간에서는 둘 다 무작위다(0–5 N·m 51 / 50 %). 과거 경로는 속도 피드포워드를 PD와 따로 ±150 N·m에서 포화시켜 무거운 진자의 착용자 토크를 비현실적으로 키웠고, 그 분포에서 "옳은 방향으로 최대"가 최적이었다. 분석: `examples/experiments/assist_pendulum/analyze_need_bins.py`.
 - F1 = R0 + C2 전환이므로 F1−R0가 C2 효과다: ±20에서 이득 **−77.6 (N·m)²**, 저부담 손해 **+1.83**, 최악 위상 **+4.77 N·m**. C2 전환은 해로웠다(앞선 후속 1의 답).
@@ -51,7 +51,7 @@ W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실
 - 진자 ±20 실제 H1: R0 legacy/phase/hold50 RMSE **2.884/2.772/4.003°**, 보조 실패 **0/0/2** (L1 2.700/2.642/3.673°, 0/0/1). 진자 점수만으로는 R0가 뽑히지 않았을 것이므로 진자 선정 기준에 필요 토크에 비례하는 보조 크기(구간별 보조 RMS)을 넣어야 한다.
 - 다른 관절(±20): R0 무릎 −67 / 발목 −121 / 몸통 +60 (N·m)² (L1 −139 / −198 / +134), 회전관절 합 감소 759.6 (L1 991.5). 몸체 오차 59.6 vs 59.3 mm, 속도 1.283 m/s 동일, 낙상 0.
 - 시뮬레이터 SIGSEGV 3회(R0 ±20 W1 seed 42/7 첫 시도, R1 학습 epoch 4,890)를 자동 재실행·재개로 완료했다. R1은 epoch 4,850 저장본에서 재개해 물리·난수 상태는 새로 초기화됐다. 원인은 미확정이며 `results/llp_relative_20261020/{runtime_failures.json,runtime_diagnosis_R0_20_seed42.txt}`에 기록했다.
-- 원본·명령·설정·로그·검증: `results/llp_relative_20261020/`, checkpoint `results/llp_relative_R{0,1}_s0_20261020/epoch_6000.ckpt`. 코드: `examples/experiments/assist_pendulum/{mlp_relative,run_relative,report_relative}.py`, `protomotions/envs/base_env/paired_assist_env.py`, `protomotions/envs/rewards/assist_energy.py`.
+- 원본·명령·설정·로그·검증: `results/llp_relative_20261020/`, checkpoint `results/llp_relative_R{0,1}_s0_20261020/epoch_6000.ckpt`. 코드: R0 = `examples/experiments/assist_pendulum/mlp.py --recipe R0`, `protomotions/envs/base_env/paired_assist_env.py`; 당시 실행기·R1 보상 커널(`assist_energy.py`)은 `results/llp_relative_20261020/scripts/`에 보관(R1은 2026-10-26 코드에서 제거).
 
 2026-10-20 당시 정한 후속 과제는 (1) R0를 학습 seed 1로 반복해 같은 보조 크기에서의 +15 % 이득 재현 확인, (2) 저부담 손해의 근본 원인인, 착용자 토크가 작은 구간의 보조 방향 오류를 겨냥해 실제 H1 예측을 학습에 연결하거나 chunk를 실제 각도에 정박한 조건에서 무보조 토크 구간별 부호 일치를 선정 지표로 두는 실험, (3) 진자 선정 기준에 보조 크기를 맞춘 비교와 필요 토크에 비례하는 보조 크기 추가다. 토크 증가 비용·흡수 파워처럼 비용 계수만 바꾸는 반복은 하지 않는다. 기존 걷기 비교 기준은 L1 ±10/15/20 N·m 축소 곡선을 유지하고 R0 ±20(0.5배)을 후보 기준으로 보조 RMS와 함께 병기한다. 새 학습을 자동 재개하지 않는다.
 
@@ -96,7 +96,7 @@ W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실
 - 전체 토크² 감소는 G0·20 N·m **306.18 (N·m)²**가 가장 컸지만 저부담 손해와 몸통 부담 증가가 남는다. 전체 평균 하나로 모델을 대체하지 않는다. 두 평가 실행의 평균·범위이며 다른 사람이나 보행에 대한 검증이 아니다.
 - 각 평가 난수의 L1·20 N·m 무보조 A로 저부담 감속 마스크를 고정했다. 50 ms 토크 RMS ≤10 N·m가 주 분석, ≤5 N·m가 민감도 분석이다. 이 구간의 위상 분포는 좌우가 달라 유각 후반과 동일시하지 않는다.
 
-원본·고정 계획·명령·검증: `results/llp_output_scale_20261016/{manifest,runs,comparison,verification,runtime_failures}.json`. 실행·분석: `examples/experiments/assist_skeleton/{evaluate_output_scale,report_output_scale}.py`. 모델·평가 소스 해시와 정상 기록의 연속 4,000개 창·토크 상한·유한값을 확인했으며 분석 검증 4개가 통과했다.
+원본·고정 계획·명령·검증: `results/llp_output_scale_20261016/{manifest,runs,comparison,verification,runtime_failures}.json`. 실행·분석: `results/llp_output_scale_20261016/scripts/{evaluate_output_scale,report_output_scale}.py`(2026-10-26 보관; 저부담 구간 마스크 계산은 `assist_skeleton/analysis.py`의 `DecelerationMasks`). 모델·평가 소스 해시와 정상 기록의 연속 4,000개 창·토크 상한·유한값을 확인했으며 분석 검증 4개가 통과했다.
 
 **다음 연구 문제는 비슷한 운동에서도 사람에게 필요한 토크가 다른 상황을 현재 관측과 이력으로 구분할 수 있는지 확인하는 것이다.** 외부 작용이 감속을 맡는 저부담 조건과 사람이 감속해야 하는 고부담 조건을 진자에서 분리해 평가한다. 계수만 키우는 재학습은 근거가 부족하다. 현재 미완료 계산은 없으며 새 학습·기존 큐·전신 추가학습을 자동 재개하지 않는다.
 
@@ -133,11 +133,18 @@ C0/S1/A1/T1·C0 연장·AB1의 이전 결론은 [연구 보고서](pendulum_rese
 | 공통 출력 크기 기준선 | [24건 결과](261016_output_scale/report.html) · 고정 계획과 원본은 `results/llp_output_scale_20261016/` |
 | 앞선 23 N·m 일반화 실험 | [최종 판단](261015_1815/FINAL_RESULTS.html) · [보행 phase 결과](261015_1815/walking_phase_report.html). 고정 계획·원본은 results/에 보존 |
 | 코드 구조·관측 계약·운영 주의 | [AI_SBC_FRAMEWORK.md](AI_SBC_FRAMEWORK.md) |
-| 새 보행 변환 / 무보조 평가 코드 | `data/scripts/retarget_soma23_to_suit.py` / `examples/experiments/assist_skeleton/evaluate_native_wearer.py` |
+| 2026-10-26 코드 통합 이전 상태 | 스냅샷 커밋 `8058f3c`(`git worktree add ../AI-SBC-PROTOMOTIONS-8058f3c 8058f3c`). 닫힌 연구의 당시 스크립트는 `results/<study>/scripts/`(각 `SNAPSHOT.md`) |
+| 새 보행 변환 / 무보조 평가 코드 | `data/scripts/retarget_soma23_to_suit.py` / `examples/experiments/assist_skeleton/evaluate.py native-wearer` |
 | 실제 보행 변환본 | `results/real_walk_retarget_20261012_224957/` |
 | 무보조 평가·참조 교체 실험 | `results/native_walk_validation_20261013/validation_summary.json` |
 | 전신 추가학습 결과 | [walking_finetune_report.html](walking_finetune_report.html) |
 | 과거 실험 일지 | [archive/20261013/NEXT_SESSION.md](archive/20261013/NEXT_SESSION.md) — 현재 지시가 아님 |
+
+2026-10-26에 실험 코드를 통합했다. 진자는 `examples/experiments/assist_pendulum/{mlp,runtime,evaluate,study,report}.py`
+(`mlp.py --recipe L1|R0|motion_leg`), 스켈레톤은 `examples/experiments/assist_skeleton/{run_system,analysis,report,evaluate,plots,viz,llp_walk,tracker_human}.py`다.
+연구 외란 제어는 `DisturbedAssistTargetControl` 하나, 양다리 공유 LLP는 `LLPPolicy(share_legs=True)`다. R1 보상 경로는 코드에서 제거했다.
+통합 뒤 W1+H1+L1×0.5 40 s 재평가(`results/assist_skeleton/consolidation_check/`)는 걷기 τ² −18.6 %, 달리기 −24.0 %로,
+같은 조건의 기존 실행 산포(걷기 −18.5…−20.4 %, 달리기 −23.7…−24.3 %) 안에 있다.
 
 실행 Python은 `/home/bak/miniconda3/envs/sbc/bin/python`이다. Full access에서 GPU 계산과 Newton 평가를 완료했다.
 예전 접근 오류로 현재 실행을 막지 말고 실제 명령 결과를 확인한다. 기존 미커밋 코드·모델·원본 결과는 보존한다.

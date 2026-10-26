@@ -140,7 +140,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 
 `run_system.py` → W1/모션 로드 → 영점 보정 → `AssistController` → 서브스텝 보조 주입 → A/B 토크 계측.
 무보조 A와 보조 B는 같은 초기 조건으로 시작한다. 토크 창 정렬과 물리 실행 산포를 검사한다.
-새 모션의 착용자만 검사할 때는 `evaluate_native_wearer.py`를 사용한다. 짧은 클립을 이어 붙이지 않는다.
+새 모션의 착용자만 검사할 때는 `evaluate.py native-wearer`를 사용한다. 짧은 클립을 이어 붙이지 않는다.
 
 ---
 
@@ -161,17 +161,14 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/action/action_functions.py` | `normalized_torque_action` (tanh × torque_scale) |
 | `protomotions/robot_configs/hip_pendulum.py` | 로봇 정의 (factory.py에 등록) + `protomotions/data/assets/mjcf/hip_pendulum.xml` |
 | `protomotions/simulator/newton/fixed_base.py` | `FixedBaseNewtonSimulator` — 고정 베이스용 root write/velocity 무해화 |
-| `examples/experiments/assist_pendulum/{mlp_general,evaluate_general,run_general}.py` | 현재 ±23 N·m 무작위 초기화 G0–G4, seed 재현, 실제 H1 평가·항별 보상 계측. L1은 ×0.5 유지 |
-| `protomotions/envs/control/pendulum_general_control.py` | 합성 의도 감속·반전과 연결한 수동 감쇠 외란. actor 위상 게이트 없음. 관성 변경·발 접촉 모델은 아님 |
-| `examples/experiments/assist_pendulum/mlp_research.py` | 진자 전용 C0/S1/A1/T1: 공통 보조 20 N·m·사람 PD+FF 전체 한계, 운동 의존 외란·공유 관절 actor·목표 유지 독립 비교 |
-| `protomotions/envs/control/pendulum_research_control.py` | 양방향 각도 의존 하중·수동 감쇠·10/50 ms PD/FF 목표 유지. 발 접촉·보행 위상 입력 없음 |
-| `protomotions/agents/common/shared_joint_mlp.py` | 외부 관측 형식은 그대로 두고 다리별 입력과 출력을 분리하는 공유 가중치 actor |
-| `examples/experiments/assist_pendulum/{evaluate_research,run_research_sequence}.py` | 고정 코호트 쌍 평가·첫 실패 계측 / 직렬 학습·평가 실행 및 소스 보존 |
-| `examples/experiments/assist_pendulum/mlp_pendulum_adapt.py`, `protomotions/agents/ppo/pendulum_adapt.py` | L1 actor만 동일 좌표로 가져와 진자에서 추가학습. critic/optimizer 새 초기화. 합성/H1 입력 비교 |
-| `protomotions/envs/control/pendulum_h1_control.py` | 동결 H1을 진자 학습에 연결. H1 RNG 분리, 기존 합성 예측 RNG 소비 유지, 부분 reset 이력 분리 |
-| `examples/experiments/assist_pendulum/run_limit_control.py` | 기존/수정 토크 처리 × 학습 한계 20/40 × seed 0/1. 저장 설정 차이 검사 후 각 6,000 epoch 처음부터 학습. 고정 마지막 모델을 모두 적용 한계 20으로 평가 |
-| `examples/experiments/assist_pendulum/mlp.py` | 실험 config (chunk 파라미터, 보상 weight, PPO 구조 전부 여기) |
-| `examples/experiments/assist_pendulum/{play,compare_rollout,runtime_utils}.py` | 시각화(θ_g 고스트/토크 화살표) / paired 비교 / ckpt 재구성 유틸 |
+| `examples/experiments/assist_pendulum/mlp.py` | 진자 LLP 레시피 하나. `--recipe L1`(랜덤화 진자 40 N·m), `R0`(토크 경로 수정), `motion_leg`(R0 + 20 N·m tanh + SEED 동작 의도·단일 관절). `Recipe` 사전이 chunk 파라미터·보상 weight·PPO 구조를 겹쳐 쌓고, `protomotions/tests/test_pendulum_recipes.py`가 L1/R0/A0D0 `resolved_configs.pt`와 필드 단위로 일치하는지 검사 |
+| `protomotions/envs/control/assist_disturbance_control.py` | `DisturbedAssistTargetControl` — 랜덤화 하중·수동 감쇠·구조화 사건·위상 사건·PD/FF 목표 유지(옛 pendulum_research/general control을 흡수, 새 항목은 기본 꺼짐). `protomotions/tests/test_pendulum_disturbance_events.py`가 병합 전 결과와 일치하는지 검사 |
+| `examples/experiments/assist_pendulum/runtime.py` | `PendulumRuntime` — ckpt/실험 파일에서 env+agent 재구성, 기록 rollout(lazy init 강제), paired 비교, 시각화(θ_g 고스트/토크 화살표), env 점검, A/B/C 평가(`abc`: 보조 없음 / 에뮬 chunk / 실 ManiFlow chunk) |
+| `examples/experiments/assist_pendulum/evaluate.py` | `PairedPendulumEvaluation`(고정 코호트 쌍 평가·실제 H1 예측), `ChunkDiagnosis`(학습 때 예측 신호 vs 실제 H1), `TrainingDistributionAudit`, `EtriEvalData`(ETRI 13동작 평가 데이터 준비) |
+| `protomotions/agents/common/shared_joint_mlp.py` | 외부 관측 형식은 그대로 두고 다리별 입력과 출력을 분리하는 공유 가중치 actor (`motion_leg` 단일 관절 학습에 사용) |
+| `examples/experiments/assist_pendulum/study.py` | `MotionLegStudy` — 20 N·m 단일 관절 연구의 준비·학습 lane·평가·진단·검증 순차 실행(소스 해시 고정, 재시도). 닫힌 연구 폴더가 기본값이므로 새 실행은 `--study results/llp20_motion_<date>` |
+| `examples/experiments/assist_pendulum/report.py` | `MotionLegReport` — 위 연구의 HTML 보고서 (스켈레톤 `analysis.py`/`report.py`를 importlib로 불러 씀) |
+| `results/<study>/scripts/` | 닫힌 진자 연구(L2–L12, 23 N·m 일반화, 적응, 한계 제어, F1/F2, R1)의 당시 실행 스크립트 보관. `SNAPSHOT.md`가 통합 전 스냅샷 커밋 `8058f3c`을 가리킨다 — 재현은 그 커밋의 worktree에서 |
 
 **Phase C 결합 계층** (2026-09-08 신설 — 위 파일들은 **무변경**, 전부 상속·신규):
 
@@ -182,8 +179,8 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/maniflow/chunk_source.py` | `ManiFlowChunkSource` — 자체 링 버퍼(policy 10 ms) → 25 ms 격자 재표집 → `predict_horizon()` → chunk knot |
 | `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A 25 ms / B 10 ms) |
 | `protomotions/tests/test_motion_intent.py` | 의도 소스 단위 테스트 15개 |
-| `examples/experiments/assist_pendulum/mlp_v3.py` | v3 실험 config (`mlp.py`를 import만; chunk 형식·관측창·control 클래스만 교체) |
-| `examples/experiments/assist_pendulum/eval_abc.py` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
+| `examples/experiments/assist_pendulum/mlp.py` (`_env_hlp_chunk_format`) | HLP chunk 형식·관측창·control 클래스 교체 단계 (옛 mlp_v3 실험 config를 레시피 체인 한 단계로 흡수) |
+| `examples/experiments/assist_pendulum/runtime.py abc` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
 
 **통합 제어기 + 스켈레톤 시스템** (2026-09-12, §3.5):
 
@@ -195,12 +192,12 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/assist/verify_controller.py` | 진자 env ↔ 제어기 등가성 검증 (chunk 주입 / 링버퍼 / RNG 페어링) |
 | `protomotions/simulator/newton/substep_hook.py` | `SubstepHookMixin` + `SubstepHook{,FixedBase}NewtonSimulator` — 서브스텝 콜백, 창 단위 PD 토크 평균, fixed-base 루트 z 오프셋 |
 | `examples/experiments/assist_skeleton/run_system.py` | 폐루프 러너 (A 무보조 / B 보조 paired; `--human mocap_pd|tracker`) |
-| `examples/experiments/assist_skeleton/{analysis,viz}.py` | 지표·리포트·그림 / 뷰어 고스트·토크 화살표 |
-| `examples/experiments/assist_skeleton/train_tracker_{walk,motions15}.sh` | 착용자 tracker 재학습 |
+| `examples/experiments/assist_skeleton/{analysis,report,evaluate,plots,viz}.py` | 지표 클래스(`ObjectiveComparison`, `WalkingPhaseDigest`, `SwingGateBins` 등) / HTML 보고서(`report.py comparison|checkpoint|torque|swing-gate`) / 모션 일괄·착용자 평가(`evaluate.py motions|native-wearer|wearer`) / 그림(`plots.py`) / 뷰어 고스트·토크 화살표 |
+| `examples/experiments/assist_skeleton/tracker_human.py`, `train_tracker_human.sh` | W1 착용자 tracker 학습 (옛 v30–v32 tracker 실행기는 `results/mimic_*/scripts/`에 보관) |
 | `protomotions/tests/test_assist_controller.py` | 특징량·interpolation 단위 테스트 (CPU) |
 | `protomotions/envs/base_env/skeleton_assist_env.py` | `SkeletonAssistEnv` — 보행 착용자(동결 tracker) 위 LLP 학습 env (action 2ch, τ_agent hip 계측) |
 | `protomotions/envs/control/skeleton_assist_control.py` | `TrackerPolicy`/`TrackerMimicControl`/`SkeletonAssistControl` — 내장 tracker, 실 HLP chunk, hip 부분집합 컨텍스트 |
-| `examples/experiments/assist_skeleton/llp_walk.py`, `check_train_env.py` | LLP 재학습 실험 파일 / 학습 env 점검 |
+| `examples/experiments/assist_skeleton/llp_walk.py` | LLP 재학습 실험 파일 (학습 env 점검 `check_train_env.py`는 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관) |
 
 **L13/R/L14 전신 걷기 추가학습 (2026-10-11)** — 결과와 현재 판정은
 `HANDOFF.md`, `experiment_summary.html`을 우선한다. 정상 걷기 개발 통과와
@@ -210,12 +207,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 |------|------|
 | `protomotions/envs/base_env/paired_skeleton_assist_env.py` | 독립 무보조 A / 보조 B 전신 시뮬레이션. 같은 초기 상태·모션·난수, paired 부담·동작 비악화 보상. A 정보는 actor에 넣지 않음 |
 | `protomotions/agents/ppo/assist_finetune.py` | actor만 전이, critic/optimizer 새 초기화. 진자 −굴곡 → 전신 +굴곡 좌표를 정규화·첫층·출력층까지 등가 변환. 전신 소스 +굴곡은 그대로 복사 |
-| `examples/experiments/assist_skeleton/llp_walk_finetune.py` | L13: W1/실제 HLP 동결, 137차원 actor, 100 Hz, gain 1 / 최종 ±100 N·m |
-| `examples/experiments/assist_skeleton/llp_walk_finetune_relative.py` | L13R: 낮은 부하에서의 부담 증가도 반영하는 상대 국소 비용. 계수는 학습 구간 rollout에서 평균을 맞춤 |
-| `examples/experiments/assist_skeleton/llp_walk_tempo.py` | L14: .90/1/1.10 시간배율 혼합, 몸체 오차 여유를 기존 평가 기준인 1 mm로 정렬 |
-| `examples/experiments/assist_skeleton/verify_walk_finetune.py` | 실제 물리에서 초기 actor 등가, zero-assist RMS, 부분 reset, A/B 종료, 실제 학습 motion IDs 검사 |
-| `examples/experiments/assist_skeleton/run_walk_{finetune,relative,tempo}_sequence.py` | 소스 해시 고정, 학습·독립 40초 평가 순차 실행, 중단 로그 보존 |
-| `examples/experiments/assist_skeleton/validate_walk_finetune.py` | 고정 후보와 같은 seed/start/motion의 L9 비교, 완료된 정확히 같은 조건만 재사용 |
+| `results/llp_L13_fullbody_walk_20261011/scripts/` (보관) | `llp_walk_finetune.py`(L13: W1/실제 HLP 동결, 137차원 actor, 100 Hz, gain 1 / 최종 ±100 N·m), `llp_walk_finetune_relative.py`(L13R 상대 국소 비용), `llp_walk_tempo.py`(L14 .90/1/1.10 시간배율), `verify_walk_finetune.py`, `run_walk_{finetune,relative,tempo}_sequence.py`, `validate_walk_finetune.py`. 2026-10-26 닫힌 연구로 보관; 재현은 `SNAPSHOT.md`의 스냅샷 커밋에서 |
 
 현재 paired 전신 env는 headless / flat / scene 없음만 지원한다. 두 env가 contact
 label을 각각 smoothing하므로 motion library는 독립 사본이어야 한다. 재개 시 내부
@@ -321,14 +313,14 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 
 - **paired 비교의 RNG 함정**: `_lazy_init_assist`의 게인 랜덤화가 첫 step에서
   RNG를 소비 → 같은 seed여도 두 조건이 다른 궤적을 받음. rollout 전에 lazy
-  init 강제 (`runtime_utils.rollout_recorded` 참조). seed 기반 비교 시 항상 의심.
+  init 강제 (`runtime.PendulumRuntime.rollout` 참조). seed 기반 비교 시 항상 의심.
 - **MdpComponent metadata 키**: static_params의 `threshold`/`weight`/`min_value`
   등은 metadata로 걸러져 compute 함수에 전달되지 않음 → 종료 조건 파라미터는
   `max_err`/`max_vel` 같은 다른 이름 사용.
 - **Newton TORQUE/PROPORTIONAL 모드 배선 끊김** (`_update_torques` 미호출)
   → BUILT_IN_PD + qfrc 경로를 사용하는 것이 현 구조의 이유 중 하나.
 - **Newton 마커**: `_update_simulator_markers`가 no-op — viewer의
-  `log_lines/log_arrows` + `_render_hook`으로 직접 그려야 함 (play.py 참조).
+  `log_lines/log_arrows` + `_render_hook`으로 직접 그려야 함 (`runtime.py play` 참조).
 - **fps 정합**: 원본/변환 모션은 40 Hz, 현재 H1 입력은 100 Hz다. 저장된 시간 간격과
   모델의 입력 계약을 각각 읽고 명시적으로 재표집한다. 과거 H0의 40 Hz 계약을 H1에 적용하지 않는다.
 - **zarr 버전**: 수집(sbc, zarr 3)은 v2 포맷 강제 기록, 학습(maniflow, 2.12)은
@@ -662,13 +654,13 @@ agent.py:514  optimize_model()                       → agent.py:709
 
 ### 9.3 추론·평가 경로
 
-- [ ] `examples/experiments/assist_pendulum/runtime_utils.py` **먼저**
-      (inference_agent.py의 60줄 축소판)
+- [ ] `examples/experiments/assist_pendulum/runtime.py` `PendulumRuntime.from_checkpoint` **먼저**
+      (inference_agent.py의 축소판)
 - [ ] `protomotions/inference_agent.py` — `resolved_configs_inference.pt` 로드(:233)
       → `apply_backward_compatibility_fixes`(:273) → CLI overrides.
       **`apply_inference_overrides`는 여기서 호출되지 않는다** (§8)
       → 위 1부 A를 건너뛰고 B부터 재구성, `fit()` 없이 rollout만
-- [ ] `examples/experiments/assist_pendulum/compare_rollout.py` —
+- [ ] `examples/experiments/assist_pendulum/runtime.py compare` (`PendulumRuntime.compare`) —
       paired 평가 구성 + RNG pairing 함정 (§8)
 - 베이스라인 트릭: `--overrides env.assist_torque_limit=0` → E의 :158 clamp가 0
       → 정책은 계속 forward하지만 주입값 전부 0 = 사람 PD 단독
