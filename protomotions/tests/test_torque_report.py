@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples/experiments/assist_skeleton"))
-from report_torque_html import aligned_torques, phase_profile
+from analysis import aligned_torques, phase_profile
 
 
 def test_previous_window_alignment_and_phase_wrap():
@@ -53,7 +53,7 @@ def test_rms_preserves_opposite_sign_load_and_weighted_contribution():
 
 def test_shortlist_uses_both_gaits_and_does_not_rank_falls_by_good_mean(tmp_path):
     import json
-    from report_torque_html import rank_candidates
+    from analysis import rank_candidates
 
     records = {}
     for label, peak, fell, change in (("reference", 11, False, -10), ("L8", 10, False, -30),

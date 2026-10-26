@@ -33,12 +33,31 @@ import sys
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "examples/experiments/assist_skeleton"))
 sys.path.insert(0, str(ROOT / "examples/experiments/assist_pendulum"))
-import report_generalization as gen  # noqa: E402
-from report_generalization import CSS, curve, digest, plt, read, svg  # noqa: E402
-from report_output_scale import masks_from_reference, read_traces  # noqa: E402
 from study import DEFAULT_STUDY  # noqa: E402
+
+
+def _load_skeleton(name):
+    """스켈레톤 쪽 모듈을 파일로 읽는다 — 이 폴더에도 report.py/evaluate.py가 있어 이름으로 import하면 자기 자신이 잡힌다."""
+    import importlib.util
+
+    path = ROOT / "examples/experiments/assist_skeleton" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"skeleton_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[f"skeleton_{name}"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_analysis = _load_skeleton("analysis")
+_report = _load_skeleton("report")
+DecelerationMasks, WalkingPhaseDigest, read = _analysis.DecelerationMasks, _analysis.WalkingPhaseDigest, _analysis.read_json
+Figures, HtmlShell, WalkingRecords = _report.Figures, _report.HtmlShell, _report.WalkingRecords
+CSS = HtmlShell.STUDY_CSS
+curve, digest = WalkingPhaseDigest.curve, WalkingPhaseDigest.digest
+masks_from_reference, read_traces = DecelerationMasks.masks_from_reference, DecelerationMasks.read_traces
+svg = Figures.embed
+plt = Figures.pyplot()
 
 
 class MotionLegReport:
@@ -74,7 +93,7 @@ class MotionLegReport:
     def w1_records(self):
         """(조건, 모델, seed) → 기록, 저역통과 민감도 기록 따로."""
         out, lpf = {}, {}
-        for (c, m, lim, s), r in gen.gather().items():
+        for (c, m, lim, s), r in WalkingRecords.gather().items():
             if c in self.W1_CONDITIONS:
                 out[c, f"{m}_{lim}", s] = r
         runs = read(self.study / "eval_runs.json") if (self.study / "eval_runs.json").exists() else {}

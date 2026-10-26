@@ -29,7 +29,7 @@ DISPLAY=:1 python examples/experiments/assist_skeleton/run_system.py ... --recor
 
 ## 학습 재현
 ```bash
-python examples/experiments/assist_skeleton/make_gait_motions.py
+python data/scripts/make_gait_motions.py
 python protomotions/train_agent.py --robot-name skeleton_torque_suit_passive_cable --simulator newton \
     --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_gait_v6 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 4096 --batch-size 16384 \

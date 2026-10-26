@@ -18,7 +18,7 @@
 import numpy as np
 import pytest
 
-from examples.experiments.assist_skeleton.report_output_scale import (
+from examples.experiments.assist_skeleton.analysis import (
     align,
     analyze_traces,
     masks_from_reference,

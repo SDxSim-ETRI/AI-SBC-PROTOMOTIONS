@@ -40,8 +40,13 @@ HLP 관측: hip flexion = 관절각, trunk pitch/roll = pelvis 자세 × lumbar 
 (`protomotions.assist.skeleton_features`, 학습 데이터 추출기와 동일). 영점 보정은
 착용자의 warmup 관측 평균을 SEED 평균에 맞추는 오프셋 (--calibration wearer).
 
+구조: `SystemRunner`가 한 번의 실행(config 조립 → env/agent → 제어기·주입 경로 → `SystemHook` → 루프 → 기록)을
+method로 나눠 갖고, `MocapGaitPhase`는 오라클·위상 분석용 특권 위상표, `FullBodyDiagnostic`은 전신 400 Hz
+동역학·접촉 읽기(선택)다. `build_configs`·`configure_for_system`·`build_env_agent`·`pin_spawn_location`은
+다른 평가기(`evaluate.py native-wearer`)도 쓴다.
+
 출력 (--out/<timestamp>_<human>/): traces.npz, metrics.json, report.md, plots.png,
-(--record) mp4.
+(--record) mp4, (--fullbody-diagnostic) fullbody.npz.
 
 실행 (sbc env):
     python examples/experiments/assist_skeleton/run_system.py --seconds 40
@@ -152,7 +157,7 @@ def parse_args(argv=None):
                    help="assist 출력 변화율 한계 [N·m/s] (None = 끔)")
     p.add_argument("--swing-gate", type=float, default=0.0,
                    help="유각 브레이크 게이트: hip 관절각이 중간값을 굴곡 방향으로 지난 뒤 보행 주기의 이 비율 동안 "
-                        "신전 보조를 0으로 (관절각만 사용, 배포 가능). 0 = 끔")
+                        "신전 보조를 0으로 (관절각만 사용, 진단 기준값). 0 = 끔")
     p.add_argument("--swing-gate-mean-tau", type=float, default=1.5,
                    help="게이트 중간값 지수이동평균 시정수 [s]")
     p.add_argument("--fixed-base-z", type=float, default=0.6, help="mocap_pd: 골반을 올릴 높이 [m]")
@@ -188,7 +193,8 @@ def load_experiment_module(path: Path):
 
 
 # ---------------------------------------------------------------------------
-# config 조립
+# config 조립 (evaluate.py native-wearer도 부분 네임스페이스로 호출한다 — human, tracker_checkpoint,
+# motion_file, physics_fps, env_dt, llp_dt, viewer, fixed_base_z 외의 인자를 읽지 않는다)
 # ---------------------------------------------------------------------------
 def build_configs(args):
     """(robot, simulator, terrain, scene_lib, motion_lib, env, agent) config."""
@@ -378,10 +384,12 @@ def _peak_indices(x: np.ndarray, min_dist: int) -> np.ndarray:
 class MocapGaitPhase:
     """mocap 클립의 hip flexion **최대 굴곡 = 위상 0 %** 로 잡은 다리별 위상 룩업.
 
-    `plot_torque_phase.py`가 오프라인에서 쓰는 위상 규약과 같다. 클립 시간으로
+    `plots.py torque-phase`가 오프라인에서 쓰는 위상 규약과 같다. 클립 시간으로
     색인하므로 첫 step부터 유효하다. 이건 실기기에 없는 특권 정보이고, 오라클
     탐침과 위상별 분석에만 쓴다 — 정책 관측에는 절대 들어가지 않는다.
     """
+
+    peak_indices = staticmethod(_peak_indices)
 
     def __init__(self, motion_lib, motion_id: int, hip_idx, device, dt: float = 0.005,
                  max_time: float | None = None):
@@ -614,223 +622,471 @@ class SystemHook:
 
 
 # ---------------------------------------------------------------------------
-def main():
-    args = parse_args()
-    torch.set_float32_matmul_precision("high")
-    out_dir = Path(args.out) / (datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{args.human}" + (f"_{args.tag}" if args.tag else ""))
-    out_dir.mkdir(parents=True, exist_ok=True)
+# 전신 400 Hz 동역학·접촉 읽기 (선택, 정책 입력 변경 없음)
+# ---------------------------------------------------------------------------
+class FullBodyDiagnostic:
+    """Opt-in readback of whole-body walking dynamics, outside policy observations.
 
-    cfgs = build_configs(args)
-    decimation, hook_every = configure_for_system(cfgs, args)
-    windows_per_step = decimation // hook_every
-    num_steps = int(round(args.seconds / args.env_dt))
-    n_calls = num_steps * windows_per_step
+    Control records are at the START of each 10 ms window. Dynamics/contact records
+    are sampled on EACH completed 2.5 ms solver step, then grouped by their window.
+    MuJoCo qacc is the force-balance acceleration, not implicit-integrator delta-v/dt.
+    No targets, torques, model properties, solver options or RNG streams are changed.
+    """
 
-    fabric = Fabric(accelerator="gpu", devices=1, num_nodes=1, loggers=[], callbacks=[])
-    fabric.launch()
-    env, agent = build_env_agent(cfgs, args, fabric)
-    sim = env.simulator
-    robot = env.robot_config
-    dof_names = robot.kinematic_info.dof_names
-    print(
-        f"[system] human={args.human} physics={args.physics_fps} Hz decimation={decimation} "
-        f"(env {args.env_dt*1e3:.0f} ms) hook_every={hook_every} (LLP {args.llp_dt*1e3:.0f} ms) "
-        f"fixed_base={robot.asset.fix_base_link} sim={type(sim).__name__}"
-    )
+    def __init__(self, sim, n_calls, out_dir):
+        import mujoco
+        import warp as wp
+        from newton.sensors import SensorContact
 
-    # HLP 영점 보정
-    calib = resolve_calibration(args, dof_names)
-    if calib is not None:
-        print("[system] HLP obs offset (deg):", [round(math.degrees(v), 2) for v in calib.tolist()])
+        self.sim = sim
+        self.out_dir = Path(out_dir)
+        self.calls = 0
+        self.steps = 0
+        self.every = sim.hook_every
+        solver = sim.solver
+        self.model = solver.mj_model
+        self.data = solver.mjw_data
+        if solver.use_mujoco_cpu or not solver._use_mujoco_contacts:
+            raise ValueError("Full-body readback requires the GPU MuJoCo contact path")
+        n, nv = sim.num_envs, self.model.nv
+        self.names = list(sim.robot_config.kinematic_info.dof_names)
+        self.body_names = list(sim.robot_config.kinematic_info.body_names)
+        self.contact_names = list(sim.robot_config.contact_bodies)
+        joint_names = [mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)
+                       for j in range(self.model.njnt)]
+        # Use the solver's coordinate map: Newton merges three-axis joints and
+        # renames them in MuJoCo, so matching human-readable joint names is unsafe.
+        mj_to_newton = solver.mjc_dof_to_newton_dof.numpy()[0]
+        common_to_newton = sim.data_conversion.dof_convert_to_common.cpu().numpy() + sim._pd_qd_dof_start
+        self.dof_ids = []
+        for name, newton_id in zip(self.names, common_to_newton):
+            matches = np.flatnonzero(mj_to_newton == newton_id)
+            if len(matches) != 1:
+                raise ValueError(f"Cannot map {name} into MuJoCo joints: {joint_names}")
+            self.dof_ids.append(int(matches[0]))
+        self.hips = [self.dof_ids[self.names.index('hip_flexion_' + side)] for side in ('r', 'l')]
+        self.hips_t = torch.tensor(self.hips, device=sim.device)
+        self.common = sim.data_conversion.dof_convert_to_common
+        self.contacts = sim.model.contacts()
+        self.sensors = {}
+        for name in self.contact_names:
+            sensor = SensorContact(sim.model, sensing_obj_bodies=sim._get_contact_sensor_body_patterns(name),
+                                   verbose=False)
+            sim._validate_contact_sensor_match(name, sim._get_contact_sensor_body_patterns(name),
+                                              sim._count_sensor_sensing_objects(sensor))
+            self.sensors[name] = sensor
 
-    ctrl = AssistController(
-        AssistControllerConfig(
-            llp_checkpoint=args.llp_checkpoint,
-            hlp_checkpoint=args.hlp_checkpoint,
-            hlp_denoise_steps=args.denoise,
-            hlp_obs_offset=None if calib is None else calib.tolist(),
-            joint_sign=1.0,  # skeleton hinge: +θ = 굴곡 = 데이터 규약
-            dt=args.llp_dt,
-            torque_limit=args.torque_limit,
-            hlp_latency_ms=args.hlp_latency_ms,
-            obs_horizon_ms=args.obs_horizon_ms,
-            torque_lpf_hz=args.torque_lpf_hz,
-            torque_slew_limit=args.torque_slew_limit,
-            swing_gate_fraction=args.swing_gate,
-            swing_gate_mean_tau=args.swing_gate_mean_tau,
-            measure_timing=True,
-            llp_share_legs=args.llp_share_legs,
-        ),
-        num_envs=2,
-        device=env.device,
-    )
+        # qM can be dense or packed along each DOF's ancestor chain.
+        self.sparse = self.data.qM.shape[1] == 1
+        if self.sparse:
+            addresses = np.full((nv, nv), -1, dtype=np.int64)
+            for row in range(nv):
+                col, address = row, int(self.model.dof_Madr[row])
+                while col >= 0:
+                    addresses[row, col] = addresses[col, row] = address
+                    col = int(self.model.dof_parentid[col])
+                    address += 1
+            addresses = addresses[self.hips]
+            self.mass_valid = torch.tensor(addresses >= 0, device=sim.device)
+            self.mass_addresses = torch.tensor(np.maximum(addresses, 0), device=sim.device)
 
-    # additive 주입 경로: 모든 env·DOF에 대해 게인 무변경(1.0)으로 engage
-    override = JointTorqueOverride(sim, env_ids=range(2), common_dof_indices=range(robot.number_of_actions))
-    override.engage(gain_scale=1.0)
+        def zeros(count, *shape):
+            return torch.zeros(count, n, *shape, device=sim.device)
 
-    if args.human == "mocap_pd":
-        scale_human_gains(sim, args.human_kp_scale, args.human_kd_scale)
-        hip_kp = robot.control.control_info["hip_flexion_r"].stiffness * args.human_kp_scale
-        hip_kd = robot.control.control_info["hip_flexion_r"].damping * args.human_kd_scale
-        print(f"[system] human PD (hip): Kp {hip_kp:.0f} Kd {hip_kd:.0f} (scale ×{args.human_kp_scale}/×{args.human_kd_scale})")
-
-    gait_phase = None
-    if args.human == "tracker":
-        gait_phase = MocapGaitPhase(
-            env.motion_lib, args.motion_id, hip_flexion_indices(dof_names), env.device,
-            max_time=args.start_time + args.seconds + 2.0,
+        self.control_log = {k: zeros(n_calls, len(self.names)) for k in
+                            ('dof_pos', 'dof_vel', 'pd_target', 'pd_target_velocity', 'reference_pos',
+                             'reference_vel', 'tau_pd_prev', 'tau_ff_prev')}
+        for key, width in (('body_pos', 3), ('body_rot', 4), ('body_vel', 3), ('body_ang_vel', 3)):
+            self.control_log[key] = zeros(n_calls, len(self.body_names), width)
+        count = n_calls * self.every
+        self.physics_log = {k: zeros(count, nv) for k in
+                            ('qvel_before', 'qvel_after', 'qacc', 'qfrc_bias', 'qfrc_passive',
+                             'qfrc_actuator', 'qfrc_applied', 'qfrc_constraint')}
+        self.physics_log['qpos_before'] = zeros(count, self.model.nq)
+        self.physics_log['hip_mass_rows'] = zeros(count, 2, nv)
+        self.physics_log['contact_force_world'] = zeros(count, len(self.contact_names), 3)
+        self.constraint_dense = self.data.efc.J.shape[1] > 1
+        self.physics_log['hip_constraint_contact'] = zeros(count, 2)
+        self.physics_log['hip_constraint_other'] = zeros(count, 2)
+        self.constraint_rows = torch.arange(self.data.efc.force.shape[1], device=sim.device)[None, :]
+        self.jac_columns = torch.arange(nv, device=sim.device)[None, None, :]
+        self.original_step = solver.step
+        solver.step = self._step
+        mujoco.mj_saveModel(self.model, str(self.out_dir / 'diagnostic_model.mjb'), None)
+        gains = {}
+        for name in ('joint_target_ke', 'joint_target_kd'):
+            value = wp.to_torch(sim.robot_view.get_attribute(name, sim.model)).reshape(n, -1)
+            gains[name] = value[:, self.common].cpu().tolist()
+        self.meta = dict(
+            dof_names_common=self.names, body_names_common=self.body_names,
+            contact_body_names=self.contact_names, mj_joint_names=joint_names,
+            common_dof_to_mj_dof=self.dof_ids, hip_mj_dofs=self.hips,
+            mj_nv=nv, mj_nq=self.model.nq, sim_dt=sim.sim_dt, substeps_per_window=self.every,
+            qM_sparse=self.sparse, gains=gains,
+            constraint_type_split=True,
+            root_mj_dofs=[int(np.flatnonzero(mj_to_newton == i)[0]) for i in range(sim._pd_qd_dof_start)],
+            timing='control=start of 10ms window; physics=each solver substep; qacc=force-balance acceleration',
+            contacts='independent SensorContact objects; world force on sensing foot body; each physics substep',
+            constraint_caveat='qfrc_constraint includes contacts, joint limits, friction and equality constraints',
+            changes_policy_inputs=False,
         )
-        valid = bool(torch.isfinite(gait_phase.table).all())
-        print(f"[phase] mocap 위상표: {gait_phase.span:.1f} s 구간, 최대굴곡 {gait_phase.num_peaks}회 "
-              f"(평균 주기 {gait_phase.span / max(gait_phase.num_peaks, 1):.3f} s), "
-              f"{'OK' if valid else '주기 검출 실패 → NaN'}")
-    if args.oracle == "phase":
-        print(f"[oracle] 창 {args.oracle_window} % 에 {args.oracle_torque:+.0f} N·m "
-              f"(ramp {args.oracle_ramp} %, 한계 {args.oracle_limit or ctrl.torque_limit} N·m)")
-    elif args.oracle == "beta":
-        print(f"[oracle] beta: τ_assist = {args.oracle_beta} × τ_착용자(직전 창), "
-              f"한계 {args.oracle_limit or ctrl.torque_limit} N·m")
+        print(f'[fullbody] enabled: {nv} velocity DOFs, hips {self.hips}, {count} substeps', flush=True)
 
-    hook = SystemHook(env, ctrl, override, args, n_calls, gait_phase=gait_phase)
-    sim.substep_hook = hook
+    @torch.no_grad()
+    def _step(self, state_in, state_out, control, contacts, dt):
+        import mujoco
+        import warp as wp
 
-    # 동기 리셋: 같은 클립, 같은 시작 시각, 같은 위치
-    pin_spawn_location(env)
-    torch.manual_seed(args.seed)
-    env.motion_manager.motion_ids[:] = args.motion_id
-    env.motion_manager.motion_times[:] = args.start_time
-    obs, _ = env.reset(disable_motion_resample=True)
-    override.zero()
-    hook.need_reset = True
-
-    if args.fullbody_diagnostic:
-        from fullbody_diagnostic import FullBodyDiagnostic
-
-        hook.diagnostic = FullBodyDiagnostic(sim, n_calls, out_dir)
-
-    ghost = None
-    if args.viewer:
-        from viz import GhostSkeletonRenderer, HipTorqueArrows
-
-        ghost = GhostSkeletonRenderer(sim, ghost_env=ENV_A, visible_env=ENV_B)
-        HipTorqueArrows(sim, hook, env_id=ENV_B)
-        if args.record:
-            sim._toggle_video_record()
-
-    # 루프 (env 주기)
-    fall_steps = 0
-    survived_s = None
-    body_err_log = []  # env step마다 (2,) — 착용자 몸체가 레퍼런스에서 벗어난 거리
-    t_wall = time.perf_counter()
-    for step in range(num_steps):
-        if agent is not None:
-            td = agent.obs_dict_to_tensordict(agent.add_agent_info_to_obs(obs))
-            with torch.no_grad():
-                out = agent.model(td)
-            action = out.get("mean_action", out["action"])
+        i = self.steps
+        if i >= len(self.physics_log['qacc']):
+            raise RuntimeError('Full-body diagnostic buffer exhausted')
+        log = self.physics_log
+        log['qpos_before'][i] = wp.to_torch(self.data.qpos)
+        log['qvel_before'][i] = wp.to_torch(self.data.qvel)
+        self.original_step(state_in, state_out, control, contacts, dt)
+        log['qvel_after'][i] = wp.to_torch(self.data.qvel)
+        for key in ('qacc', 'qfrc_bias', 'qfrc_passive', 'qfrc_actuator', 'qfrc_applied', 'qfrc_constraint'):
+            log[key][i] = wp.to_torch(getattr(self.data, key))
+        force = wp.to_torch(self.data.efc.force)
+        valid = self.constraint_rows < wp.to_torch(self.data.nefc)[:, None]
+        kind = wp.to_torch(self.data.efc.type)
+        contact_kind = kind >= int(mujoco.mjtConstraint.mjCNSTR_CONTACT_FRICTIONLESS)
+        if self.constraint_dense:
+            jac = wp.to_torch(self.data.efc.J)[:, :force.shape[1], self.hips_t]
         else:
-            action = torch.zeros(2, robot.number_of_actions, device=env.device)
-        obs, _rew, _done, _term, _extras = env.step(action)
+            rowadr = wp.to_torch(self.data.efc.J_rowadr).long()
+            rownnz = wp.to_torch(self.data.efc.J_rownnz)
+            packed = wp.to_torch(self.data.efc.J)[:, 0]
+            addresses = (rowadr[:, :, None] + self.jac_columns).clamp(0, packed.shape[1] - 1)
+            values = packed.gather(1, addresses.flatten(1)).reshape_as(addresses)
+            columns = wp.to_torch(self.data.efc.J_colind)[:, 0].gather(1, addresses.flatten(1)).reshape_as(addresses)
+            values = values * (self.jac_columns < rownnz[:, :, None])
+            jac = torch.stack([(values * (columns == hip)).sum(dim=-1) for hip in self.hips], dim=-1)
+        for label, mask in (('contact', contact_kind), ('other', ~contact_kind)):
+            log['hip_constraint_' + label][i] = (jac * (force * (valid & mask))[:, :, None]).sum(dim=1)
+        mass = wp.to_torch(self.data.qM)
+        if self.sparse:
+            log['hip_mass_rows'][i] = mass[:, 0, self.mass_addresses] * self.mass_valid
+        else:
+            log['hip_mass_rows'][i] = mass[:, self.hips_t, :]
+        # Convert into a separate Contacts buffer; don't change simulator contacts.
+        self.sim.solver.update_contacts(self.contacts, state_out)
+        for j, sensor in enumerate(self.sensors.values()):
+            sensor.update(state_out, self.contacts)
+            log['contact_force_world'][i, :, j] = wp.to_torch(sensor.net_force).sum(dim=-2).reshape(self.sim.num_envs, 3)
+        self.steps += 1
 
-        if body_err_log is not None:
-            try:
-                ctx = env._current_context
-                err = (ctx.current.rigid_body_pos - ctx.mimic.ref_state.rigid_body_pos).norm(dim=-1).mean(dim=-1)
-                body_err_log.append(err.detach().cpu().numpy().copy())
-            except (AttributeError, KeyError, TypeError):
-                print("[system] 몸체 추종 오차를 읽을 수 없어 기록하지 않는다 (mimic 컨텍스트 없음)")
-                body_err_log = None
+    @torch.no_grad()
+    def record_control(self, dof_pos, dof_vel, reference, tau_ff_prev):
+        import warp as wp
 
+        i = self.calls
+        log = self.control_log
+        log['dof_pos'][i] = dof_pos
+        log['dof_vel'][i] = dof_vel
+        log['reference_pos'][i] = reference.dof_pos
+        log['reference_vel'][i] = reference.dof_vel
+        log['tau_pd_prev'][i] = self.sim.window_tau_pd_common
+        log['tau_ff_prev'][i] = tau_ff_prev
+        for key, field in (('pd_target', 'joint_target_pos'), ('pd_target_velocity', 'joint_target_vel')):
+            value = wp.to_torch(self.sim.robot_view.get_attribute(field, self.sim.control)).reshape(self.sim.num_envs, -1)
+            log[key][i] = value[:, self.common]
+        state = self.sim.get_bodies_state()
+        for key, field in (('body_pos', 'rigid_body_pos'), ('body_rot', 'rigid_body_rot'),
+                           ('body_vel', 'rigid_body_vel'), ('body_ang_vel', 'rigid_body_ang_vel')):
+            log[key][i] = getattr(state, field)
+        self.calls += 1
+
+    def save(self):
+        if self.steps != self.calls * self.every:
+            raise RuntimeError(f'Incomplete physics windows: {self.steps} vs {self.calls}*{self.every}')
+        arrays = {'control_' + k: v[:self.calls].cpu().numpy() for k, v in self.control_log.items()}
+        arrays.update({'physics_' + k: v[:self.steps].cpu().numpy() for k, v in self.physics_log.items()})
+        np.savez_compressed(self.out_dir / 'fullbody.npz', **arrays)
+        self.meta.update(control_samples=self.calls, physics_samples=self.steps)
+        (self.out_dir / 'fullbody_meta.json').write_text(json.dumps(self.meta, indent=2))
+        self.sim.solver.step = self.original_step
+        print(f'[fullbody] saved {self.calls} windows / {self.steps} physics samples', flush=True)
+
+
+# ---------------------------------------------------------------------------
+# 한 번의 실행
+# ---------------------------------------------------------------------------
+class SystemRunner:
+    """config 조립 → env/agent → 제어기·주입 경로 → 훅 → 동기 리셋 → 루프 → 기록·지표.
+
+    순서(특히 `torch.manual_seed`가 Fabric·agent·제어기 생성 뒤, `env.reset` 직전에 오는 것)는 문서화된
+    seed 42 수치의 전제라 바꾸지 않는다.
+    """
+
+    hook_cls = SystemHook
+
+    def __init__(self, args):
+        self.args = args
+        torch.set_float32_matmul_precision("high")
+        self.out_dir = Path(args.out) / (datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_{args.human}" + (f"_{args.tag}" if args.tag else ""))
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.env = self.agent = self.sim = self.robot = None
+        self.ctrl = self.override = self.hook = self.gait_phase = None
+        self.calib = None
+        self.obs = None
+        self.survived_s = None
+        self.body_err_log = []
+
+    # ---- 조립 ----
+    def build(self):
+        args = self.args
+        cfgs = build_configs(args)
+        decimation, hook_every = configure_for_system(cfgs, args)
+        windows_per_step = decimation // hook_every
+        self.num_steps = int(round(args.seconds / args.env_dt))
+        self.n_calls = self.num_steps * windows_per_step
+        fabric = Fabric(accelerator="gpu", devices=1, num_nodes=1, loggers=[], callbacks=[])
+        fabric.launch()
+        self.env, self.agent = build_env_agent(cfgs, args, fabric)
+        self.sim = self.env.simulator
+        self.robot = self.env.robot_config
+        self.dof_names = self.robot.kinematic_info.dof_names
+        print(
+            f"[system] human={args.human} physics={args.physics_fps} Hz decimation={decimation} "
+            f"(env {args.env_dt*1e3:.0f} ms) hook_every={hook_every} (LLP {args.llp_dt*1e3:.0f} ms) "
+            f"fixed_base={self.robot.asset.fix_base_link} sim={type(self.sim).__name__}"
+        )
+        return self
+
+    def build_controller(self):
+        args = self.args
+        self.calib = resolve_calibration(args, self.dof_names)  # HLP 영점 보정
+        if self.calib is not None:
+            print("[system] HLP obs offset (deg):", [round(math.degrees(v), 2) for v in self.calib.tolist()])
+        self.ctrl = AssistController(
+            AssistControllerConfig(
+                llp_checkpoint=args.llp_checkpoint,
+                hlp_checkpoint=args.hlp_checkpoint,
+                hlp_denoise_steps=args.denoise,
+                hlp_obs_offset=None if self.calib is None else self.calib.tolist(),
+                joint_sign=1.0,  # skeleton hinge: +θ = 굴곡 = 데이터 규약
+                dt=args.llp_dt,
+                torque_limit=args.torque_limit,
+                hlp_latency_ms=args.hlp_latency_ms,
+                obs_horizon_ms=args.obs_horizon_ms,
+                torque_lpf_hz=args.torque_lpf_hz,
+                torque_slew_limit=args.torque_slew_limit,
+                swing_gate_fraction=args.swing_gate,
+                swing_gate_mean_tau=args.swing_gate_mean_tau,
+                measure_timing=True,
+                llp_share_legs=args.llp_share_legs,
+            ),
+            num_envs=2,
+            device=self.env.device,
+        )
+        return self
+
+    def build_override(self):
+        """additive 주입 경로: 모든 env·DOF에 대해 게인 무변경(1.0)으로 engage."""
+        args, sim, robot = self.args, self.sim, self.robot
+        self.override = JointTorqueOverride(sim, env_ids=range(2), common_dof_indices=range(robot.number_of_actions))
+        self.override.engage(gain_scale=1.0)
+        if args.human == "mocap_pd":
+            scale_human_gains(sim, args.human_kp_scale, args.human_kd_scale)
+            hip_kp = robot.control.control_info["hip_flexion_r"].stiffness * args.human_kp_scale
+            hip_kd = robot.control.control_info["hip_flexion_r"].damping * args.human_kd_scale
+            print(f"[system] human PD (hip): Kp {hip_kp:.0f} Kd {hip_kd:.0f} (scale ×{args.human_kp_scale}/×{args.human_kd_scale})")
+        return self
+
+    def build_gait_phase(self):
+        args = self.args
         if args.human == "tracker":
-            root_z = sim._get_simulator_root_state().root_pos[:, 2]
-            if bool((root_z < args.fall_z).any()):
-                fall_steps += 1
-                if fall_steps * args.env_dt >= 0.5:
-                    survived_s = (step + 1) * args.env_dt
-                    print(f"[system] fall detected at {survived_s:.2f} s (root z {root_z.tolist()})")
-                    break
+            self.gait_phase = MocapGaitPhase(
+                self.env.motion_lib, args.motion_id, hip_flexion_indices(self.dof_names), self.env.device,
+                max_time=args.start_time + args.seconds + 2.0,
+            )
+            gp = self.gait_phase
+            valid = bool(torch.isfinite(gp.table).all())
+            print(f"[phase] mocap 위상표: {gp.span:.1f} s 구간, 최대굴곡 {gp.num_peaks}회 "
+                  f"(평균 주기 {gp.span / max(gp.num_peaks, 1):.3f} s), "
+                  f"{'OK' if valid else '주기 검출 실패 → NaN'}")
+        if args.oracle == "phase":
+            print(f"[oracle] 창 {args.oracle_window} % 에 {args.oracle_torque:+.0f} N·m "
+                  f"(ramp {args.oracle_ramp} %, 한계 {args.oracle_limit or self.ctrl.torque_limit} N·m)")
+        elif args.oracle == "beta":
+            print(f"[oracle] beta: τ_assist = {args.oracle_beta} × τ_착용자(직전 창), "
+                  f"한계 {args.oracle_limit or self.ctrl.torque_limit} N·m")
+        return self
+
+    def attach_hook(self):
+        self.hook = self.hook_cls(self.env, self.ctrl, self.override, self.args, self.n_calls, gait_phase=self.gait_phase)
+        self.sim.substep_hook = self.hook
+        return self
+
+    def reset(self):
+        """동기 리셋: 같은 클립, 같은 시작 시각, 같은 위치."""
+        args, env = self.args, self.env
+        pin_spawn_location(env)
+        torch.manual_seed(args.seed)
+        env.motion_manager.motion_ids[:] = args.motion_id
+        env.motion_manager.motion_times[:] = args.start_time
+        self.obs, _ = env.reset(disable_motion_resample=True)
+        self.override.zero()
+        self.hook.need_reset = True
+        return self
+
+    def attach_diagnostics(self):
+        if self.args.fullbody_diagnostic:
+            self.hook.diagnostic = FullBodyDiagnostic(self.sim, self.n_calls, self.out_dir)
+        return self
+
+    def attach_viewer(self):
+        if self.args.viewer:
+            from viz import GhostSkeletonRenderer, HipTorqueArrows
+
+            GhostSkeletonRenderer(self.sim, ghost_env=ENV_A, visible_env=ENV_B)
+            HipTorqueArrows(self.sim, self.hook, env_id=ENV_B)
+            if self.args.record:
+                self.sim._toggle_video_record()
+        return self
+
+    # ---- 실행 ----
+    def run_loop(self):
+        args, env, sim, agent, robot = self.args, self.env, self.sim, self.agent, self.robot
+        obs = self.obs
+        fall_steps = 0
+        body_err_log = self.body_err_log  # env step마다 (2,) — 착용자 몸체가 레퍼런스에서 벗어난 거리
+        t_wall = time.perf_counter()
+        for step in range(self.num_steps):
+            if agent is not None:
+                td = agent.obs_dict_to_tensordict(agent.add_agent_info_to_obs(obs))
+                with torch.no_grad():
+                    out = agent.model(td)
+                action = out.get("mean_action", out["action"])
             else:
-                fall_steps = 0
-        if (step + 1) % int(round(5.0 / args.env_dt)) == 0:
-            print(f"[system] {(step+1)*args.env_dt:5.1f} s / {args.seconds:.0f} s  ({time.perf_counter()-t_wall:.0f} s wall)")
+                action = torch.zeros(2, robot.number_of_actions, device=env.device)
+            obs, _rew, _done, _term, _extras = env.step(action)
 
-    if args.record:
-        sim._toggle_video_record()
-        sim.render()  # 마지막 프레임에서 인코딩 트리거 (RecordingMixin → ffmpeg)
-        rec_dir = getattr(sim, "_curr_user_recording_name", None)
-        if rec_dir and Path(rec_dir).exists():
-            import shutil
+            if body_err_log is not None:
+                try:
+                    ctx = env._current_context
+                    err = (ctx.current.rigid_body_pos - ctx.mimic.ref_state.rigid_body_pos).norm(dim=-1).mean(dim=-1)
+                    body_err_log.append(err.detach().cpu().numpy().copy())
+                except (AttributeError, KeyError, TypeError):
+                    print("[system] 몸체 추종 오차를 읽을 수 없어 기록하지 않는다 (mimic 컨텍스트 없음)")
+                    body_err_log = self.body_err_log = None
 
-            for mp4 in Path(rec_dir).glob("*.mp4"):
-                shutil.copy(mp4, out_dir / "sim.mp4")
-                print(f"[system] video → {out_dir / 'sim.mp4'}")
+            if args.human == "tracker":
+                root_z = sim._get_simulator_root_state().root_pos[:, 2]
+                if bool((root_z < args.fall_z).any()):
+                    fall_steps += 1
+                    if fall_steps * args.env_dt >= 0.5:
+                        self.survived_s = (step + 1) * args.env_dt
+                        print(f"[system] fall detected at {self.survived_s:.2f} s (root z {root_z.tolist()})")
+                        break
+                else:
+                    fall_steps = 0
+            if (step + 1) % int(round(5.0 / args.env_dt)) == 0:
+                print(f"[system] {(step+1)*args.env_dt:5.1f} s / {args.seconds:.0f} s  ({time.perf_counter()-t_wall:.0f} s wall)")
+        self.obs = obs
+        return self
 
-    traces = hook.traces()
-    if body_err_log:
-        traces["body_err"] = np.stack(body_err_log)                       # (num_steps, 2)
-        traces["body_err_t"] = (np.arange(len(body_err_log)) + 1) * args.env_dt
-    meta = {
-        "human": args.human,
-        "robot": args.robot_name if args.human == "mocap_pd" else type(robot).__name__,
-        "motion_file": args.motion_file,
-        "motion_id": args.motion_id,
-        "start_time": args.start_time,
-        "llp_checkpoint": str(Path(args.llp_checkpoint).resolve()),
-        "llp_share_legs": bool(args.llp_share_legs),
-        "llp_epoch": ctrl.llp.epoch,
-        "hlp_checkpoint": ctrl.hlp_checkpoint,
-        "denoise": args.denoise,
-        "calibration_deg": (hook.measured_calib_deg if calib is None
-                            else [math.degrees(v) for v in calib.tolist()]),
-        "calibration_mode": args.calibration,
-        "seed_mean_deg": list(SEED_CHANNEL_MEAN_DEG),
-        "physics_fps": args.physics_fps,
-        "env_dt": args.env_dt,
-        "llp_dt": args.llp_dt,
-        "seconds": args.seconds,
-        "warmup": args.warmup,
-        "assist_scale": args.assist_scale,
-        "oracle": args.oracle if args.oracle != "off" else None,
-        "oracle_beta": args.oracle_beta if args.oracle == "beta" else None,
-        "oracle_window": args.oracle_window if args.oracle == "phase" else None,
-        "oracle_torque": args.oracle_torque if args.oracle == "phase" else None,
-        "oracle_ramp": args.oracle_ramp if args.oracle == "phase" else None,
-        "mask_window": args.mask_window,
-        "oracle_limit": args.oracle_limit,
-        "torque_limit": ctrl.torque_limit,
-        "policy_torque_limit": ctrl.layout.torque_limit,
-        "policy_torque_scale": ctrl.layout.torque_scale,
-        "policy_action_transform": ctrl.layout.action_transform,
-        "hlp_latency_ms": args.hlp_latency_ms or None,
-        "obs_horizon_ms": args.obs_horizon_ms,
-        "torque_lpf_hz": args.torque_lpf_hz or None,
-        "torque_slew_limit": args.torque_slew_limit,
-        "swing_gate": args.swing_gate or None,
-        "swing_gate_mean_tau": args.swing_gate_mean_tau if args.swing_gate else None,
-        "feedforward": hook.use_ff,
-        "human_kp_scale": args.human_kp_scale if args.human == "mocap_pd" else None,
-        "human_kd_scale": args.human_kd_scale if args.human == "mocap_pd" else None,
-        "lock_knee_ankle": bool(args.lock_knee_ankle) if args.human == "mocap_pd" else None,
-        "fixed_base_z": args.fixed_base_z if args.human == "mocap_pd" else None,
-        "survived_s": survived_s,
-        "hlp_ms": {"mean": float(np.mean(ctrl.hlp_ms)) if ctrl.hlp_ms else None,
-                   "p95": float(np.percentile(ctrl.hlp_ms, 95)) if ctrl.hlp_ms else None},
-        "llp_ms": {"mean": float(np.mean(ctrl.llp_ms)) if ctrl.llp_ms else None,
-                   "p95": float(np.percentile(ctrl.llp_ms, 95)) if ctrl.llp_ms else None},
-        "hlp_dt": ctrl.hlp_dt,
-        "num_knots": ctrl.num_knots,
-        "obs_future_dt": ctrl.layout.obs_future_dt,
-        "tracker_checkpoint": str(Path(args.tracker_checkpoint).resolve()) if args.human == "tracker" else None,
-        "command": " ".join(sys.argv),
-    }
-    np.savez_compressed(out_dir / "traces.npz", **traces)
-    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
-    if hook.diagnostic is not None:
-        hook.diagnostic.save()
-    metrics = analyze(traces, meta, out_dir)
-    print(json.dumps(metrics["summary"], indent=2, ensure_ascii=False))
-    print(f"saved: {out_dir}")
+    def finish_recording(self):
+        if self.args.record:
+            sim = self.sim
+            sim._toggle_video_record()
+            sim.render()  # 마지막 프레임에서 인코딩 트리거 (RecordingMixin → ffmpeg)
+            rec_dir = getattr(sim, "_curr_user_recording_name", None)
+            if rec_dir and Path(rec_dir).exists():
+                import shutil
+
+                for mp4 in Path(rec_dir).glob("*.mp4"):
+                    shutil.copy(mp4, self.out_dir / "sim.mp4")
+                    print(f"[system] video → {self.out_dir / 'sim.mp4'}")
+        return self
+
+    # ---- 기록 ----
+    def collect_traces(self):
+        traces = self.hook.traces()
+        if self.body_err_log:
+            traces["body_err"] = np.stack(self.body_err_log)                       # (num_steps, 2)
+            traces["body_err_t"] = (np.arange(len(self.body_err_log)) + 1) * self.args.env_dt
+        return traces
+
+    def build_meta(self):
+        args, ctrl, hook, calib, robot = self.args, self.ctrl, self.hook, self.calib, self.robot
+        return {
+            "human": args.human,
+            "robot": args.robot_name if args.human == "mocap_pd" else type(robot).__name__,
+            "motion_file": args.motion_file,
+            "motion_id": args.motion_id,
+            "start_time": args.start_time,
+            "llp_checkpoint": str(Path(args.llp_checkpoint).resolve()),
+            "llp_share_legs": bool(args.llp_share_legs),
+            "llp_epoch": ctrl.llp.epoch,
+            "hlp_checkpoint": ctrl.hlp_checkpoint,
+            "denoise": args.denoise,
+            "calibration_deg": (hook.measured_calib_deg if calib is None
+                                else [math.degrees(v) for v in calib.tolist()]),
+            "calibration_mode": args.calibration,
+            "seed_mean_deg": list(SEED_CHANNEL_MEAN_DEG),
+            "physics_fps": args.physics_fps,
+            "env_dt": args.env_dt,
+            "llp_dt": args.llp_dt,
+            "seconds": args.seconds,
+            "warmup": args.warmup,
+            "assist_scale": args.assist_scale,
+            "oracle": args.oracle if args.oracle != "off" else None,
+            "oracle_beta": args.oracle_beta if args.oracle == "beta" else None,
+            "oracle_window": args.oracle_window if args.oracle == "phase" else None,
+            "oracle_torque": args.oracle_torque if args.oracle == "phase" else None,
+            "oracle_ramp": args.oracle_ramp if args.oracle == "phase" else None,
+            "mask_window": args.mask_window,
+            "oracle_limit": args.oracle_limit,
+            "torque_limit": ctrl.torque_limit,
+            "policy_torque_limit": ctrl.layout.torque_limit,
+            "policy_torque_scale": ctrl.layout.torque_scale,
+            "policy_action_transform": ctrl.layout.action_transform,
+            "hlp_latency_ms": args.hlp_latency_ms or None,
+            "obs_horizon_ms": args.obs_horizon_ms,
+            "torque_lpf_hz": args.torque_lpf_hz or None,
+            "torque_slew_limit": args.torque_slew_limit,
+            "swing_gate": args.swing_gate or None,
+            "swing_gate_mean_tau": args.swing_gate_mean_tau if args.swing_gate else None,
+            "feedforward": hook.use_ff,
+            "human_kp_scale": args.human_kp_scale if args.human == "mocap_pd" else None,
+            "human_kd_scale": args.human_kd_scale if args.human == "mocap_pd" else None,
+            "lock_knee_ankle": bool(args.lock_knee_ankle) if args.human == "mocap_pd" else None,
+            "fixed_base_z": args.fixed_base_z if args.human == "mocap_pd" else None,
+            "survived_s": self.survived_s,
+            "hlp_ms": {"mean": float(np.mean(ctrl.hlp_ms)) if ctrl.hlp_ms else None,
+                       "p95": float(np.percentile(ctrl.hlp_ms, 95)) if ctrl.hlp_ms else None},
+            "llp_ms": {"mean": float(np.mean(ctrl.llp_ms)) if ctrl.llp_ms else None,
+                       "p95": float(np.percentile(ctrl.llp_ms, 95)) if ctrl.llp_ms else None},
+            "hlp_dt": ctrl.hlp_dt,
+            "num_knots": ctrl.num_knots,
+            "obs_future_dt": ctrl.layout.obs_future_dt,
+            "tracker_checkpoint": str(Path(args.tracker_checkpoint).resolve()) if args.human == "tracker" else None,
+            "command": " ".join(sys.argv),
+        }
+
+    def save(self):
+        traces = self.collect_traces()
+        meta = self.build_meta()
+        np.savez_compressed(self.out_dir / "traces.npz", **traces)
+        (self.out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+        if self.hook.diagnostic is not None:
+            self.hook.diagnostic.save()
+        metrics = analyze(traces, meta, self.out_dir)
+        print(json.dumps(metrics["summary"], indent=2, ensure_ascii=False))
+        print(f"saved: {self.out_dir}")
+        return metrics
+
+    def run(self):
+        self.build().build_controller().build_override().build_gait_phase().attach_hook()
+        self.reset().attach_diagnostics().attach_viewer()
+        self.run_loop().finish_recording()
+        return self.save()
+
+
+def main():
+    SystemRunner(parse_args()).run()
 
 
 if __name__ == "__main__":

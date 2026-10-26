@@ -38,7 +38,7 @@ python examples/experiments/assist_skeleton/run_system.py --motion-id 1
 python examples/experiments/assist_skeleton/run_system.py --viewer --record
 
 # 새 보행의 착용자 추종만 검사: 짧은 클립을 이어 붙이지 않는 전용 평가기
-python examples/experiments/assist_skeleton/evaluate_native_wearer.py \
+python examples/experiments/assist_skeleton/evaluate.py native-wearer \
     --motion-file results/real_walk_retarget_20261012_224957/native_pairs_v1/suit_native_walk.pt \
     --starts 0 0.5 --max-seconds 8 --out results/native_walk_check
 ```
@@ -50,8 +50,8 @@ python examples/experiments/assist_skeleton/evaluate_native_wearer.py \
 
 ```bash
 python examples/experiments/assist_skeleton/run_system.py \
-    --llp-checkpoint results/llp_L13R_walk_continue/epoch_400.ckpt \
-    --assist-scale 1 --torque-limit 100 --motion-id 0 --seconds 40
+    --llp-checkpoint results/llp_relative_R0_s0_20261020/epoch_6000.ckpt \
+    --assist-scale 0.5 --motion-id 0 --seconds 40
 ```
 
 이 명령은 기존 걷기의 연구 후보 평가다. 범용 보행이나 실기기 성능을 입증하지 않는다.
@@ -70,32 +70,34 @@ python examples/experiments/assist_skeleton/run_system.py \
 HLP 계산 시간은 별도 기록한다. `--hlp-latency-ms 0`은 계산 지연을 물리 시간에 추가하지 않는 설정이다.
 `--oracle`과 `--mask-window`는 참조·착용자 토크를 사용하는 원인 진단용이다.
 
-`--swing-gate 0.20`은 배포 가능한 유각 브레이크 게이트다 (2026-10-14, `protomotions/assist/controller.py`).
+`--swing-gate 0.20`은 관절각만 보는 유각 브레이크 게이트다 (2026-10-14, `protomotions/assist/controller.py`).
 각 hip 관절각이 자기 중간값(지수이동평균)을 굴곡 방향으로 지나는 순간부터 같은 hip의 직전 교차 간격 × 0.20
-동안 신전 보조를 0으로 둔다 — 관절각 외 정보는 쓰지 않는다. 걷기에서 유각 중·후반(참조 위상 68–92 %)의
-다리 감속은 무릎 결합·중력이 내고 착용자 hip 토크는 ≈0인데, 진자에서 배운 L1은 감속을 보고 브레이크를 걸어
-착용자가 같은 크기로 맞서던 구간을 끊는다. W1 평가: 걷기 τ² −18.7 → −26.5 %, 달리기 −24.3 → −31.0 %
-(`docs/ai_sbc/walking_swing_gate.html`).
+동안 신전 보조를 0으로 둔다. 걷기에서 유각 중·후반(참조 위상 68–92 %)의 다리 감속은 무릎 결합·중력이 내고
+착용자 hip 토크는 ≈0인데, 진자에서 배운 L1은 감속을 보고 브레이크를 걸어 착용자가 같은 크기로 맞서던 구간을
+끊는다. W1 평가: 걷기 τ² −18.7 → −26.5 %, 달리기 −24.3 → −31.0 % (`docs/ai_sbc/walking_swing_gate.html`).
+손으로 만든 위상 규칙이라 **진단 기준값**이지 배포 후보가 아니다.
 
 ```bash
 python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20                 # 걷기
 python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20 --motion-id 1   # 달리기
-python examples/experiments/assist_skeleton/report_swing_gate.py --out docs/ai_sbc/walking_swing_gate.html
+python examples/experiments/assist_skeleton/report.py swing-gate --out docs/ai_sbc/walking_swing_gate.html
 ```
 
 ## 파일 역할
 
 | 파일 | 역할 |
 |---|---|
-| `run_system.py`, `analysis.py`, `viz.py` | 통합 비교 실행, 지표·그림, 시각화 |
-| `evaluate_native_wearer.py` | 새 보행의 무보조 착용자 평가 |
-| `diagnose_walking.py`, `fullbody_diagnostic.py`, `phase_screen.py` | 구간별 방해와 전신 물리 진단 |
-| `report_*.py` | 저장한 결과의 보고서 생성. 생성 뒤 `python docs/ai_sbc/organize_reports.py` 실행 |
-| `llp_walk_finetune*.py`, `llp_walk_tempo.py` | 전신 추가학습 실험 구성 |
-| `run_walk_*_sequence.py`, `validate_walk_finetune.py` | 해당 실험의 실행·평가 절차 재현 |
+| `run_system.py` | 통합 비교 실행. `SystemRunner`(조립→제어기→훅→루프→기록), `SystemHook`(10 ms 서브스텝 훅), `MocapGaitPhase`(오라클용 특권 위상표), `FullBodyDiagnostic`(`--fullbody-diagnostic`) |
+| `analysis.py` | 기록의 지표 계산 (numpy만). 실행 직후 지표·그림·report.md와 `RunRecord`·`ObjectiveComparison`·`TorqueAlignment`·`PhaseScreen`·`DecelerationMasks`·`WalkingPhaseDigest`·`SwingGateBins` 등 |
+| `evaluate.py` | 시뮬레이션을 돌리는 평가: `motions`(모션별 A/B), `native-wearer`(새 보행의 무보조 착용자), `wearer`(착용자 사람다움 표) |
+| `report.py` | HTML 보고서: `comparison`, `checkpoint`, `torque`, `swing-gate`. 생성 뒤 `python docs/ai_sbc/organize_reports.py` |
+| `plots.py` | 문서용 PNG: `gait-symmetry`, `timing`, `torque-phase`, `compare`(터미널 표 + 오라클 그림) |
+| `viz.py` | Newton 뷰어 오버레이 (A 고스트 라인, 보조 토크 화살표) |
 | `tracker_human.py`, `train_tracker_human.sh` | W1 착용자 학습 구성·실행 |
-| `llp_walk.py`, 초기 tracker 스크립트 | 과거 실험 재현 및 일부 공통 구성 제공 |
+| `llp_walk.py` | 보행 착용자 위 LLP 재학습 env (후속 과제; 추가학습 변형은 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관) |
 
-공통 제어기는 `protomotions/assist/`, ManiFlow 연결은 `protomotions/maniflow/`에 있다.
+보행 클립 부분집합은 `data/scripts/make_gait_motions.py`로 만든다. 공통 제어기는 `protomotions/assist/`,
+ManiFlow 연결은 `protomotions/maniflow/`에 있다. 진자 쪽 학습·평가는 `../assist_pendulum/`
+(`mlp.py` 프리셋, `runtime.py`, `evaluate.py`, `study.py`, `report.py`).
 구체적인 코드 흐름과 주의점은 [프레임워크 문서](../../../docs/ai_sbc/AI_SBC_FRAMEWORK.md)를 참조한다.
-학습 스크립트가 남아 있다는 이유로 종료된 실험을 다시 시작하지 않는다.
+닫힌 연구의 실행기는 `results/<연구>/scripts/`에 있고(각 `SNAPSHOT.md`), 그대로 다시 시작하지 않는다.

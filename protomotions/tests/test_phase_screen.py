@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples/experiments/assist_skeleton"))
-from phase_screen import screen_motion
+from analysis import screen_motion
 
 
 def inputs():
