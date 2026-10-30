@@ -8,7 +8,7 @@
 | 표기 | 뜻 |
 |---|---|
 | H1 | 미래 고관절 각도 예측기. HLP(High-Level Predictor), ManiFlow 모델 |
-| L1, L9, L13R, L14 등 | 보조 토크 제어기의 실험 버전. LLP(Low-Level Policy). 큰 번호가 항상 더 좋은 모델은 아님 |
+| L1, L9, L13R, L14, L15, L16 등 | 보조 토크 제어기의 실험 버전. LLP(Low-Level Policy). 큰 번호가 항상 더 좋은 모델은 아님 |
 | W1 | 시뮬레이션에서 사람 역할을 하는 가상 착용자. 보조 제어기와 별도 모델 |
 | A443 같은 Axxx | BONES-SEED 원본 메타데이터의 `actor_uid`, 촬영한 사람을 구분하는 코드. 실험·모델 번호가 아님 |
 | 무보조 A / 보조 B | 같은 조건에서 보조 유무를 비교하는 두 시뮬레이션. 위의 동작 수행자 코드와 무관 |
@@ -34,7 +34,10 @@
 L9·L13R·L14 평가는 배율 1, 최종 토크 한계 ±100 N·m를 사용했다.
 L1과는 출력 한계와 학습 조건도 다르므로 성능 차이를 보상식 하나의 효과로 해석하지 않는다.
 
-H1의 검증된 저장 경로:
+H1의 검증된 저장 경로 (2026-10-29부터, flexion100-h15-swap: 관측 토큰 self-attention · 노이즈 action 열 cross-attention):
+`/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/outputs/hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42/checkpoints/epoch=0008-val_loss=0.000834.ckpt`
+
+옛 H1(관측 cross-attention)은 2026-10-29에 폐기했다. 그 전의 모든 결과는 이 파일로 측정했으며 재현용으로만 남긴다:
 `/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/outputs/hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42/checkpoints/epoch=0006-val_loss=0.000762.ckpt`
 
 ## 진자 비교 결과와 보존 경로
@@ -43,6 +46,17 @@ H1의 검증된 저장 경로:
 
 | 실험 | 경로 | 상태 |
 |---|---|---|
+| L15 · 진자 학습, 보조 한계 20 N·m (2026-10-29) | `results/llp_R0lim20_s0_20261029/epoch_6000.ckpt` | seed 0·6,000 epoch. 배율 1 ±20: W1 걷기 τ² −17.8 %·달리기 −22.4 %, 최대출력 95% 이상 사용 시간비율 76 / 84 %. 20 N·m로 학습한 현재 계보의 출발 모델 |
+| L15 걷기 전용 / 달리기 전용 추가학습 (2026-10-29, 옛 H1) | `results/llp_lim20ft_{walk,run}_20261029/epoch_200.ckpt` | 가상 착용자 W1과 예측기를 연결한 전신 시뮬레이션에서 200 epoch 이어서 학습. 걷기 −22.3 %, 달리기 −25.0 %; 최대출력 95% 이상 사용 시간비율 78–84 % 유지 |
+| R0 ×0.5 걷기/달리기 전신 추가학습 (기준 계보, 2026-10-29) | `results/llp_R0ft_{walk,run}_20261029/epoch_200.ckpt` | 출력 20·tanh·한계 20으로 R0 actor 이어받음. 걷기 −26.5 %, 달리기 −25.6 %, 걷기 모델→달리기 −30.2 %. 걷기 후보 |
+| 위 연구 원본 (2026-10-29) | `results/llp_lim20_finetune_20261029/` · `results/llp_R0_finetune_20261029/` | 평가 기록·학습 로그·보고서 스크립트. [결과](261029_lim20_finetune/report.html) |
+| 예측기 토큰 자리 맞바꿈 (2026-10-29) | `/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/outputs/hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42/checkpoints/epoch=0008-val_loss=0.000834.ckpt` · `results/hlp_routing_swap_20261029/` | 옛 H1과 같은 조건 학습. ETRI 14동작 MAE 0.51° (옛 H1 0.56°, denoise 1), 지연 2.45 vs 2.20 ms. 정확도는 같은 수준이며 원래 구상한 구조이므로 사용자 결정으로 2026-10-29 H1로 채택, 옛 H1 폐기 |
+| 새 H1 기준값 (2026-10-29) | `results/h1_swap_adoption_20261029/` (`summary.json`, `eval_all.sh`) | W1 + 새 H1, 40 s, seed 42·7, denoise 1: L1 ×0.5 걷기 −19.0 / 달리기 −23.3 %, R0 ×0.5 걷기 추가학습 모델 −26.7 / −29.7 % (옛 H1: −18.8 / −24.1, −26.5 / −30.2). 낙상 0 |
+| L15 걷기 전용 / 달리기 전용 추가학습 400 epoch (2026-10-29, 새 H1) | `results/llp_L15ft_{walk,run}_20261029/epoch_400.ckpt` | W1 걷기 −24.9 % / 달리기 −25.5 %(각자 동작). 다른 동작에 쓰면 −18.9 / −18.6 % |
+| L16 · L15 걷기·달리기 동시 추가학습 800 epoch (2026-10-29) | `results/llp_L16_20261029/epoch_800.ckpt` | 두 동작 반반, motion별 영점. W1 걷기 −22.7 % / 달리기 −27.1 %, 최대출력 95% 이상 사용 시간비율 91 / 91 %. 한 모델로 두 동작을 맡길 때 가장 균형 잡힌 checkpoint |
+| L15 걷기 전용 / 달리기 전용 추가학습 1,200 epoch (2026-10-30, 400에서 이어서) | `results/llp_L15ft_{walk,run}_20261029/epoch_1200.ckpt` | 같은 run을 400 epoch에서 이어받음(원본 설정 `resolved_configs.pt.ep400`). 걷기 전용: 걷기 −26.6 %(600 epoch과 같음), 최대출력 95% 이상 사용 시간비율 68 %, 걷기 70–90 % 방해 없음 → L15 계보의 걷기 후보. 달리기 전용: 달리기 −24.9 %(400 epoch −25.5 %보다 못함) |
+| L16 1,200 epoch (2026-10-30, 800에서 이어서) | `results/llp_L16_20261029/epoch_1200.ckpt` | 같은 run을 800 epoch에서 이어받음(원본 설정 `resolved_configs.pt.ep800`). W1 걷기 −19.9 % / 달리기 −27.4 %, 최대출력 95% 이상 사용 시간비율 92 / 88 %. 달리기는 수렴(800 → 1,200 epoch −27.1 → −27.4 %) → L15 계보의 달리기 후보; 걷기는 800 epoch보다 못함 |
+| 위 연구 원본 (2026-10-29 ~ 30) | `results/llp_L16_study_20261029/` | 평가 72건·`summary.json`·`train_curve.json`(학습 보상 곡선)·`cross_summary.json`(교차 적용)·학습/평가/이어서 학습 스크립트. [결과](261029_L16_joint_finetune/report.html) |
 | 발표 편집본 3장·고부담 출력 진단 (2026-10-23) | `results/presentation_three_slides_20261023/index.html` · 보관 스크립트 `results/presentation_three_slides_20261023/scripts/` | 기본형=L1, 효율형=R0. 보조 최대 ±20 조건만. 기존 영상·수치 재구성; 새 학습/추론 없음. 원본·진단 `source_manifest.json`, `diagnostics/` |
 | 발표용 ON → OFF → ON 회복 시연 (2026-10-23) | `results/presentation_toggle_20261023/` · `results/presentation_toggle_20261023/scripts/presentation_toggle_capture.py`(보관) | 기존 가중치·W1 힘 한계·피드백 유지. 영상 5초 OFF/10초 ON. 전환 2건+저장 대조군 2건 모두 낙상 0. 영상·계측·원본 해시 `deliverables/` |
 | 발표용 고관절 최대 힘 제한 ON/OFF (2026-10-23) | `results/presentation_cap_20261023/` · `results/presentation_cap_20261023/scripts/presentation_cap_capture.py`(보관) | 기존 L1/R0 ×0.5·H1·W1 동결. 착용자 hip_flexion 두 축만 기존 ON 절대 최대값으로 제한, 피드백 유지. 4건 완주·낙상 0. 조건·실행 `protocol.json`, `runs.json`; 영상·검증 `deliverables/` |
