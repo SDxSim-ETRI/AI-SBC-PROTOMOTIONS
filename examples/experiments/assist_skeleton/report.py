@@ -334,6 +334,38 @@ class Svg:
         return "".join(out) + f'<text class="axis" x="{ml}" y="12">RMS 감소량 [N·m] · 양수 = 부담 감소</text><text class="axis" x="{w-mr}" y="{h-3}" text-anchor="end">보행 phase [%]</text></svg>'
 
     @staticmethod
+    def reduction_bars_grouped(series: dict, colors: list, h=300, w=900):
+        """series: 이름 -> {"mean": [10], "runs": [[10], ...], "labels": [...]} — 보행 진행률 10 % 구간별
+        착용자 토크 실효값 감소량(무보조 A − 보조 B)을 모델별로 나란히. 양수 = 부담 감소."""
+        names = list(series)
+        ml, mr, mt, mb = 65, 15, 22, 45
+        vals = [v for d in series.values() for v in d["mean"]]
+        bound = max(5.0, max(abs(v) for v in vals if v is not None)) * 1.18
+        y = lambda v: mt + (bound - v) / (2 * bound) * (h - mt - mb)  # noqa: E731
+        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="보행 진행률별 착용자 토크 실효값 감소량" style="max-width:100%;height:auto;display:block">']
+        step = Svg.nice(bound / 2.5)
+        tick = -np.floor(bound / step) * step
+        while tick <= bound:
+            out.append(f'<line class="grid" x1="{ml}" x2="{w-mr}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
+                       f'<text class="tick" x="{ml-8}" y="{y(tick)+4:.1f}" text-anchor="end">{tick:+.0f}</text>')
+            tick += step
+        out.append(f'<line class="zero" x1="{ml}" x2="{w-mr}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>')
+        n = len(names); dx = (w - ml - mr) / 10; bw = dx * .8 / n
+        for b in range(10):
+            out.append(f'<text class="tick" x="{ml+dx*(b+.5):.1f}" y="{h-mb+16}" text-anchor="middle">{b*10}–{(b+1)*10}</text>')
+            for j, name in enumerate(names):
+                v = series[name]["mean"][b]
+                if v is None:
+                    continue
+                xx = ml + dx * (b + .1) + j * bw
+                per = ", ".join(f"{l} {r[b]:+.1f}" for l, r in zip(series[name]["labels"], series[name]["runs"]) if r[b] is not None)
+                out.append(f'<rect class="bar" x="{xx:.1f}" y="{min(y(v), y(0)):.1f}" width="{bw:.1f}" height="{max(1, abs(y(v)-y(0))):.1f}" rx="1.5" fill="{colors[j]}">'
+                           f'<title>{html.escape(name)} · {b*10}–{(b+1)*10} %: {v:+.2f} N·m ({html.escape(per)})</title></rect>')
+        out.append(f'<text class="axis" x="{ml}" y="12">토크 실효값 감소량 [N·m] · 양수 = 부담 감소</text>'
+                   f'<text class="axis" x="{w-mr}" y="{h-4}" text-anchor="end">보행 진행률 [%] · 0 % = 참조 최대 굴곡</text></svg>')
+        return "".join(out)
+
+    @staticmethod
     def bins_line(series, ylabel, ylim, shade=None, h=250, w=900, bins=25):
         """series: [(label, color, y[bins], dash)] — x = 구간 중심 (유각 게이트 보고서)."""
         ml, mr, mt, mb = 60, 15, 18, 40
@@ -711,7 +743,7 @@ class CheckpointReport:
             )
         tbl = f"""
 <div class="scroll"><table>
-  <thead><tr><th>epoch</th><th>걷기 τ² [%]</th><th>달리기 τ² [%]</th><th>걷기 몸체 오차 [%]</th><th>보조 RMS [N·m]</th><th>포화 [%]</th><th>상관 (걷기)</th><th>상관 (달리기)</th></tr></thead>
+  <thead><tr><th>epoch</th><th>걷기 τ² [%]</th><th>달리기 τ² [%]</th><th>걷기 몸체 오차 [%]</th><th>보조 RMS [N·m]</th><th>최대출력 95% 이상 사용 시간비율 [%]</th><th>상관 (걷기)</th><th>상관 (달리기)</th></tr></thead>
   <tbody>{''.join(rows)}</tbody>
 </table></div>"""
         charts = ""
@@ -1085,6 +1117,127 @@ class SwingGateReport:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 추가학습 전후 보고서 — 보행 진행률별 토크 실효값 감소량
+# ---------------------------------------------------------------------------
+class FinetuneReport:
+    """추가학습 전후(및 기준선)를 걷기·달리기별로 비교한다. 그래프는 보행 진행률 10 % 구간별 착용자 토크
+    실효값 감소량(무보조 A − 보조 B, N·m)이고, 같은 이름의 실행(평가 seed 여러 개)은 구간별 평균을 그린다."""
+
+    @staticmethod
+    def resolve(items):
+        """이름=glob → {이름: [run dirs]}; glob은 run_system 출력 폴더(traces.npz) 여러 개에 맞을 수 있다."""
+        out = {}
+        for it in items:
+            name, pat = it.split("=", 1)
+            hits = sorted(h for h in glob.glob(pat) if (Path(h) / "traces.npz").exists())
+            assert hits, f"no run for {pat}"
+            out[name] = [Path(h) for h in hits]
+        return out
+
+    @staticmethod
+    def digest(run: Path):
+        rec = RunRecord(run)
+        meta = rec.meta
+        data = TorqueAlignment.aligned_torques(rec.traces, meta)
+        rows = TorqueAlignment.phase_profile(data, 10)
+        limit = abs(meta["assist_scale"]) * min(meta["torque_limit"], meta.get("policy_torque_limit", meta["torque_limit"]))
+        red = [r["rms_reduction_Nm"] for r in rows]
+        return dict(run=str(run), seed=meta.get("seed"), reduction=red, metrics=ObjectiveComparison.html_metrics(run), limit=limit,
+                    saturation=float(100 * np.mean(np.abs(data["assist_B"]) > .95 * limit)),
+                    worst=max(-(v or 0) for v in red), bad_bins=sum((v or 0) < 0 for v in red),
+                    survived=meta.get("survived_s"), seconds=meta.get("seconds"))
+
+    @classmethod
+    def series(cls, runs: dict):
+        out = {}
+        for name, paths in runs.items():
+            ds = [cls.digest(p) for p in paths]
+            mean = [None if any(d["reduction"][b] is None for d in ds) else float(np.mean([d["reduction"][b] for d in ds])) for b in range(10)]
+            out[name] = dict(mean=mean, runs=[d["reduction"] for d in ds], labels=[f"seed {d['seed']}" for d in ds], digests=ds)
+        return out
+
+    @staticmethod
+    def table_html(series: dict):
+        def cell(values, spec="+.1f", unit=""):
+            vals = [v for v in values if v is not None]
+            if not vals:
+                return "<td>–</td>"
+            per = ", ".join(format(v, spec) for v in vals)
+            return f'<td>{np.mean(vals):{spec}}{unit} <span class="dim">({per})</span></td>'
+        head = ["모델", "착용자 τ² 변화 [%]", "보조 RMS [N·m]", "최대출력 95% 이상 사용 시간비율 [%]", "최악 구간 RMS 증가 [N·m]", "부담 증가 구간 / 10", "몸체 오차 변화 [%]", "완주"]
+        body = []
+        for name, d in series.items():
+            ds = d["digests"]
+            done = ", ".join(f'{x["seconds"]:g} s' if x["survived"] is None else f'{x["survived"]:.1f} s 낙상' for x in ds)
+            body.append("<tr><th>" + html.escape(name) + "</th>" + cell([x["metrics"]["tau2"] for x in ds])
+                        + cell([x["metrics"]["assist_rms"] for x in ds], ".1f") + cell([x["saturation"] for x in ds], ".1f")
+                        + cell([x["worst"] for x in ds], "+.1f") + cell([x["bad_bins"] for x in ds], ".0f")
+                        + cell([x["metrics"].get("body") for x in ds]) + f'<td class="txt">{done}</td></tr>')
+        return ('<div class="scroll"><table><thead><tr>' + "".join(f"<th>{h}</th>" for h in head) + "</tr></thead><tbody>"
+                + "".join(body) + "</tbody></table></div>")
+
+    @staticmethod
+    def bins_table_html(series: dict):
+        names = list(series)
+        head = "<tr><th>구간 [%]</th>" + "".join(f"<th>{html.escape(n)}</th>" for n in names) + "</tr>"
+        rows = []
+        for b in range(10):
+            best = max((series[n]["mean"][b] for n in names if series[n]["mean"][b] is not None), default=None)
+            cells = "".join(f'<td class="{"best" if series[n]["mean"][b] == best else ""}">{series[n]["mean"][b]:+.2f}</td>' if series[n]["mean"][b] is not None else "<td>–</td>" for n in names)
+            rows.append(f"<tr><th>{b*10}–{(b+1)*10}</th>{cells}</tr>")
+        return f'<div class="scroll"><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>'
+
+    PALETTE = HtmlShell.SERIES + ["#8e5bd6", "#5b8f3a", "#b5473f", "#6b6b6b"]
+
+    @classmethod
+    def section(cls, title, runs: dict, note: str, chart_names=None):
+        series = cls.series(runs)
+        chart = {n: series[n] for n in (chart_names or list(series)) if n in series}
+        assert chart, f"--chart 이름이 실행 이름과 맞지 않음: {chart_names}"
+        colors = cls.PALETTE[:len(chart)]
+        legend = "".join(f'<span class="lg"><i style="background:{c}"></i>{html.escape(n)}</span>' for n, c in zip(chart, colors))
+        paths = "".join(f"<li><code>{html.escape(str(p))}</code></li>" for d in series.values() for p in [x["run"] for x in d["digests"]])
+        return f"""<section>
+  <h2>{html.escape(title)}</h2>
+  <p class="note">{note}</p>
+  <div class="legend">{legend}</div>
+  {Svg.reduction_bars_grouped(chart, colors)}
+  <h3 style="margin-top:16px">전체 지표 (평가 seed 평균, 괄호 안은 seed별)</h3>
+  {cls.table_html(series)}
+  <h3 style="margin-top:16px">구간별 감소량 [N·m] (seed 평균, 굵은 칸 = 구간에서 가장 큰 감소)</h3>
+  {cls.bins_table_html(series)}
+  <details><summary>원본 기록</summary><ul>{paths}</ul></details>
+</section>"""
+
+    @classmethod
+    def build(cls, args):
+        walk, run = cls.resolve(args.walk), cls.resolve(args.run)
+        note = ("감소량 = 무보조 A의 착용자 고관절 토크 실효값 − 보조 B의 실효값, 구간 안에서 좌우 고관절을 각 다리의 참조 위상으로 모아 계산. "
+                "양수가 부담 감소다. 막대에 마우스를 올리면 seed별 값이 보인다.")
+        chart = [x.strip() for x in args.chart.split(";")] if args.chart else None
+        sections = cls.section("걷기 (motion 0, 40 s, W1)", walk, note, chart)
+        if run:
+            sections += cls.section("달리기 (motion 1, 40 s, W1)", run, note, chart)
+        page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(args.title)}</title>
+{HtmlShell.PLEX_FONTS}
+<style>{HtmlShell.plex_css()}</style></head><body>
+<main>
+  <header>
+    <div class="eyebrow">{html.escape(args.eyebrow)}</div>
+    <h1>{html.escape(args.title)}</h1>
+    <p class="verdict">{args.verdict}</p>
+  </header>
+  {Path(args.prelude).read_text() if args.prelude else ""}
+  {sections}
+  <div class="foot">{args.notes}</div>
+</main></body></html>"""
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(page)
+        print("saved", args.out, f"({len(page)//1024} KB)")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
@@ -1117,6 +1270,17 @@ def main(argv=None):
     s.add_argument("--manifest", default="results/llp_wide100_sequence/comparison.json")
     s.add_argument("--out", default="docs/ai_sbc/l6_l7_torque_report.html")
 
+    s = sub.add_parser("finetune", help="추가학습 전후 비교: 보행 진행률 10 % 구간별 토크 실효값 감소량 + 전체 지표")
+    s.add_argument("--walk", nargs="+", required=True, help="이름=glob (걷기 실행; glob이 seed 여러 개에 맞으면 평균)")
+    s.add_argument("--run", nargs="*", default=[], help="이름=glob (달리기 실행)")
+    s.add_argument("--chart", default=None, help="그래프에 올릴 이름들 (';' 구분, 기본 전부; 표에는 전부 나온다)")
+    s.add_argument("--title", default="LLP 추가학습 전후 비교")
+    s.add_argument("--eyebrow", default="AI-SBC · LLP 추가학습")
+    s.add_argument("--verdict", default="", help="맨 위 한 줄 판정 (HTML 가능)")
+    s.add_argument("--notes", default="", help="맨 아래 각주 (HTML 가능)")
+    s.add_argument("--prelude", default=None, help="걷기·달리기 절 앞에 넣을 HTML 조각 파일 (예: 예측기 비교 표)")
+    s.add_argument("--out", default="docs/ai_sbc/finetune_report.html")
+
     s = sub.add_parser("swing-gate", help="걷기 유각 브레이크 분석과 관절각 게이트")
     s.add_argument("--out", default="docs/ai_sbc/walking_swing_gate.html")
     s.add_argument("--baseline-dir", default="results/pendulum_reeval_20261013/evaluations")
@@ -1129,6 +1293,8 @@ def main(argv=None):
         CheckpointReport.build(args)
     elif args.command == "torque":
         TorqueReport.build(args.manifest, args.out)
+    elif args.command == "finetune":
+        FinetuneReport.build(args)
     else:
         SwingGateReport.build(args.out, args.baseline_dir, args.probe_dir)
 

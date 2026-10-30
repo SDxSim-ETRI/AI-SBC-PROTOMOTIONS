@@ -45,9 +45,25 @@ mocap hip 각도는 tracker 자체가 10~14° 벗어나 따라간다. 대신 "�
         --num-envs 4096 --batch-size 16384 \\
         --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt
 평가: examples/experiments/assist_skeleton/run_system.py --human tracker --llp-checkpoint results/llp_skel_walk/last.ckpt
+
+진자 LLP actor 이어받기 추가학습 (`--initial-actor-checkpoint`, 2026-10-11 L13 방식을 옵션으로 통합):
+    출발 checkpoint의 관측 구성·action 변환·토크 한계를 그대로 쓰고(actor 가중치만 이어받음, critic·optimizer는 새로),
+    무보조 착용자를 같은 난수로 나란히 돌려 보상을 계산하는 `PairedSkeletonAssistEnv`를 쓴다.
+    에피소드 8 s, 시작 시각은 클립의 0–`--segment-start-max` s. `--exclude-motion-ids`로 걷기(0)·달리기(1)를 고른다.
+    둘을 한 모델로 같이 학습하려면 제외 없이 `--motion-weights 0.5,0.5`와 motion id별 영점
+    `--hlp-calibration "0:p,q,r,s;1:p,q,r,s"`를 준다 (2026-10-29).
+    python protomotions/train_agent.py --robot-name skeleton_torque_suit_human --simulator newton \\
+        --experiment-path examples/experiments/assist_skeleton/llp_walk.py --experiment-name llp_C0ft_walk \\
+        --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 256 --batch-size 8192 \\
+        --training-max-steps 1638400 --seed 13 --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \\
+        --hlp-checkpoint <H1> --decimation 4 --human-cost torque_sq --hlp-calibration "p,q,r,s" \\
+        --initial-actor-checkpoint results/llp_relative_R0_s0_20261020/epoch_6000.ckpt --exclude-motion-ids 1 \\
+        --finetune-assist-limit 20
 """
 
 import argparse
+import copy
+from dataclasses import fields
 from pathlib import Path
 
 import torch
@@ -103,7 +119,8 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="assist Στ² 벌점 weight (None = 토크 한계에 맞춰 자동 환산 — "
                              "한계를 올려도 이 항이 몰래 한계로 작동하지 않게)")
     parser.add_argument("--hlp-calibration", type=str, default="motion",
-                        help="HLP 영점: motion(재생 클립 평균) | none | 'p,q,r,s'(deg, 착용자 스트림 평균으로 잰 값). "
+                        help="HLP 영점: motion(재생 클립 평균) | none | 'p,q,r,s'(deg, 착용자 스트림 평균으로 잰 값) | "
+                             "'0:p,q,r,s;1:p,q,r,s'(motion id별 — 걷기·달리기 동시 학습). "
                              "착용자 자세는 mocap과 10° 가까이 다를 수 있다 — run_system.py --calibration wearer가 측정값을 찍어 준다")
     parser.add_argument("--action-rate-weight", type=float, default=-0.005,
                         help="연속 step 사이 토크 변화 벌점. ×10(−0.05)은 과했다 — 정책이 거의 일정한 "
@@ -112,6 +129,24 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="주입 전 1차 저역통과 [Hz] (0 = 끔). 구동기 대역을 플랜트에 넣는 방식 — "
                              "정책이 그 한계 안에서 위상을 맞추는 법을 배운다. 실행 시 "
                              "run_system.py --torque-lpf-hz 같은 값으로")
+    # --- 진자 LLP actor 이어받기 추가학습 (L13 방식) ---
+    parser.add_argument("--initial-actor-checkpoint", type=str, default=None,
+                        help="진자 LLP checkpoint. 주면 actor 가중치만 이어받고(critic·optimizer 새로), 관측 구성·action 변환·"
+                             "토크 한계는 그 checkpoint의 설정을 쓰며, 무보조 착용자를 나란히 돌리는 PairedSkeletonAssistEnv로 학습")
+    parser.add_argument("--exclude-motion-ids", type=str, default=None,
+                        help="추가학습에서 뺄 motion id (쉼표). gait.pt: 0=걷기, 1=달리기. 예: 걷기만 = 1")
+    parser.add_argument("--motion-weights", type=str, default=None,
+                        help="추가학습 motion 표본 비율 (쉼표, motion id 순). 없으면 motion 파일 가중치(gait.pt 걷기 0.75·달리기 0.25)")
+    parser.add_argument("--segment-start-max", type=float, default=20.0,
+                        help="에피소드 시작 시각 상한 [s] (클립 앞부분만 학습에 쓰고 뒷부분은 평가용으로 남김)")
+    parser.add_argument("--local-excess-weight", type=float, default=1.0,
+                        help="PairedSkeletonAssistEnv의 관절별 부담 증가 벌점 가중치 (L13 1.0, L13R 0.149 + floor 10)")
+    parser.add_argument("--local-excess-floor", type=float, default=0.0,
+                        help="위 벌점의 분모 바닥 [N·m] (0 = 고정 scale로 나눔)")
+    parser.add_argument("--finetune-actor-lr", type=float, default=3e-5, help="이어받은 actor의 학습률 (L13 3e-5)")
+    parser.add_argument("--finetune-assist-limit", type=float, default=None,
+                        help="추가학습 중 보조 토크 출력 배율·한계 [N·m] (None = 출발 checkpoint 값). 40·tanh로 학습한 R0에 20을 주면 "
+                             "평가의 R0 ×0.5(20·tanh)와 같은 출력에서 시작해 20 N·m 한계로 학습한다")
 
 
 def _tracker_resolved(args: argparse.Namespace):
@@ -128,6 +163,11 @@ def configure_robot_and_simulator(
     robot_cfg: RobotConfig, simulator_cfg: SimulatorConfig, args: argparse.Namespace
 ):
     """tracker와 같은 접촉 센서(발) + LLP 주기: 물리 400 Hz / decimation (기본 2 = 5 ms)."""
+    if getattr(args, "initial_actor_checkpoint", None):
+        # L13 방식: 로봇·물리 설정을 착용자 checkpoint의 저장본으로 맞춘다.
+        wearer = _tracker_resolved(args)
+        robot_cfg.__dict__.update(copy.deepcopy(wearer["robot"].__dict__))
+        simulator_cfg.sim = copy.deepcopy(wearer["simulator"].sim)
     robot_cfg.update_fields(contact_bodies=["all_left_foot_bodies", "all_right_foot_bodies"])
     simulator_cfg.sim.fps = 400
     simulator_cfg.sim.decimation = int(args.decimation)
@@ -329,7 +369,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         ),
     }
 
-    return SkeletonAssistEnvConfig(
+    cfg = SkeletonAssistEnvConfig(
         max_episode_length=1000,  # 10 s @ 100 Hz
         reset_grace_period=5,
         num_state_history_steps=rate["history"],
@@ -345,6 +385,79 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> SkeletonAssi
         assist_torque_limit=float(args.assist_limit),
         assist_torque_lpf_hz=float(args.assist_lpf_hz),
     )
+    if args.initial_actor_checkpoint:
+        cfg = _env_finetune(cfg, args)
+    return cfg
+
+
+def _finetune_source(args: argparse.Namespace):
+    """추가학습 출발 checkpoint(진자 LLP)의 학습 resolved config."""
+    path = Path(args.initial_actor_checkpoint).parent / "resolved_configs.pt"
+    assert path.exists(), f"resolved_configs.pt not found next to {args.initial_actor_checkpoint}"
+    return torch.load(path, map_location="cpu", weights_only=False)
+
+
+def _env_finetune(cfg: SkeletonAssistEnvConfig, args: argparse.Namespace):
+    """L13 방식 env: 출발 checkpoint의 관측 구성·action 변환·토크 한계를 그대로 쓰고, 무보조 착용자를 같은 난수로
+    나란히 돌려 보상을 계산한다(PairedSkeletonAssistEnv). 에피소드 8 s, 시작 시각 0–segment_start_max s."""
+    from protomotions.envs.base_env.paired_skeleton_assist_env import (
+        PairedSkeletonAssistEnvConfig, WalkingSegmentConfig,
+    )
+    from protomotions.envs.context_views import EnvContext
+
+    source = _finetune_source(args)["env"]
+    out = PairedSkeletonAssistEnvConfig(**{f.name: getattr(cfg, f.name) for f in fields(cfg) if f.name != "_target_"})
+    out.num_state_history_steps = source.num_state_history_steps
+    cc = out.control_components["assist"]
+    cc.hlp_dt = 0.01
+    cc.chunk_knots = 6
+    cc.target_low_override = (-1.52, -1.52)
+    cc.target_high_override = (1.52, 1.52)
+    for key in ("assist_proprio", "assist_target", "previous_actions", "assist_privileged"):
+        out.observation_components[key] = copy.deepcopy(source.observation_components[key])
+    # 출발 모델의 관측은 진자 전체 DOF를 가리킨다 — 스켈레톤에서는 두 hip 축(assist 컨텍스트)으로 바꿔 단다.
+    for key in ("assist_proprio", "assist_target", "assist_privileged"):
+        obs = out.observation_components[key]
+        for name in ("dof_pos", "dof_vel", "historical_dof_pos", "historical_dof_vel"):
+            if name in obs.dynamic_vars:
+                obs.dynamic_vars[name] = getattr(EnvContext.assist, name)
+    out.action_config = copy.deepcopy(source.action_config)
+    out.assist_torque_limit = source.assist_torque_limit
+    if args.finetune_assist_limit is not None:
+        limit = float(args.finetune_assist_limit)
+        assert isinstance(out.action_config, dict) and "torque_scale" in out.action_config, "source action config has no torque_scale"
+        out.action_config["torque_scale"] = limit  # 예: 40·tanh → 20·tanh (R0 ×0.5와 같은 출력)
+        out.assist_torque_limit = limit
+    out.reward_components = {}  # 보상은 두 착용자의 물리 step 뒤 PairedSkeletonAssistEnv가 계산
+    out.motion_manager = WalkingSegmentConfig(**{f.name: copy.deepcopy(getattr(out.motion_manager, f.name))
+                                                for f in fields(out.motion_manager) if f.name != "_target_"})
+    if args.exclude_motion_ids:
+        out.motion_manager.exclude_motion_ids = [int(v) for v in args.exclude_motion_ids.split(",")]
+    if getattr(args, "motion_weights", None):
+        out.motion_manager.motion_weights = tuple(float(v) for v in args.motion_weights.split(","))
+    out.motion_manager.init_start_prob = 0.0
+    out.motion_manager.start_max_s = float(args.segment_start_max)
+    out.max_episode_length = 800
+    out.local_excess_weight = float(args.local_excess_weight)
+    out.local_excess_floor_Nm = float(args.local_excess_floor)
+    return out
+
+
+def _agent_finetune(args: argparse.Namespace) -> PPOAgentConfig:
+    """출발 checkpoint의 PPO 설정에 actor 이어받기(AssistFinetunePPO)만 얹는다. 평가는 run_system A/B로 따로."""
+    from protomotions.agents.ppo.assist_finetune import AssistFinetuneConfig
+
+    source = _finetune_source(args)["agent"]
+    cfg = AssistFinetuneConfig(**{f.name: copy.deepcopy(getattr(source, f.name)) for f in fields(source) if f.name != "_target_"})
+    cfg.initial_actor_checkpoint = str(Path(args.initial_actor_checkpoint).resolve())
+    cfg.batch_size = args.batch_size
+    cfg.training_max_steps = args.training_max_steps
+    cfg.model.actor_optimizer.lr = float(args.finetune_actor_lr)
+    cfg.model.critic_optimizer.lr = 5e-4
+    cfg.save_epoch_checkpoint_every = 50
+    cfg.save_last_checkpoint_every = 10
+    cfg.evaluator.eval_metrics_every = None
+    return cfg
 
 
 def agent_config(
@@ -362,6 +475,8 @@ def agent_config(
     from protomotions.envs.mdp_component import MdpComponent
     from protomotions.envs.rewards.assist import compute_human_power_eval, compute_tracking_error_eval
 
+    if args.initial_actor_checkpoint:
+        return _agent_finetune(args)
     num_assist = len(env_config.control_components["assist"].assist_dof_names)
     actor_in_keys = ["assist_proprio", "assist_target", "previous_actions"]
     critic_in_keys = actor_in_keys + ["assist_privileged"]

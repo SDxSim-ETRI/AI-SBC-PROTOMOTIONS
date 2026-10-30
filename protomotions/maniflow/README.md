@@ -10,7 +10,7 @@
 
 ## 입력·출력과 시간
 
-| 항목 | 현재 H1 flexion100-h15 |
+| 항목 | 현재 H1 flexion100-h15-swap (2026-10-29부터) |
 |---|---|
 | 입력 | 오른쪽·왼쪽 고관절 굴곡, 몸통 pitch·roll의 4채널, rad |
 | 출력 | 오른쪽·왼쪽 고관절 굴곡의 2채널, rad |
@@ -18,6 +18,11 @@
 | 예측 범위 | 현재부터 50 ms까지, 10 ms 간격의 6점 |
 | LLP가 소비하는 창 | 현재·10 ms·20 ms |
 | 통합 평가의 denoise | 1회 |
+
+H1은 ManiFlow DiT-X에서 관측 토큰(4채널 × 10)을 self-attention에, 노이즈 섞인 15프레임 action 토큰열을
+cross-attention에 두는 구조다(ManiFlow `obs_routing=swap`). 관측을 cross-attention에 두던 옛 H1(flexion100-h15-run01)은
+2026-10-29에 폐기했으며, 그 전의 결과는 옛 H1로 측정했다. 체크포인트의 저장 설정이 구조를 정하므로 외부 ManiFlow 코드에
+`obs_routing` 옵션이 있어야 로드된다.
 
 `predict_horizon()`의 전체 배열은 관측 창과 정렬돼 있다.
 현재 프레임은 `n_obs_steps - 1`이며, 미래를 포함한 부분은

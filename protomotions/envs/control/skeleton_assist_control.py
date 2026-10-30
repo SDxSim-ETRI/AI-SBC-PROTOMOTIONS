@@ -174,7 +174,9 @@ class SkeletonAssistControlConfig(MotionAssistTargetControlConfig):
             떨어진 착용자 특이성 대책).
         tracker_period_steps: tracker 행동 주기 [env step] (50 ms / 10 ms = 5).
         hlp_calibration: "motion"(재생 mocap 평균 → SEED 평균 오프셋) | "none" |
-            "p,q,r,s"(직접 지정, deg). 착용자(tracker)가 실제로 걷는 자세는 재생 mocap과
+            "p,q,r,s"(직접 지정, deg) | "0:p,q,r,s;1:p,q,r,s"(motion id별 직접 지정 — 걷기·달리기를
+            한 배치에서 같이 학습할 때 리셋마다 env의 motion id에 맞는 영점을 HLP에 넣는다).
+            착용자(tracker)가 실제로 걷는 자세는 재생 mocap과
             10° 가까이 다를 수 있어, 착용자 스트림 평균으로 잰 값을 직접 넣는 쪽이
             예측 오차가 작다 (`run_system.py --calibration wearer`가 그 값을 측정해 찍어 준다).
         motion_file_for_calibration: 오프셋 계산에 쓸 motion .pt (None이면 env의 motion_lib 파일).
@@ -245,6 +247,7 @@ class SkeletonAssistControl(ControlComponent):
             ckpt, num_envs=n, device=dev,
             denoise_steps=int(config.maniflow_denoise_steps or DEFAULT_DENOISE_STEPS),
         )
+        self._calibration_table: Optional[Tensor] = None  # motion id별 영점 (rad), _calibration_offset이 채움
         offset = self._calibration_offset(names)
         if offset is not None:
             estimator.set_calibration(obs_offset=offset, output_bias=offset[:2])
@@ -285,6 +288,21 @@ class SkeletonAssistControl(ControlComponent):
         cfg = self.config
         if cfg.hlp_calibration == "none":
             return None
+        if ":" in cfg.hlp_calibration:
+            # "0:p,q,r,s;1:p,q,r,s" — motion id별 영점. 리셋 때 env의 motion id로 골라 넣는다 (reset 참조).
+            n_motions = int(self.env.motion_lib.num_motions())
+            table = torch.full((n_motions, 4), float("nan"))
+            for item in cfg.hlp_calibration.split(";"):
+                mid, vec = item.split(":")
+                vals = [float(v) for v in vec.split(",")]
+                assert len(vals) == 4, "hlp_calibration 'id:p,q,r,s'는 4채널(deg)"
+                assert 0 <= int(mid) < n_motions, f"hlp_calibration motion id {mid} out of range"
+                table[int(mid)] = torch.deg2rad(torch.tensor(vals, dtype=torch.float32))
+            self._calibration_table = table.to(self.env.device)
+            logger.info("HLP obs offset by motion id (deg): %s",
+                        {i: [round(v, 2) for v in torch.rad2deg(table[i]).tolist()] for i in range(n_motions) if not torch.isnan(table[i, 0])})
+            given = table[~torch.isnan(table[:, 0])]
+            return given.mean(dim=0)  # 첫 리셋 전의 공통값; 리셋마다 env별로 덮어쓴다
         if "," in cfg.hlp_calibration:
             vals = [float(v) for v in cfg.hlp_calibration.split(",")]
             assert len(vals) == 4, "hlp_calibration 'p,q,r,s'는 4채널(deg)"
@@ -377,6 +395,11 @@ class SkeletonAssistControl(ControlComponent):
             self._tracker_id[env_ids] = torch.randint(
                 len(self.trackers), (len(env_ids),), device=self._tracker_id.device
             )
+        if self._calibration_table is not None:
+            # motion id별 영점: 리셋된 env에 이번 motion의 영점을 넣는다 (motion_manager는 이미 새 motion을 뽑은 뒤).
+            off = self._calibration_table[self.env.motion_manager.motion_ids[env_ids]]
+            assert not torch.isnan(off).any(), "hlp_calibration: 영점을 주지 않은 motion id가 뽑혔다"
+            self._chunk_src.estimator.set_calibration_envs(env_ids, off, off[:, :2])
         dof_pos, trunk = self._hlp_observation(env_ids)
         self._chunk_src.reset(env_ids, dof_pos, trunk)
         self._refresh_chunk(env_ids, torch.zeros(len(env_ids), device=self.env.device))

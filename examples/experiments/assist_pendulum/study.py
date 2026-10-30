@@ -59,7 +59,7 @@ RUNNER = "examples/experiments/assist_skeleton/run_system.py"
 BASE = "results/llp_relative_R0_s0_20261020/epoch_6000.ckpt"  # 진자 평가의 플랜트·관측 config 출처
 H1_CHECKPOINT = os.path.expanduser(
     "~/Projects/ManiFlow_Policy/ManiFlow/data/outputs/"
-    "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42/checkpoints/epoch=0006-val_loss=0.000762.ckpt"
+    "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42/checkpoints/epoch=0008-val_loss=0.000834.ckpt"
 )
 W1 = "checkpoints/W1_wearer_human/last.ckpt"
 GAIT = "data/motion_for_trackers/skeleton_torque_suit_gait.pt"

@@ -28,7 +28,9 @@ whitelisted in `.gitignore` are versioned; reports, figures and the archive stay
 
 ## Current research baseline
 
-- H1: ManiFlow angle predictor, 100 Hz input, current through 50 ms prediction.
+- H1: ManiFlow angle predictor, 100 Hz input, current through 50 ms prediction. Since 2026-10-29 it is
+  flexion100-h15-swap (observation tokens in self-attention, noised action tokens in cross-attention);
+  the retired cross-attention H1 is kept only to reproduce results dated before then.
 - L1: pendulum-trained assist policy, `checkpoints/L1_llp_pendulum/last.ckpt`.
   W1 comparison uses output scale 0.5 (about ±20 N·m), 10 ms control.
   The hip-angle swing-brake gate (`--swing-gate 0.20`, `AssistController.swing_gate_fraction`, off by default)

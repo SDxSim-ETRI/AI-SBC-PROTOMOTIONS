@@ -47,7 +47,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 |---|---|---|
 | 정체 | ProtoMotions Mimic(PPO) 전신 모션 추종 RL 정책 | BONES-SEED mocap 지도학습 예측 모델 |
 | 역할 | 시뮬레이션 속 **"착용자" 대역** (skeleton을 걷게 함) | **사용자 의도 예측** (미래 flexion 출력) |
-| 현재 체크포인트 | `checkpoints/W1_wearer_human/last.ckpt` | H1 flexion100-h15 (버전표의 경로) |
+| 현재 체크포인트 | `checkpoints/W1_wearer_human/last.ckpt` | H1 flexion100-h15-swap (버전표의 경로) |
 
 ### 2.3 Chunk 인터페이스 (HLP ↔ LLP 결합점)
 
@@ -113,7 +113,9 @@ chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(
 
 ### 3.1 각도 예측기
 
-H1 = ManiFlow flexion100-h15. 고관절 좌우 각도와 몸통 pitch/roll의 4채널을 입력한다.
+H1 = ManiFlow flexion100-h15-swap (2026-10-29부터). DiT-X에서 관측 토큰은 self-attention, 노이즈 섞인 action 토큰열은
+cross-attention에 둔다(ManiFlow `obs_routing=swap`). 관측을 cross-attention에 두던 옛 H1(flexion100-h15-run01)은 폐기했고,
+2026-10-29 이전 결과는 옛 H1로 측정했다. 고관절 좌우 각도와 몸통 pitch/roll의 4채널을 입력한다.
 입력 간격 10 ms, 현재부터 50 ms까지 6점을 예측한다. LLP는 0/10/20 ms 미래 창을 소비한다.
 체크포인트 위치는 버전표에 고정했다. 시뮬레이션 코드는 `protomotions/maniflow/`를 통해 접근한다.
 40 Hz·150 ms의 H0는 초기 비교 모델이며 H1과 시간 계약을 혼용하지 않는다.

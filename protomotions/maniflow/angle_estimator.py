@@ -196,7 +196,8 @@ class ManiFlowAngleEstimator:
         obs_offset: Optional[_TensorLike] = None,
         output_bias: Optional[_TensorLike] = None,
     ) -> None:
-        """영점 오프셋 갱신 — None인 인자는 기존 값을 유지한다."""
+        """영점 오프셋 갱신 — None인 인자는 기존 값을 유지한다. 전 env 공통 벡터이며,
+        :meth:`set_calibration_envs`로 만든 env별 표가 있으면 그 표를 버리고 공통 벡터로 돌아간다."""
         if obs_offset is not None:
             off = torch.as_tensor(obs_offset, dtype=torch.float32, device=self.device)
             assert off.shape == (self.obs_dim,), (
@@ -209,6 +210,48 @@ class ManiFlowAngleEstimator:
                 f"output_bias must be ({self.action_dim},), got {tuple(bias.shape)}"
             )
             self._output_bias = bias
+
+    def set_calibration_envs(
+        self,
+        env_ids: torch.Tensor,
+        obs_offset: _TensorLike,
+        output_bias: Optional[_TensorLike] = None,
+    ) -> None:
+        """env별 영점 오프셋 — 한 배치 안에서 동작(걷기·달리기)마다 영점이 다를 때 쓴다.
+
+        처음 호출되면 공통 벡터를 (num_envs, dim) 표로 펼치고, 이후 호출은 ``env_ids`` 행만 바꾼다.
+        :meth:`observe`/:meth:`set_history`/:meth:`predict`/:meth:`predict_horizon`은 표가 있으면 행별로 적용한다.
+        """
+        if self._obs_offset.dim() == 1:
+            self._obs_offset = self._obs_offset.unsqueeze(0).repeat(self.num_envs, 1)
+        if self._output_bias.dim() == 1:
+            self._output_bias = self._output_bias.unsqueeze(0).repeat(self.num_envs, 1)
+        m = int(env_ids.numel())
+        off = torch.as_tensor(obs_offset, dtype=torch.float32, device=self.device)
+        assert off.shape == (m, self.obs_dim), f"obs_offset must be ({m}, {self.obs_dim}), got {tuple(off.shape)}"
+        self._obs_offset[env_ids] = off
+        if output_bias is not None:
+            bias = torch.as_tensor(output_bias, dtype=torch.float32, device=self.device)
+            assert bias.shape == (m, self.action_dim), f"output_bias must be ({m}, {self.action_dim}), got {tuple(bias.shape)}"
+            self._output_bias[env_ids] = bias
+
+    def _obs_offset_for(self, env_ids: Optional[torch.Tensor], seq: bool) -> torch.Tensor:
+        off = self._obs_offset
+        if off.dim() == 2:
+            if env_ids is not None:
+                off = off[env_ids]
+            if seq:
+                off = off.unsqueeze(1)
+        return off
+
+    def _output_bias_for(self, env_ids: Optional[torch.Tensor], seq: bool) -> torch.Tensor:
+        bias = self._output_bias
+        if bias.dim() == 2:
+            if env_ids is not None:
+                bias = bias[env_ids]
+            if seq:
+                bias = bias.unsqueeze(1)
+        return bias
 
     def reset(self, env_ids: Optional[torch.Tensor] = None) -> None:
         """리셋된 env를 표시 — 다음 observe에서 history가 재프라이밍된다."""
@@ -252,7 +295,7 @@ class ManiFlowAngleEstimator:
         if not bool(self._primed.all()):
             raise RuntimeError("predict() called before observe() primed all envs")
         result = self.policy.predict_action({self.obs_key: self._history})
-        return result["action"].detach() - self._output_bias
+        return result["action"].detach() - self._output_bias_for(None, seq=True)
 
     def set_history(self, env_ids: Optional[torch.Tensor], history: torch.Tensor) -> None:
         """history를 외부에서 직접 써넣는다 (25 ms 격자 재표집 등).
@@ -271,7 +314,7 @@ class ManiFlowAngleEstimator:
         expected = (m, self.n_obs_steps, self.obs_dim)
         if tuple(history.shape) != expected:
             raise ValueError(f"history must be {expected}, got {tuple(history.shape)}")
-        history = history + self._obs_offset
+        history = history + self._obs_offset_for(env_ids, seq=True)
         if env_ids is None:
             self._history = history
             self._primed[:] = True
@@ -297,4 +340,4 @@ class ManiFlowAngleEstimator:
         if not bool(primed.all()):
             raise RuntimeError("predict_horizon() called before observe/set_history")
         result = self.policy.predict_action({self.obs_key: history})
-        return result["action_pred"].detach() - self._output_bias
+        return result["action_pred"].detach() - self._output_bias_for(env_ids, seq=True)

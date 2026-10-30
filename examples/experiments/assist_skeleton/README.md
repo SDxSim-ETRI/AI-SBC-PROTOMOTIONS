@@ -12,7 +12,7 @@
 | 항목 | 기본값 |
 |---|---|
 | 가상 착용자 | W1, `checkpoints/W1_wearer_human/last.ckpt` |
-| 각도 예측기 | H1 flexion100-h15, 버전표에 고정한 epoch 6 파일 |
+| 각도 예측기 | H1 flexion100-h15-swap (2026-10-29부터), 버전표에 고정한 epoch 8 파일 |
 | 보조 제어기 | L1, `checkpoints/L1_llp_pendulum/last.ckpt`, 출력 0.5배 |
 | 동작 | `data/motion_for_trackers/skeleton_torque_suit_gait.pt`, 걷기 0번 (달리기 1번) |
 | 시간 | 물리 400 Hz, 착용자 20 Hz, 보조 100 Hz, 평가 40초 |

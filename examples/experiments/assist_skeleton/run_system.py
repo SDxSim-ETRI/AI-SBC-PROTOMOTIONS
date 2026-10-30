@@ -94,8 +94,8 @@ REPO = Path(__file__).resolve().parents[3]
 DEFAULT_LLP_CHECKPOINT = "checkpoints/L1_llp_pendulum/last.ckpt"
 DEFAULT_HLP_CHECKPOINT = str(
     Path.home() / "Projects/ManiFlow_Policy/ManiFlow/data/outputs"
-    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42"
-    / "checkpoints/epoch=0006-val_loss=0.000762.ckpt"
+    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42"
+    / "checkpoints/epoch=0008-val_loss=0.000834.ckpt"
 )
 MIMIC_EXPERIMENT = REPO / "examples" / "experiments" / "mimic" / "mlp.py"
 HOOK_SIM = "protomotions.simulator.newton.substep_hook.SubstepHookNewtonSimulator"
@@ -118,7 +118,7 @@ def parse_args(argv=None):
     p.add_argument("--llp-share-legs", action="store_true",
                    help="단일 관절로 학습한 --llp-checkpoint 하나를 양쪽 다리에 같은 가중치로 적용 (2026-10-21)")
     p.add_argument("--hlp-checkpoint", default=DEFAULT_HLP_CHECKPOINT,
-                   help="H1 flexion100-h15의 검증된 체크포인트 (다른 모델은 경로를 명시)")
+                   help="H1 flexion100-h15-swap(2026-10-29부터, 관측 토큰 → self-attention)의 검증된 체크포인트 (다른 모델은 경로를 명시)")
     p.add_argument("--denoise", type=int, default=1,
                    help="HLP denoise 스텝 (기본 비교 기준: 1)")
     p.add_argument("--calibration", default="wearer",

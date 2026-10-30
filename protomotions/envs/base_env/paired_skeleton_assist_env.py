@@ -41,9 +41,22 @@ class WalkingSegmentConfig(MimicMotionManagerConfig):
     _target_: str = "protomotions.envs.base_env.paired_skeleton_assist_env.WalkingSegmentManager"
     start_min_s: float = 0.0
     start_max_s: float = 20.0
+    # motion별 표본 비율 덮어쓰기 (빈 튜플 = motion 파일의 가중치; gait.pt는 걷기 0.75·달리기 0.25).
+    # 걷기·달리기를 한 모델로 같이 학습할 때 (0.5, 0.5)로 맞춘다. 제외된 motion은 그대로 0.
+    motion_weights: tuple = ()
 
 
 class WalkingSegmentManager(MimicMotionManager):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.config.motion_weights:
+            w = torch.tensor(self.config.motion_weights, dtype=torch.float32, device=self.device)
+            assert w.numel() == self.motion_weights.numel(), "motion_weights length must match the motion count"
+            self.motion_weights[:] = w
+            if self.excluded_motion_ids is not None:
+                self.motion_weights[self.excluded_motion_ids] = 0.0
+            print(f"WalkingSegmentManager: motion sampling weights {self.motion_weights.tolist()}")
+
     def sample_time(self, motion_ids, truncate_time=None):
         # With 8s episodes, LLP adaptation sees 0-28s, leaving 60s+ for testing.
         lo, hi = self.config.start_min_s, self.config.start_max_s

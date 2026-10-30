@@ -54,14 +54,17 @@ from protomotions.maniflow.loader import (
     load_maniflow_policy,
 )
 
-# 현역 예측기 — 100 fps(10 ms 격자), 과거 100 ms → 미래 0~50 ms 6점.
-# 2026-09-15 교차평가(suit14): 10 ms 0.27° / 20 ms 0.39° / 50 ms 1.07°, denoise 1 기준
-# 4.9 ms. 이전 40 fps 판(FLEXION40_RUN_DIR)은 25 ms 격자·미래 150 ms.
+# 현역 예측기 H1 — 100 fps(10 ms 격자), 과거 100 ms → 미래 0~50 ms 6점.
+# 2026-10-29부터 flexion100-h15-swap: DiT-X에서 관측 토큰은 self-attention, 노이즈 섞인
+# action 토큰열은 cross-attention(ManiFlow `obs_routing=swap`). ETRI suit14 100 Hz 교차평가
+# (denoise 1): 10 ms 0.23° / 20 ms 0.34° / 50 ms 1.03°, 지연 2.45 ms.
+# 옛 H1(flexion100-h15-run01, 관측 cross-attention; 10/20/50 ms 0.27/0.39/1.07°)은 폐기했고
+# 2026-10-29 이전 결과의 재현용으로 파일만 남겼다. 40 fps 판(FLEXION40_RUN_DIR)은 25 ms 격자·미래 150 ms.
 FLEXION100_RUN_DIR = (
     DEFAULT_MANIFLOW_ROOT
     / "data"
     / "outputs"
-    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-run01_seed42"
+    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42"
 )
 
 FLEXION40_RUN_DIR = (
