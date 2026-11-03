@@ -31,6 +31,10 @@ import re
 DOCS = Path(__file__).resolve().parent
 MARKER = '<!-- AI-SBC report presentation v1 -->'
 CATALOG = [
+    dict(file='261102_fpo_transformer/report.html', group='current', title='Temporal Transformer + FPO++ LLP와 MLP+PPO 기준선의 평지 걷기·달리기 비교 (구현 다이어그램·그래프)', date='2026-11-03',
+         purpose='FPO++(flow 정책, CFM 손실 비율)와 관측 이력·HLP 예측을 시간별 토큰으로 읽는 소형 Temporal Transformer를 ProtoMotions LLP에 구현하고, 같은 W1·H1·관측·보상·±20 N·m·학습 예산(1,200 epoch, 진자 사전학습 없음)에서 MLP+PPO(2026-11-02 처음부터 학습)와 걷기·달리기별 τ² 변화·구간별 감소량·추종·최대출력 95% 이상 사용 시간비율·추론 지연으로 비교. 구현 검증(단위 시험 9개·20 epoch 짧은 학습)과 호환성 문제·남은 검증 포함',
+         result='1,200 epoch best checkpoint 기준 걷기 τ²: Transformer+FPO++ −30.1 %, MLP+FPO++ −29.8 %, MLP+PPO −24.4 %; 달리기: MLP+PPO −35.4 %(200 epoch), Transformer+FPO++ −29.4 %, MLP+FPO++ −29.0 %. FPO++ 두 모델은 보조 토크 실효값 10–12 N·m(PPO 17)·최대출력 95% 이상 사용 시간비율 0 %(PPO 52–57 %)로 작은 토크를 쓰고 1,200 epoch까지 계속 좋아지는 추세. 낙상 0. LLP 지연 CPU batch 1: 0.06 / 0.62 / 0.98 ms(10 ms 예산 안).',
+         limit='학습 seed 하나, W1 하나, 걷기·달리기 기록 하나씩. FPO++는 rollout당 gradient step 32회, PPO 기준선은 1회(기존 설정)라 알고리즘 효과와 갱신 횟수 효과가 섞여 있다. 실기기 검증 아님.'),
     dict(file='261029_L16_joint_finetune/report.html', group='current', title='L15의 걷기·달리기 동시 추가학습(L16)과 동작별 추가학습 비교, 1,200 epoch까지 (그래프)', date='2026-10-30',
          purpose='보조 한계 20 N·m로 진자에서 학습한 정책(L15)을 가상 착용자 W1과 새 예측기 H1을 연결한 전신 시뮬레이션에서 걷기 전용·달리기 전용과 두 동작 동시(반반, L16)로 이어서 학습하고(각 1,200 epoch까지, 400·800 epoch에서 같은 run을 이어받음), 걷기·달리기 각각 W1에서 보행 진행률 10 % 구간별 토크 실효값 감소량으로 비교',
          result='1,200 epoch까지 이어 학습해도 더 줄지 않음. 걷기 전용 600 epoch부터 −25 ~ −27 %(1,200 epoch −26.6 %), 달리기 전용은 400 epoch(−25.5 %)이 최선. L16 달리기 −27.4 %로 수렴, 걷기는 800 epoch −22.7 %가 최선이고 걷기 80–90 % 방해는 남음. 학습 보상 곡선 포함.',
