@@ -98,7 +98,7 @@ python examples/experiments/assist_skeleton/report.py swing-gate --out docs/ai_s
 | `plots.py` | 문서용 PNG: `gait-symmetry`, `timing`, `torque-phase`, `compare`(터미널 표 + 오라클 그림) |
 | `viz.py` | Newton 뷰어 오버레이 (A 고스트 라인, 보조 토크 화살표) |
 | `tracker_human.py`, `train_tracker_human.sh` | W1 착용자 학습 구성·실행 |
-| `llp_walk.py` | 보행 착용자 위 LLP 재학습 env (후속 과제; 추가학습 변형은 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관) |
+| `llp_walk.py` | W1 + H1 전신 시뮬레이션에서 LLP 학습: 진자 정책 추가학습(`--initial-actor-checkpoint`, `--finetune-assist-limit 20`, `--motion-weights 0.5,0.5`, motion별 `--hlp-calibration`), 같은 조건으로 처음부터 학습(`--actor-init random`), 정책 선택 `--policy mlp_ppo|mlp_fpo|tfm_fpo`(FPO++·Temporal Transformer, `protomotions/agents/fpo/`). 옛 L13/L14 변형은 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관 |
 
 보행 클립 부분집합은 `data/scripts/make_gait_motions.py`로 만든다. 공통 제어기는 `protomotions/assist/`,
 ManiFlow 연결은 `protomotions/maniflow/`에 있다. 진자 쪽 학습·평가는 `../assist_pendulum/`

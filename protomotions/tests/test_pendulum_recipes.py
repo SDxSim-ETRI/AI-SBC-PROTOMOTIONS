@@ -107,6 +107,28 @@ def test_recipe_reproduces_recorded_training_config(name):
     assert agent.evaluator.eval_metrics_every == rec["agent"].evaluator.eval_metrics_every
 
 
+def test_fpo_policy_keeps_env_and_critic_and_reads_token_layout():
+    """--policy tfm_fpo/mlp_fpo (2026-11-03): env와 critic은 PPO 기준선 그대로, actor만 flow 정책 + 토큰 시간축은 env 관측 구성."""
+    from protomotions.agents.fpo.config import FPOAgentConfig
+    from protomotions.agents.fpo.model import TRANSFORMER_IN_KEYS
+
+    base_env, base = build(["--recipe", "R0", "--assist-limit", "20"])
+    env, agent = build(["--recipe", "R0", "--assist-limit", "20", "--policy", "tfm_fpo"])
+    assert not differences(plain(env), plain(base_env))
+    assert isinstance(agent, FPOAgentConfig)
+    assert not differences(plain(agent.model.critic), plain(base.model.critic))
+    actor = agent.model.actor
+    assert tuple(actor.in_keys) == TRANSFORMER_IN_KEYS and actor.num_out == 2
+    assert [l.units for l in actor.layers] == [512, 256, 128]
+    assert (actor.context.history_steps, actor.context.prev_action_steps, actor.context.future_samples) == (25, 10, 3)
+    assert agent.save_epoch_checkpoint_every == 500 and agent.evaluator.eval_metrics_every is None
+    assert agent.num_mini_epochs == 8 and agent.actor_clip_frac_threshold is None and not agent.clip_critic_loss
+    _, mlp = build(["--recipe", "R0", "--assist-limit", "20", "--policy", "mlp_fpo"])
+    assert mlp.model.actor.context is None
+    with pytest.raises(ValueError, match="motion_leg"):
+        build(["--recipe", "motion_leg", "--leg", "right", "--policy", "tfm_fpo"])
+
+
 def test_recipes_differ_only_where_the_lineage_says():
     l1, _ = build(["--recipe", "L1"])
     r0, _ = build(["--recipe", "R0"])

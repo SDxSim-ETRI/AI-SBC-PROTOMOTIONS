@@ -46,6 +46,10 @@ v4 뒤의 실패한 변형(L2–L5, 2026-09-29)은 모두 이 파일의 CLI 인�
         --assist-effort-weight=0 --action-rate-weight=0
 `--motion-file`은 CLI상 필수지만 이 실험은 모션 라이브러리를 쓰지 않는다. 무보조 평가는
 `--overrides env.assist_torque_limit=0`. 학습 전 환경 점검은 `runtime.py check-env`, 짝 평가는 `evaluate.py`.
+
+`--policy mlp_fpo|tfm_fpo`(2026-11-03): 같은 env·관측·보상·토크 한계에서 actor만 flow 정책(FPO++) 또는 Temporal Transformer
+context + flow 정책으로 바꾼다 (`protomotions/agents/fpo/recipe.py`, 전신 `llp_walk.py --policy`와 같은 인자). motion_leg 프리셋의
+SingleJointMLP와는 함께 쓸 수 없다.
 """
 
 import argparse
@@ -55,6 +59,7 @@ from pathlib import Path
 from protomotions.robot_configs.base import RobotConfig
 from protomotions.simulator.base_simulator.config import SimulatorConfig
 from protomotions.envs.base_env.assist_env import AssistEnvConfig
+from protomotions.agents.fpo.recipe import add_policy_arguments, fpo_agent_config
 from protomotions.agents.ppo.config import PPOAgentConfig
 from protomotions.components.terrains.config import TerrainConfig
 from protomotions.components.scene_lib import SceneLibConfig
@@ -212,6 +217,8 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     m.add_argument("--leg", choices=sorted(LEGS), default=None, help="학습할 다리 (motion_leg 프리셋에서 필수)")
     m.add_argument("--motion-zarr", default=SEED_ZARR, help="SEED 고관절 굴곡 zarr (100 fps)")
     m.add_argument("--motion-metadata", default=SEED_METADATA, help="SEED metadata parquet")
+    # --- FPO++ / Temporal Transformer (2026-11-03): env·관측·보상·토크 한계는 위와 같고 정책·학습 알고리즘만 바꾼다 ---
+    add_policy_arguments(parser, policy_note="진자 학습은 모두 무작위 초기화 (motion_leg 프리셋과는 함께 쓸 수 없다)")
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +715,12 @@ def agent_config(
         _agent_fixed_final_epoch(cfg)
     if recipe.motion_intent_per_leg:
         _agent_single_joint_actor(cfg, robot_config, args)
+    if getattr(args, "policy", "mlp_ppo") != "mlp_ppo":
+        # FPO++ (2026-11-03): 진자 PPO 설정(critic·정규화·500 epoch 보관)은 그대로, actor만 flow 정책 + CFM 비율 손실.
+        # 토큰 시간축(히스토리 25·이전 action 10·예측 창 3)은 env 관측 구성에서 읽는다.
+        if recipe.motion_intent_per_leg:
+            raise ValueError("--policy mlp_fpo/tfm_fpo cannot be combined with the motion_leg preset (SingleJointMLP)")
+        cfg = fpo_agent_config(cfg, args, env_cfg=env_config, actor_cfg=cfg.model.actor, actor_lr=cfg.model.actor_optimizer.lr)
     return cfg
 
 

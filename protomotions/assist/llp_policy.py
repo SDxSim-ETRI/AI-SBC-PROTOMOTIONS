@@ -91,6 +91,9 @@ def _static_param(component, name: str, default):
 class LLPPolicy:
     """`assist_pendulum` 체크포인트의 actor (deterministic, mean action).
 
+    FPO++ flow actor(`protomotions.agents.fpo.model.FlowActor`) 체크포인트도 같은 경로로 복원한다:
+    `mu` 모델 대신 `act_deterministic`(초기 잡음 0에서 flow 적분)을 부른다.
+
     `share_legs=True`: 단일 관절 진자로 학습한 정책 하나를 양쪽 다리에 같은 가중치로 적용한다
     (2026-10-21 가중치 공유). `SingleJointMLP`(한쪽 관절로 학습) 또는 `SharedJointMLP` 체크포인트의
     관절 모델을 다리마다 그 다리의 관측(각도·속도 히스토리, 미래 목표, 이전 명령)으로 한 번씩 돌린다.
@@ -174,7 +177,11 @@ class LLPPolicy:
         model = model_cls(config=agent_cfg.model)
         actor = model._actor.eval()
         with torch.no_grad():
-            actor.mu(TensorDict(self.zero_obs(batch=1), batch_size=1))
+            td0 = TensorDict(self.zero_obs(batch=1), batch_size=1)
+            if hasattr(actor, "mu"):
+                actor.mu(td0)
+            else:
+                actor(td0)  # FlowActor(FPO++): context·속도 MLP의 lazy 모듈을 굳힌다
         state = torch.load(self.checkpoint, map_location="cpu", weights_only=False)
         actor_state = {
             k[len("_actor.") :]: v for k, v in state["model"].items() if k.startswith("_actor.")
@@ -224,6 +231,9 @@ class LLPPolicy:
             # SingleJointMLP.forward는 학습 관절 하나만 내므로, 같은 관절 모델을 두 관절에 돌리는
             # SharedJointMLP.forward를 쓴다.
             return SharedJointMLP.forward(self.actor.mu, td)[self.mu_key]
+        if hasattr(self.actor, "act_deterministic"):
+            # FlowActor(FPO++): x_1 = 0에서 flow를 적분한 결정적 action (RNG 소비 없음)
+            return self.actor.act_deterministic(td)[self.mu_key]
         td = self.actor.mu(td)
         return td[self.mu_key]
 

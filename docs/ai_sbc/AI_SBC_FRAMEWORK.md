@@ -209,6 +209,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 |------|------|
 | `protomotions/envs/base_env/paired_skeleton_assist_env.py` | 독립 무보조 A / 보조 B 전신 시뮬레이션. 같은 초기 상태·모션·난수, paired 부담·동작 비악화 보상. A 정보는 actor에 넣지 않음 |
 | `protomotions/agents/ppo/assist_finetune.py` | actor만 전이, critic/optimizer 새 초기화. 진자 −굴곡 → 전신 +굴곡 좌표를 정규화·첫층·출력층까지 등가 변환. 전신 소스 +굴곡은 그대로 복사 |
+| `protomotions/agents/fpo/` (2026-11-02) | FPO++(flow policy) agent. `config.py`(`FPOAgentConfig`·`FlowActorConfig`·`TemporalTransformerConfig`), `model.py`(`FlowActor`: context 한 번 → Euler N step 속도 MLP, `cfm_loss`; `TemporalTransformer`: 평탄 관측 137을 시간별 토큰 29개로 되돌려 self-attention 뒤 현재 토큰 읽기), `agent.py`(`FPO(PPO)`: actor 손실 = CFM 손실 비율 exp(L_old − L_new)·ASPO clip 0.05, actor EMA를 checkpoint actor에 구워 넣고 원 가중치는 `fpo_actor_raw`). `llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`으로 쓰고, `LLPPolicy`는 `act_deterministic`(초기 잡음 0)으로 평가. `protomotions/tests/test_fpo_agent.py` |
 | `results/llp_L13_fullbody_walk_20261011/scripts/` (보관) | `llp_walk_finetune.py`(L13: W1/실제 HLP 동결, 137차원 actor, 100 Hz, gain 1 / 최종 ±100 N·m), `llp_walk_finetune_relative.py`(L13R 상대 국소 비용), `llp_walk_tempo.py`(L14 .90/1/1.10 시간배율), `verify_walk_finetune.py`, `run_walk_{finetune,relative,tempo}_sequence.py`, `validate_walk_finetune.py`. 2026-10-26 닫힌 연구로 보관; 재현은 `SNAPSHOT.md`의 스냅샷 커밋에서 |
 
 현재 paired 전신 env는 headless / flat / scene 없음만 지원한다. 두 env가 contact

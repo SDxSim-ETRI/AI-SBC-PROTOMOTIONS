@@ -59,6 +59,9 @@ mocap hip 각도는 tracker 자체가 10~14° 벗어나 따라간다. 대신 "�
         --hlp-checkpoint <H1> --decimation 4 --human-cost torque_sq --hlp-calibration "p,q,r,s" \\
         --initial-actor-checkpoint results/llp_relative_R0_s0_20261020/epoch_6000.ckpt --exclude-motion-ids 1 \\
         --finetune-assist-limit 20
+    진자 사전학습 없이 같은 조건으로 처음부터 학습하려면(2026-11-02 비교) `--actor-init random`을 더한다:
+    출발 checkpoint는 관측 구성·action 변환·PPO 설정의 틀로만 쓰고 actor 가중치는 무작위 초기화한다
+    (`--finetune-actor-lr`를 처음부터 학습의 값 1e-4로 올려 준다).
 """
 
 import argparse
@@ -68,6 +71,7 @@ from pathlib import Path
 
 import torch
 
+from protomotions.agents.fpo.recipe import add_policy_arguments, fpo_agent_config
 from protomotions.agents.ppo.config import PPOAgentConfig
 from protomotions.components.motion_lib import MotionLibConfig
 from protomotions.components.scene_lib import SceneLibConfig
@@ -147,6 +151,12 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--finetune-assist-limit", type=float, default=None,
                         help="추가학습 중 보조 토크 출력 배율·한계 [N·m] (None = 출발 checkpoint 값). 40·tanh로 학습한 R0에 20을 주면 "
                              "평가의 R0 ×0.5(20·tanh)와 같은 출력에서 시작해 20 N·m 한계로 학습한다")
+    parser.add_argument("--actor-init", choices=["checkpoint", "random"], default="checkpoint",
+                        help="checkpoint: --initial-actor-checkpoint의 actor 가중치를 이어받음(추가학습). "
+                             "random: 같은 env·관측·PPO 설정으로 actor를 무작위 초기화해 처음부터 학습 "
+                             "(진자 사전학습 효과 비교용, 2026-11-02; --finetune-actor-lr 1e-4 권장)")
+    # --- FPO++ / Temporal Transformer (2026-11-02): env·관측·보상·토크 한계는 위와 같고 정책·학습 알고리즘만 바꾼다 ---
+    add_policy_arguments(parser, policy_note="fpo 계열은 --actor-init random 필수 (flow actor는 Gaussian MLP 가중치를 이어받을 수 없다)")
 
 
 def _tracker_resolved(args: argparse.Namespace):
@@ -449,7 +459,10 @@ def _agent_finetune(args: argparse.Namespace) -> PPOAgentConfig:
 
     source = _finetune_source(args)["agent"]
     cfg = AssistFinetuneConfig(**{f.name: copy.deepcopy(getattr(source, f.name)) for f in fields(source) if f.name != "_target_"})
-    cfg.initial_actor_checkpoint = str(Path(args.initial_actor_checkpoint).resolve())
+    if getattr(args, "actor_init", "checkpoint") == "random":
+        cfg.initial_actor_checkpoint = ""  # AssistFinetunePPO.setup이 비어 있으면 actor를 이어받지 않는다 (무작위 초기화)
+    else:
+        cfg.initial_actor_checkpoint = str(Path(args.initial_actor_checkpoint).resolve())
     cfg.batch_size = args.batch_size
     cfg.training_max_steps = args.training_max_steps
     cfg.model.actor_optimizer.lr = float(args.finetune_actor_lr)
@@ -457,6 +470,12 @@ def _agent_finetune(args: argparse.Namespace) -> PPOAgentConfig:
     cfg.save_epoch_checkpoint_every = 50
     cfg.save_last_checkpoint_every = 10
     cfg.evaluator.eval_metrics_every = None
+    if getattr(args, "policy", "mlp_ppo") != "mlp_ppo":
+        # FPO++ (2026-11-02): 위 PPO 설정(보상·advantage 정규화, γ·λ, rollout 길이, critic)은 그대로, actor만 flow 정책 +
+        # CFM 비율 손실. 토큰 시간축·actor 은닉층·관측 키는 출발 checkpoint의 env·actor 설정에서 옮긴다 (진자 mlp.py와 공용).
+        assert getattr(args, "actor_init", "checkpoint") == "random", "--policy mlp_fpo/tfm_fpo needs --actor-init random"
+        src = _finetune_source(args)
+        return fpo_agent_config(cfg, args, env_cfg=src["env"], actor_cfg=src["agent"].model.actor, actor_lr=args.finetune_actor_lr)
     return cfg
 
 
