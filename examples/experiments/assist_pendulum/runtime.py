@@ -339,9 +339,7 @@ class PendulumRuntime:
         덮어써진다. 추적을 끄면 ViewerGL 기본 마우스 내비게이션이 살아난다.
         """
         sim = self.env.simulator
-        sim._camera_distance = 3.0
-        sim._camera_height = 1.0
-        sim._camera_azimuth = 270.0  # 측면 뷰 — 시상면 스윙이 가장 잘 보임
+        sim.set_orbit_camera(azimuth=270.0, distance=3.0, height=1.0)  # 측면 뷰 — 시상면 스윙이 가장 잘 보임
         sim._assist_follow_cam = True
         orig_update = sim._update_camera
 
@@ -359,8 +357,9 @@ class PendulumRuntime:
                 print("[Camera] 추적 OFF — 마우스 자유 시점 (좌드래그 회전 / 우드래그 팬 / 스크롤 줌)")
 
         def zoom(delta):
-            sim._camera_distance = max(0.8, min(12.0, sim._camera_distance + delta))
-            print(f"[Camera] distance = {sim._camera_distance:.1f} m")
+            distance = max(0.8, min(12.0, sim.orbit_camera["distance"] + delta))
+            sim.set_orbit_camera(distance=distance)
+            print(f"[Camera] distance = {distance:.1f} m")
 
         sim._custom_key_handlers["f"] = toggle_follow
         sim._custom_key_handlers["z"] = lambda: zoom(-0.5)

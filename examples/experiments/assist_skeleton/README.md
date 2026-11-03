@@ -37,6 +37,10 @@ python examples/experiments/assist_skeleton/run_system.py --motion-id 1
 # 화면 / 영상 (그래픽 디스플레이 필요)
 python examples/experiments/assist_skeleton/run_system.py --viewer --record
 
+# 문서용 영상: 착용자를 따라가는 궤도 카메라 (방위각 0 = 정면, 270 = 오른쪽 옆, 315 = 오른쪽 앞 대각선), 토크 화살표 없이
+python examples/experiments/assist_skeleton/run_system.py --viewer --record --no-torque-arrows \
+    --camera-azimuth 315 --camera-distance 3.4 --camera-height 0.5 --camera-look-height 0
+
 # 새 보행의 착용자 추종만 검사: 짧은 클립을 이어 붙이지 않는 전용 평가기
 python examples/experiments/assist_skeleton/evaluate.py native-wearer \
     --motion-file results/real_walk_retarget_20261012_224957/native_pairs_v1/suit_native_walk.pt \
@@ -90,7 +94,7 @@ python examples/experiments/assist_skeleton/report.py swing-gate --out docs/ai_s
 | `run_system.py` | 통합 비교 실행. `SystemRunner`(조립→제어기→훅→루프→기록), `SystemHook`(10 ms 서브스텝 훅), `MocapGaitPhase`(오라클용 특권 위상표), `FullBodyDiagnostic`(`--fullbody-diagnostic`) |
 | `analysis.py` | 기록의 지표 계산 (numpy만). 실행 직후 지표·그림·report.md와 `RunRecord`·`ObjectiveComparison`·`TorqueAlignment`·`PhaseScreen`·`DecelerationMasks`·`WalkingPhaseDigest`·`SwingGateBins` 등 |
 | `evaluate.py` | 시뮬레이션을 돌리는 평가: `motions`(모션별 A/B), `native-wearer`(새 보행의 무보조 착용자), `wearer`(착용자 사람다움 표) |
-| `report.py` | HTML 보고서: `comparison`, `checkpoint`, `torque`, `swing-gate`. 생성 뒤 `python docs/ai_sbc/organize_reports.py` |
+| `report.py` | HTML 보고서: `comparison`, `checkpoint`, `torque`, `finetune`(추가학습 전후·모델 비교: 보행 진행률 구간별 감소량 막대·꺾은선, `--figures`로 발표용 .svg/.png), `swing-gate`. 생성 뒤 `python docs/ai_sbc/organize_reports.py` |
 | `plots.py` | 문서용 PNG: `gait-symmetry`, `timing`, `torque-phase`, `compare`(터미널 표 + 오라클 그림) |
 | `viz.py` | Newton 뷰어 오버레이 (A 고스트 라인, 보조 토크 화살표) |
 | `tracker_human.py`, `train_tracker_human.sh` | W1 착용자 학습 구성·실행 |

@@ -34,7 +34,10 @@ import html
 import io
 import json
 import os
+import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -109,6 +112,7 @@ svg .grid{{stroke:var(--grid);stroke-width:1}} svg .zero{{stroke:var(--zero);str
 svg .mark{{stroke:var(--zero);stroke-width:1;stroke-dasharray:3 3}} svg .limit{{stroke:var(--limit);stroke-width:1.2;stroke-dasharray:6 3}}
 svg .band{{fill:var(--band)}} svg .bandlab{{fill:var(--ink2);font:12px "IBM Plex Sans KR",sans-serif}}
 svg .tick{{fill:var(--ink2);font:11px "IBM Plex Mono",monospace}} svg .axis{{fill:var(--ink2);font:11.5px "IBM Plex Sans KR",sans-serif}}
+svg .leg{{fill:var(--ink);font:12px "IBM Plex Sans KR",sans-serif}} svg .legbg{{fill:var(--bg);opacity:.92}}
 svg .bar:hover{{opacity:.75}}
 .tip{{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);font:12.5px "IBM Plex Mono",monospace;padding:6px 9px;border-radius:4px;transform:translate(-50%,-130%);white-space:nowrap}}
 .foot{{color:var(--ink2);font-size:13px;max-width:72ch;border-top:1px solid var(--rule);padding-top:14px}}
@@ -192,7 +196,75 @@ class Fmt:
 
 
 class Svg:
-    """손으로 그리는 SVG — 막대·선·범례."""
+    """손으로 그리는 SVG — 막대·선·범례. present = True면 발표 자료용(Figure)으로, 큰 글자(축 이름 20 px > 숫자 15 px)에 맞춰 여백을 넓힌다."""
+
+    present = False
+    GAP = 6  # 범례 상자와 그래프 틀 사이 여백
+    LEG = {True: (14, 16, 18, 6), False: (11, 12, 14, 5)}  # 발표용/보고서: (글자 크기, 견본 폭, 줄 간격, 안쪽 여백)
+
+    @classmethod
+    def frame(cls, big=None, xlabel=True):
+        """(ml, mr, mt, mb, tk, tx, yl, xl): 여백, 세로 눈금 x 간격, 가로 눈금 y 간격, 세로축 이름 x, 가로축 이름 y. big = 발표 자료용(Svg.present)."""
+        big = cls.present if big is None else big
+        if big:
+            return 92, 22, 20, (64 if xlabel else 30), 12, 24, 68, 8
+        return 58, 14, 14, (34 if xlabel else 18), 8, 16, 44, 4
+
+    @classmethod
+    def legend_dims(cls, items, big=None):
+        """[(이름, 색, 점선)] 범례 상자의 (폭, 높이). 글자 폭은 CJK 1.0·그 외 0.58 em으로 어림한다."""
+        fs, sw, row, pad = cls.LEG[cls.present if big is None else big]
+        est = lambda t: sum(fs * (1.0 if ord(ch) > 0x2E80 else 0.58) for ch in t)  # noqa: E731
+        return pad + sw + 6 + max(est(n) for n, _, _ in items) + pad, 2 * pad + (len(items) - 1) * row + fs
+
+    @classmethod
+    def legend_box(cls, items, x, y, big=None):
+        """그래프 안 작은 범례 — 한 줄에 하나씩, (x, y) = 왼쪽 위 모서리. 점선 항목은 점선 견본."""
+        big = cls.present if big is None else big
+        fs, sw, row, pad = cls.LEG[big]
+        w, h = cls.legend_dims(items, big)
+        sh = round(fs * 0.75)
+        out = [f'<rect class="legbg" x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="3"/>']
+        for i, (name, color, dash) in enumerate(items):
+            yy = y + pad + i * row
+            if dash:
+                out.append(f'<line x1="{x+pad:.1f}" x2="{x+pad+sw:.1f}" y1="{yy+fs/2:.1f}" y2="{yy+fs/2:.1f}" stroke="{color}" stroke-width="{2.5 if big else 2}" stroke-dasharray="5 3"/>')
+            else:
+                out.append(f'<rect x="{x+pad:.1f}" y="{yy+(fs-sh)/2:.1f}" width="{sw}" height="{sh}" rx="2" fill="{color}"/>')
+            out.append(f'<text class="leg" x="{x+pad+sw+6:.1f}" y="{yy+fs*0.85:.1f}">{html.escape(name)}</text>')
+        return "".join(out)
+
+    @classmethod
+    def legend_auto(cls, items, pts, ml, mt, pw, ph, big=None, soft=()):
+        """범례를 그래프 안 왼쪽 아래에 둔다(사용자 지시 2026-10-31: 그 자리가 비어 있으므로; 그래프 범위는 바꾸지 않는다).
+        pts(데이터의 픽셀 좌표)가 거기 있으면 왼쪽 위 → 오른쪽 아래 → 오른쪽 위 순으로 빈 모서리를 고른다.
+        soft = 가려도 되는 보조선(예: 그래프 폭 전체에 걸친 기준 점선)의 좌표: 네 모서리가 다 막혔을 때는 soft만 있는 모서리를,
+        그것도 없으면 pts가 가장 적게 걸리는 모서리를 고른다 (2026-11-02: 기준선이 위 두 모서리를 항상 막아 데이터 점을 가리던 문제)."""
+        big = cls.present if big is None else big
+        w, h = cls.legend_dims(items, big)
+        g = cls.GAP
+        corners = [(ml + g, mt + ph - g - h), (ml + g, mt + g), (ml + pw - g - w, mt + ph - g - h), (ml + pw - g - w, mt + g)]
+        hits = lambda x, y, ps: sum(x - 2 <= px <= x + w + 2 and y - 2 <= py <= y + h + 2 for px, py in ps)  # noqa: E731
+        for x, y in corners:
+            if not hits(x, y, pts) and not hits(x, y, soft):
+                break
+        else:
+            free = [c for c in corners if not hits(c[0], c[1], pts)]
+            x, y = free[0] if free else min(corners, key=lambda c: hits(c[0], c[1], pts))
+        return cls.legend_box(items, x, y, big)
+
+    @staticmethod
+    def densify(xs, ys, n=10):
+        """꺾은선의 각 구간을 n개 점으로 보간한 (x, y) 목록 — 범례 상자와 선분이 겹치는지 볼 때 쓴다(NaN 구간은 건너뛴다)."""
+        xs, ys = np.asarray(xs, float), np.asarray(ys, float)
+        pts = []
+        for i in range(len(xs) - 1):
+            if np.isfinite(ys[i]) and np.isfinite(ys[i + 1]):
+                t = np.linspace(0, 1, n, endpoint=False)
+                pts += list(zip(xs[i] + t * (xs[i + 1] - xs[i]), ys[i] + t * (ys[i + 1] - ys[i])))
+        if len(xs) and np.isfinite(ys[-1]):
+            pts.append((float(xs[-1]), float(ys[-1])))
+        return pts
 
     @staticmethod
     def nice(x):
@@ -209,9 +281,10 @@ class Svg:
 
     @classmethod
     def line(cls, x, series, *, ylabel, xlabel=None, ylim=None, xlim=None, vlines=(), hlines=(), band=None,
-             H=210, W=860, xtick=None, label=""):
-        """series: list of dict(y, color, width, dash). band: (lo, hi, color)."""
-        ml, mr, mt, mb = 58, 14, 14, 34 if xlabel else 18
+             H=210, W=860, xtick=None, label="", legend=None):
+        """series: list of dict(y, color, width, dash). band: (lo, hi, color). legend: [(이름, 색, 점선)] — 그래프 안 왼쪽 아래."""
+        big = cls.present
+        ml, mr, mt, mb, tk, tx, yl, xl = cls.frame(big, bool(xlabel))
         pw, ph = W - ml - mr, H - mt - mb
         xlo, xhi = xlim if xlim else (float(np.min(x)), float(np.max(x)))
         if ylim is None:
@@ -225,17 +298,18 @@ class Svg:
         ylo, yhi = ylim
         fx = lambda v: ml + (v - xlo) / (xhi - xlo or 1.0) * pw  # noqa: E731
         fy = lambda v: mt + (yhi - v) / (yhi - ylo or 1.0) * ph  # noqa: E731
+        leg = cls.legend_auto(legend, [(fx(px), fy(py)) for s in series for px, py in cls.densify(x, s["y"])], ml, mt, pw, ph, big) if legend else ""
         p = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{html.escape(label or ylabel)}" style="max-width:100%;height:auto;display:block">']
         # 세로 표시선 (위상 0 %)
         for v in vlines:
             p.append(f'<line x1="{fx(v):.1f}" x2="{fx(v):.1f}" y1="{mt}" y2="{mt+ph}" class="mark"/>')
         # 가로 눈금
-        step = cls.nice((yhi - ylo) / 4)
+        step = cls.nice((yhi - ylo) / (6 if big else 4))
         tick = np.ceil(ylo / step) * step
         while tick <= yhi + 1e-9:
             yy = fy(tick)
             p.append(f'<line x1="{ml}" x2="{W-mr}" y1="{yy:.1f}" y2="{yy:.1f}" class="grid"/>')
-            p.append(f'<text x="{ml-8}" y="{yy+4:.1f}" class="tick" text-anchor="end">{tick:g}</text>')
+            p.append(f'<text x="{ml-tk}" y="{yy+4:.1f}" class="tick" text-anchor="end">{tick + 0.0:g}</text>')
             tick += step
         if ylo < 0 < yhi:
             p.append(f'<line x1="{ml}" x2="{W-mr}" y1="{fy(0):.1f}" y2="{fy(0):.1f}" class="zero"/>')
@@ -246,7 +320,7 @@ class Svg:
         tick = np.ceil(xlo / xt) * xt
         while tick <= xhi + 1e-9:
             xx = fx(tick)
-            p.append(f'<text x="{xx:.1f}" y="{H-mb+16}" class="tick" text-anchor="middle">{tick:g}</text>')
+            p.append(f'<text x="{xx:.1f}" y="{H-mb+tx}" class="tick" text-anchor="middle">{tick:g}</text>')
             tick += xt
         if band:
             lo, hi, col = band
@@ -258,9 +332,10 @@ class Svg:
             d = cls.path(x, s["y"], fx, fy)
             dash = f' stroke-dasharray="{s["dash"]}"' if s.get("dash") else ""
             p.append(f'<path d="{d}" fill="none" stroke="{s["color"]}" stroke-width="{s.get("width", 1.6)}"{dash} stroke-linejoin="round"/>')
-        p.append(f'<text x="{ml-44}" y="{mt+ph/2:.0f}" class="axis" text-anchor="middle" transform="rotate(-90 {ml-44} {mt+ph/2:.0f})">{html.escape(ylabel)}</text>')
+        p.append(leg)
+        p.append(f'<text x="{ml-yl}" y="{mt+ph/2:.0f}" class="axis" text-anchor="middle" transform="rotate(-90 {ml-yl} {mt+ph/2:.0f})">{html.escape(ylabel)}</text>')
         if xlabel:
-            p.append(f'<text x="{W-mr}" y="{H-4}" class="axis" text-anchor="end">{html.escape(xlabel)}</text>')
+            p.append(f'<text x="{W-mr}" y="{H-xl}" class="axis" text-anchor="end">{html.escape(xlabel)}</text>')
         p.append("</svg>")
         return "\n".join(p)
 
@@ -334,25 +409,40 @@ class Svg:
         return "".join(out) + f'<text class="axis" x="{ml}" y="12">RMS 감소량 [N·m] · 양수 = 부담 감소</text><text class="axis" x="{w-mr}" y="{h-3}" text-anchor="end">보행 phase [%]</text></svg>'
 
     @staticmethod
-    def reduction_bars_grouped(series: dict, colors: list, h=300, w=900):
-        """series: 이름 -> {"mean": [10], "runs": [[10], ...], "labels": [...]} — 보행 진행률 10 % 구간별
-        착용자 토크 실효값 감소량(무보조 A − 보조 B)을 모델별로 나란히. 양수 = 부담 감소."""
-        names = list(series)
-        ml, mr, mt, mb = 65, 15, 22, 45
-        vals = [v for d in series.values() for v in d["mean"]]
-        bound = max(5.0, max(abs(v) for v in vals if v is not None)) * 1.18
-        y = lambda v: mt + (bound - v) / (2 * bound) * (h - mt - mb)  # noqa: E731
-        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="보행 진행률별 착용자 토크 실효값 감소량" style="max-width:100%;height:auto;display:block">']
+    def _bins_frame(series, h, w):
+        """막대·꺾은선 공통: (ml, mt, pw, ph, dx, y, 눈금 SVG, 축 이름 SVG). 세로 범위는 ±(최대 절대값 × 1.18)."""
+        big = Svg.present
+        ml, mr, mt, mb, tk, tx, yl, xl = Svg.frame(big)
+        pw, ph = w - ml - mr, h - mt - mb
+        vals = [v for d in series.values() for v in d["mean"] if v is not None]
+        bound = max(5.0, max(abs(v) for v in vals)) * 1.18
+        y = lambda v: mt + (bound - v) / (2 * bound) * ph  # noqa: E731
+        dx = pw / 10
+        out = []
         step = Svg.nice(bound / 2.5)
         tick = -np.floor(bound / step) * step
         while tick <= bound:
             out.append(f'<line class="grid" x1="{ml}" x2="{w-mr}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
-                       f'<text class="tick" x="{ml-8}" y="{y(tick)+4:.1f}" text-anchor="end">{tick:+.0f}</text>')
+                       f'<text class="tick" x="{ml-tk}" y="{y(tick)+4:.1f}" text-anchor="end">{tick + 0.0:+.0f}</text>')
             tick += step
         out.append(f'<line class="zero" x1="{ml}" x2="{w-mr}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>')
-        n = len(names); dx = (w - ml - mr) / 10; bw = dx * .8 / n
         for b in range(10):
-            out.append(f'<text class="tick" x="{ml+dx*(b+.5):.1f}" y="{h-mb+16}" text-anchor="middle">{b*10}–{(b+1)*10}</text>')
+            out.append(f'<text class="tick" x="{ml+dx*(b+.5):.1f}" y="{h-mb+tx}" text-anchor="middle">{b*10}–{(b+1)*10}</text>')
+        axes = (f'<text class="axis" x="{ml-yl}" y="{mt+ph/2:.0f}" text-anchor="middle" transform="rotate(-90 {ml-yl} {mt+ph/2:.0f})">토크 실효값 감소량 [N·m]</text>'
+                f'<text class="axis" x="{w-mr}" y="{h-xl}" text-anchor="end">보행 진행률 [%]</text></svg>')
+        return ml, mt, pw, ph, dx, y, "".join(out), axes
+
+    @staticmethod
+    def reduction_bars_grouped(series: dict, colors: list, h=300, w=900, legend=None):
+        """series: 이름 -> {"mean": [10], "runs": [[10], ...], "labels": [...]} — 보행 진행률 10 % 구간별
+        착용자 토크 실효값 감소량(무보조 A − 보조 B)을 모델별로 나란히. 양수 = 부담 감소(설명은 HTML caption에 둔다).
+        legend: [(이름, 색, 점선)] — 그래프 안 왼쪽 아래(막대가 있으면 빈 모서리)."""
+        names = list(series)
+        ml, mt, pw, ph, dx, y, head, axes = Svg._bins_frame(series, h, w)
+        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="보행 진행률별 착용자 토크 실효값 감소량" style="max-width:100%;height:auto;display:block">', head]
+        n = len(names); bw = dx * .8 / n
+        pts = []
+        for b in range(10):
             for j, name in enumerate(names):
                 v = series[name]["mean"][b]
                 if v is None:
@@ -361,8 +451,39 @@ class Svg:
                 per = ", ".join(f"{l} {r[b]:+.1f}" for l, r in zip(series[name]["labels"], series[name]["runs"]) if r[b] is not None)
                 out.append(f'<rect class="bar" x="{xx:.1f}" y="{min(y(v), y(0)):.1f}" width="{bw:.1f}" height="{max(1, abs(y(v)-y(0))):.1f}" rx="1.5" fill="{colors[j]}">'
                            f'<title>{html.escape(name)} · {b*10}–{(b+1)*10} %: {v:+.2f} N·m ({html.escape(per)})</title></rect>')
-        out.append(f'<text class="axis" x="{ml}" y="12">토크 실효값 감소량 [N·m] · 양수 = 부담 감소</text>'
-                   f'<text class="axis" x="{w-mr}" y="{h-4}" text-anchor="end">보행 진행률 [%] · 0 % = 참조 최대 굴곡</text></svg>')
+                pts += [(xx + k * bw / 2, yy) for k in (0, 1, 2) for yy in np.linspace(y(0), y(v), 6)]
+        if legend:
+            out.append(Svg.legend_auto(legend, pts, ml, mt, pw, ph))
+        out.append(axes)
+        return "".join(out)
+
+    @staticmethod
+    def reduction_lines_grouped(series: dict, colors: list, h=300, w=900, legend=None):
+        """reduction_bars_grouped와 같은 입력을 꺾은선으로 — 구간 중심(5, 15, …, 95 %)을 점으로 잇는다.
+        seed별 값은 옅은 가는 선, 평균은 굵은 선(설명은 HTML caption에 둔다)."""
+        names = list(series)
+        ml, mt, pw, ph, dx, y, head, axes = Svg._bins_frame(series, h, w)
+        x = lambda b: ml + dx * (b + .5)  # noqa: E731
+        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="보행 진행률별 착용자 토크 실효값 감소량 (꺾은선)" style="max-width:100%;height:auto;display:block">', head]
+        pts = []
+        for j, name in enumerate(names):
+            c = colors[j]
+            for lab, run in zip(series[name]["labels"], series[name]["runs"]):
+                pp = [(x(b), y(v)) for b, v in enumerate(run) if v is not None]
+                out.append(f'<polyline fill="none" stroke="{c}" stroke-width="1" opacity=".35" points="{" ".join(f"{a:.1f},{b:.1f}" for a, b in pp)}"><title>{html.escape(name)} · {html.escape(lab)}</title></polyline>')
+                pts += Svg.densify([x(b) for b in range(10)], [np.nan if v is None else y(v) for v in run])
+            mean = series[name]["mean"]
+            pp = [(x(b), y(v)) for b, v in enumerate(mean) if v is not None]
+            out.append(f'<polyline fill="none" stroke="{c}" stroke-width="2.2" stroke-linejoin="round" points="{" ".join(f"{a:.1f},{b:.1f}" for a, b in pp)}"/>')
+            pts += Svg.densify([x(b) for b in range(10)], [np.nan if v is None else y(v) for v in mean])
+            for b, v in enumerate(mean):
+                if v is None:
+                    continue
+                per = ", ".join(f"{l} {r[b]:+.1f}" for l, r in zip(series[name]["labels"], series[name]["runs"]) if r[b] is not None)
+                out.append(f'<circle cx="{x(b):.1f}" cy="{y(v):.1f}" r="3.2" fill="{c}"><title>{html.escape(name)} · {b*10}–{(b+1)*10} %: {v:+.2f} N·m ({html.escape(per)})</title></circle>')
+        if legend:
+            out.append(Svg.legend_auto(legend, pts, ml, mt, pw, ph))
+        out.append(axes)
         return "".join(out)
 
     @staticmethod
@@ -1120,6 +1241,51 @@ class SwingGateReport:
 # ---------------------------------------------------------------------------
 # 추가학습 전후 보고서 — 보행 진행률별 토크 실효값 감소량
 # ---------------------------------------------------------------------------
+class Figure:
+    """발표 자료용 그림. 보고서와 같은 SVG(class="tick|axis|leg|…")를 글자 크기·색을 속성으로 박은 독립 SVG로 바꾸고
+    Chrome headless로 PNG(기본 3배 해상도)도 저장한다. 글자는 모두 검정, 축 이름(20 px 굵게)이 축 숫자(15 px)보다 크다
+    (사용자 지시 2026-10-30: 보고서 그래프는 발표 자료에서 축 이름·숫자가 너무 작고 흐리다). Svg.present = True로 그린 SVG(넓은 여백, 범례는 그래프 안)를 넘긴다."""
+
+    CHROME = "/usr/bin/google-chrome"
+    FONT = "Noto Sans CJK KR, Noto Sans KR, sans-serif"
+    TICK, AXIS, LEGEND = 15, 20, 17
+    ATTRS = {  # class → 속성 (PowerPoint는 SVG 안의 CSS class를 읽지 못하므로 속성으로)
+        "tick": f'font-size="{TICK}" fill="#000"',
+        "axis": f'font-size="{AXIS}" font-weight="700" fill="#000"',
+        "leg": f'font-size="{LEGEND}" fill="#000"',
+        "legbg": 'fill="#fff"',
+        "bandlab": f'font-size="{TICK}" fill="#000"',
+        "grid": 'stroke="#d8d8d8" stroke-width="1"',
+        "zero": 'stroke="#000" stroke-width="1.4"',
+        "mark": 'stroke="#000" stroke-width="1" stroke-dasharray="4 3"',
+        "limit": 'stroke="#000" stroke-width="1.4" stroke-dasharray="7 4"',
+        "band": 'fill="#f3efe2"',
+        "bar": "",
+    }
+
+    @classmethod
+    def save(cls, svg: str, stem, scale=3):
+        """svg: Svg.*가 돌려준 문자열(첫 태그에 viewBox). stem: 확장자 없는 경로 → .svg와 .png."""
+        m = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
+        W, H = int(m.group(1)), int(m.group(2))
+        body = re.sub(r"^<svg[^>]*>", "", svg.strip(), count=1)
+        body = re.sub(r"</svg>\s*$", "", body, count=1)
+        for k, v in cls.ATTRS.items():
+            body = body.replace(f'class="{k}"', v)
+        out = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="{cls.FONT}">'
+               f'<rect width="100%" height="100%" fill="#fff"/>{body}</svg>')
+        stem = Path(stem)
+        stem.parent.mkdir(parents=True, exist_ok=True)
+        stem.with_suffix(".svg").write_text(out)
+        with tempfile.TemporaryDirectory() as td:
+            page = Path(td) / "fig.html"
+            page.write_text(f'<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#fff">{out}</body></html>')
+            subprocess.run([cls.CHROME, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", f"--user-data-dir={td}/profile",
+                            f"--force-device-scale-factor={scale}", f"--window-size={W},{H}", f"--screenshot={stem.with_suffix('.png')}", page.as_uri()],
+                           check=True, capture_output=True)
+        print("saved", stem.with_suffix(".svg"), stem.with_suffix(".png"))
+
+
 class FinetuneReport:
     """추가학습 전후(및 기준선)를 걷기·달리기별로 비교한다. 그래프는 보행 진행률 10 % 구간별 착용자 토크
     실효값 감소량(무보조 A − 보조 B, N·m)이고, 같은 이름의 실행(평가 seed 여러 개)은 구간별 평균을 그린다."""
@@ -1143,7 +1309,9 @@ class FinetuneReport:
         rows = TorqueAlignment.phase_profile(data, 10)
         limit = abs(meta["assist_scale"]) * min(meta["torque_limit"], meta.get("policy_torque_limit", meta["torque_limit"]))
         red = [r["rms_reduction_Nm"] for r in rows]
-        return dict(run=str(run), seed=meta.get("seed"), reduction=red, metrics=ObjectiveComparison.html_metrics(run), limit=limit,
+        m = re.search(r"_s(\d+)$", run.name)  # meta.json에 seed가 없으면 평가 폴더 이름의 _s<seed> 접미에서 읽는다
+        seed = meta.get("seed", int(m.group(1)) if m else None)
+        return dict(run=str(run), seed=seed, reduction=red, metrics=ObjectiveComparison.html_metrics(run), limit=limit,
                     saturation=float(100 * np.mean(np.abs(data["assist_B"]) > .95 * limit)),
                     worst=max(-(v or 0) for v in red), bad_bins=sum((v or 0) < 0 for v in red),
                     survived=meta.get("survived_s"), seconds=meta.get("seconds"))
@@ -1191,18 +1359,35 @@ class FinetuneReport:
     PALETTE = HtmlShell.SERIES + ["#8e5bd6", "#5b8f3a", "#b5473f", "#6b6b6b"]
 
     @classmethod
-    def section(cls, title, runs: dict, note: str, chart_names=None):
-        series = cls.series(runs)
-        chart = {n: series[n] for n in (chart_names or list(series)) if n in series}
-        assert chart, f"--chart 이름이 실행 이름과 맞지 않음: {chart_names}"
-        colors = cls.PALETTE[:len(chart)]
-        legend = "".join(f'<span class="lg"><i style="background:{c}"></i>{html.escape(n)}</span>' for n, c in zip(chart, colors))
+    def chart(cls, series: dict, spec=None, chart_colors=None):
+        """그래프에 올릴 부분집합: spec = ["run 이름" 또는 "run 이름=범례 이름", ...] (없으면 전부). 색은 spec과 같은 순서.
+        → (부분집합 dict, 범례 이름 list, 색 list). 없는 run 이름은 건너뛴다."""
+        spec = spec or list(series)
+        palette = chart_colors or cls.PALETTE
+        rows = []
+        for i, item in enumerate(spec):
+            name, _, label = item.partition("=")
+            if name in series:
+                rows.append((name, label or name, palette[i % len(palette)]))
+        assert rows, f"--chart 이름이 실행 이름과 맞지 않음: {spec}"
+        return {n: series[n] for n, _, _ in rows}, [l for _, l, _ in rows], [c for _, _, c in rows]
+
+    BARS_CAPTION = ("막대 = 보행 진행률 10 % 구간별 착용자 고관절 토크 실효값 감소량(무보조 − 보조), seed 평균. 양수 = 부담 감소. "
+                    "가로축 0 % = 참조 최대 굴곡(좌우 고관절을 각 다리의 참조 위상으로 모아 계산). 막대에 마우스를 올리면 checkpoint와 seed별 값이 보인다.")
+    LINES_CAPTION = "같은 값을 꺾은선으로. 점은 각 10 % 구간의 중심, 굵은 선 = seed 평균, 가는 선 = seed별."
+
+    @classmethod
+    def section(cls, title, series: dict, note: str, spec=None, chart_colors=None):
+        chart, labels, colors = cls.chart(series, spec, chart_colors)
+        legend = [(l, c, False) for l, c in zip(labels, colors)]
         paths = "".join(f"<li><code>{html.escape(str(p))}</code></li>" for d in series.values() for p in [x["run"] for x in d["digests"]])
         return f"""<section>
   <h2>{html.escape(title)}</h2>
   <p class="note">{note}</p>
-  <div class="legend">{legend}</div>
-  {Svg.reduction_bars_grouped(chart, colors)}
+  {Svg.reduction_bars_grouped(chart, colors, legend=legend)}
+  <p class="note">{cls.BARS_CAPTION}</p>
+  {Svg.reduction_lines_grouped(chart, colors, legend=legend)}
+  <p class="note">{cls.LINES_CAPTION}</p>
   <h3 style="margin-top:16px">전체 지표 (평가 seed 평균, 괄호 안은 seed별)</h3>
   {cls.table_html(series)}
   <h3 style="margin-top:16px">구간별 감소량 [N·m] (seed 평균, 굵은 칸 = 구간에서 가장 큰 감소)</h3>
@@ -1214,11 +1399,24 @@ class FinetuneReport:
     def build(cls, args):
         walk, run = cls.resolve(args.walk), cls.resolve(args.run)
         note = ("감소량 = 무보조 A의 착용자 고관절 토크 실효값 − 보조 B의 실효값, 구간 안에서 좌우 고관절을 각 다리의 참조 위상으로 모아 계산. "
-                "양수가 부담 감소다. 막대에 마우스를 올리면 seed별 값이 보인다.")
-        chart = [x.strip() for x in args.chart.split(";")] if args.chart else None
-        sections = cls.section("걷기 (motion 0, 40 s, W1)", walk, note, chart)
+                "양수가 부담 감소다. 그래프는 평가 동작 기준 best checkpoint끼리, 표는 전부.")
+        split = lambda v: [x.strip() for x in v.split(";")] if v else None  # noqa: E731
+        spec_w, spec_r = split(args.chart_walk or args.chart), split(args.chart_run or args.chart)
+        chart_colors = split(args.chart_colors)
+        walk_s, run_s = cls.series(walk), cls.series(run)
+        sections = cls.section("걷기 (motion 0, 40 s, W1)", walk_s, note, spec_w, chart_colors)
         if run:
-            sections += cls.section("달리기 (motion 1, 40 s, W1)", run, note, chart)
+            sections += cls.section("달리기 (motion 1, 40 s, W1)", run_s, note, spec_r, chart_colors)
+        if args.figures:  # 발표 자료용 그림 (큰 검은 글자)
+            Svg.present = True
+            for motion, series, spec in (("걷기", walk_s, spec_w), ("달리기", run_s, spec_r)):
+                if not series:
+                    continue
+                sub, labels, colors = cls.chart(series, spec, chart_colors)
+                legend = [(l, c, False) for l, c in zip(labels, colors)]
+                Figure.save(Svg.reduction_bars_grouped(sub, colors, h=420, legend=legend), f"{args.figures}/{motion}_모델비교_구간별감소량_막대")
+                Figure.save(Svg.reduction_lines_grouped(sub, colors, h=420, legend=legend), f"{args.figures}/{motion}_모델비교_구간별감소량_꺾은선")
+            Svg.present = False
         page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(args.title)}</title>
 {HtmlShell.PLEX_FONTS}
@@ -1273,12 +1471,16 @@ def main(argv=None):
     s = sub.add_parser("finetune", help="추가학습 전후 비교: 보행 진행률 10 % 구간별 토크 실효값 감소량 + 전체 지표")
     s.add_argument("--walk", nargs="+", required=True, help="이름=glob (걷기 실행; glob이 seed 여러 개에 맞으면 평균)")
     s.add_argument("--run", nargs="*", default=[], help="이름=glob (달리기 실행)")
-    s.add_argument("--chart", default=None, help="그래프에 올릴 이름들 (';' 구분, 기본 전부; 표에는 전부 나온다)")
+    s.add_argument("--chart", default=None, help="그래프에 올릴 항목 'run 이름' 또는 'run 이름=범례 이름' (';' 구분, 기본 전부; 표에는 전부 나온다)")
+    s.add_argument("--chart-walk", default=None, help="걷기 절의 그래프 항목 (없으면 --chart)")
+    s.add_argument("--chart-run", default=None, help="달리기 절의 그래프 항목 (없으면 --chart)")
+    s.add_argument("--chart-colors", default=None, help="그래프 항목과 같은 순서의 색 (';' 구분, 기본 PALETTE)")
     s.add_argument("--title", default="LLP 추가학습 전후 비교")
     s.add_argument("--eyebrow", default="AI-SBC · LLP 추가학습")
     s.add_argument("--verdict", default="", help="맨 위 한 줄 판정 (HTML 가능)")
     s.add_argument("--notes", default="", help="맨 아래 각주 (HTML 가능)")
     s.add_argument("--prelude", default=None, help="걷기·달리기 절 앞에 넣을 HTML 조각 파일 (예: 예측기 비교 표)")
+    s.add_argument("--figures", default=None, help="발표 자료용 그림 폴더: 걷기·달리기 구간별 감소량 막대·꺾은선을 큰 검은 글자의 .svg/.png로 저장")
     s.add_argument("--out", default="docs/ai_sbc/finetune_report.html")
 
     s = sub.add_parser("swing-gate", help="걷기 유각 브레이크 분석과 관절각 게이트")

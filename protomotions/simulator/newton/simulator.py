@@ -157,6 +157,7 @@ class NewtonSimulator(Simulator):
         self._camera_azimuth = 0.0  # degrees; 0=front, 180=rear, 270=right side (original default)
         self._camera_distance = 5.0   # meters from character
         self._camera_height = 1.0     # meters above character root
+        self._camera_look_height = 0.5  # look target height above character root (0 = pelvis)
 
     def _setup_terrain_heightfield(self) -> None:
         """Convert ProtoMotions terrain height field to a Newton Heightfield.
@@ -1514,6 +1515,29 @@ class NewtonSimulator(Simulator):
         )
 
     # ===== Group 6: Rendering & Visualization =====
+    @property
+    def orbit_camera(self) -> dict:
+        """Current orbit-camera settings: azimuth [deg], distance [m], height [m], look_height [m]."""
+        return dict(azimuth=self._camera_azimuth, distance=self._camera_distance,
+                    height=self._camera_height, look_height=self._camera_look_height)
+
+    def set_orbit_camera(self, azimuth=None, distance=None, height=None, look_height=None) -> None:
+        """Place the viewer camera on an orbit around the followed character (viewer only; `None` keeps a value).
+
+        azimuth [deg]: 0 = front (character faces the camera), 180 = rear, 270 = right side;
+        distance [m] from the character root; height [m] of the camera above the root;
+        look_height [m] of the point the camera looks at, above the root (0 = pelvis).
+        A `camera_offset` in the simulator config overrides azimuth/distance/height.
+        """
+        if azimuth is not None:
+            self._camera_azimuth = float(azimuth) % 360.0
+        if distance is not None:
+            self._camera_distance = float(distance)
+        if height is not None:
+            self._camera_height = float(height)
+        if look_height is not None:
+            self._camera_look_height = float(look_height)
+
     def _get_camera_target_pos(self) -> tuple:
         """Returns (char_root_pos, look_target_pos) for the current camera target."""
         if self._camera_target["element"] == 0:
@@ -1532,7 +1556,7 @@ class NewtonSimulator(Simulator):
                 .cpu()
                 .numpy()
             )
-        look_target = char_root_pos + np.array([0, 0, 0.5])
+        look_target = char_root_pos + np.array([0, 0, self._camera_look_height])
         return char_root_pos, look_target
 
     def _compute_cam_pos(self, char_root_pos: np.ndarray) -> np.ndarray:

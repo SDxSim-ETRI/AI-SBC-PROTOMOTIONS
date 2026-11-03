@@ -171,6 +171,14 @@ def parse_args(argv=None):
     p.add_argument("--fall-z", type=float, default=0.5, help="tracker: 루트 높이 이하면 낙상")
     p.add_argument("--viewer", action="store_true")
     p.add_argument("--record", action="store_true", help="뷰어 프레임을 mp4로 저장 (--viewer 자동)")
+    p.add_argument("--no-torque-arrows", action="store_true", help="뷰어에서 고관절 보조 토크 화살표를 그리지 않는다")
+    p.add_argument("--camera-azimuth", type=float, default=0.0,
+                   help="뷰어 카메라 방위각 [deg]: 0 = 정면(착용자가 카메라 쪽으로), 270 = 오른쪽 옆")
+    p.add_argument("--camera-distance", type=float, default=5.0, help="뷰어 카메라 거리 [m]")
+    p.add_argument("--camera-height", type=float, default=1.0, help="뷰어 카메라 높이 (골반 기준) [m]")
+    p.add_argument("--camera-look-height", type=float, default=0.5, help="카메라가 바라보는 점의 높이 (골반 기준) [m]; 0 = 골반")
+    p.add_argument("--window-pos", default=None,
+                   help="뷰어 창을 옮길 화면 좌표 'X,Y' (여러 모니터에서 창이 좁은 모니터에 떠 잘리는 것을 막는다; 옮긴 뒤 1920×1080으로 되돌린다)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", default="results/assist_skeleton")
     p.add_argument("--tag", default="")
@@ -941,7 +949,15 @@ class SystemRunner:
             from viz import GhostSkeletonRenderer, HipTorqueArrows
 
             GhostSkeletonRenderer(self.sim, ghost_env=ENV_A, visible_env=ENV_B)
-            HipTorqueArrows(self.sim, self.hook, env_id=ENV_B)
+            if not self.args.no_torque_arrows:
+                HipTorqueArrows(self.sim, self.hook, env_id=ENV_B)
+            self.sim.set_orbit_camera(self.args.camera_azimuth, self.args.camera_distance,  # 착용자를 따라가는 궤도 카메라 (Newton)
+                                      self.args.camera_height, self.args.camera_look_height)
+            if self.args.window_pos:
+                win = self.sim.viewer.renderer.window  # pyglet window
+                x, y = (int(v) for v in self.args.window_pos.split(","))
+                win.set_location(x, y)
+                win.set_size(1920, 1080)
             if self.args.record:
                 self.sim._toggle_video_record()
         return self
