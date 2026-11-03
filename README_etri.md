@@ -178,3 +178,49 @@ python scripts/patch_newton_mjcf_rgba.py
 # 4. 동작 확인
 bash tasks/mimic_suit_passive_cable_motions14_23dof/play_newton.sh
 ```
+
+---
+
+## 설치·실행 중 겪은 문제와 수정 기록 (2026-06, 협업 연구원 작성)
+
+원래 `NOTES.md`에 있던 개인 기록을 2026-11-03에 이 문서로 합쳤다. 작성 환경은 Windows 11 + WSL2 Ubuntu 22.04,
+RTX 4080, CUDA 11.8, Newton 1.3.0이며 upstream 데모 모델(G1 `g1-bones-deploy`, SOMA `soma-bones`)로 확인한 내용이다.
+2026-11-03 기준으로 MuJoCo gear 보상·실시간 재생 조절, 뷰어의 모션 이름 표시, Newton `include_joints=list(...)`·`sensing_indices`
+처리는 현재 코드에 있고, SOMA 리셋 바닥 보정(아래 마지막 항목)은 현재 코드에 없다. 이 저장소의 `sbc` 환경은 Newton 1.2.0.dev0이다.
+
+### SOMA 하체가 땅 속으로 꺼짐
+원인: `init_start_prob=1.0`이라 바닥 크롤링 클립(root_z ≈ 0.09 m)의 임의 프레임에서 시작.
+해결: `data/pretrained_models/motion_tracker/soma-bones/resolved_configs_inference.pt`의
+`env_config.motion_manager.init_start_prob`를 0.0으로 바꿔 항상 클립 첫 프레임에서 시작.
+
+### SOMA T-포즈 고정·물리 폭발 (MuJoCo)
+원인: SOMA MJCF 액추에이터의 `gear=200~250`이 implicit PD force에 곱해져 실효 kp = 500 × 250 = 125,000 N·m/rad
+(증상 `max_dof_vel=2243 rad/s`, `root_vel=77 m/s`, 한 스텝 뒤 root_z → 0.002 m).
+해결: `protomotions/simulator/mujoco/simulator.py`의 `_configure_actuators_for_pd()`가 kp/kd/effort를 gear로 나눠 설정한다.
+
+```python
+gear = float(self.model.actuator_gear[act_idx, 0]) or 1.0
+self.model.actuator_gainprm[act_idx, 0] = kp / gear
+self.model.actuator_biasprm[act_idx, 1] = -kp / gear
+self.model.actuator_biasprm[act_idx, 2] = -kd / gear
+self.model.actuator_forcerange[act_idx] = [-effort / gear, effort / gear]
+```
+
+### MuJoCo 뷰어가 6배 빠르게 재생
+원인: `viewer.sync()` 뒤에 대기가 없음. 해결: `_physics_step()`에 실시간 조절(정책 주기 − 경과 시간만큼 `time.sleep`)을 넣었다.
+
+### 화면 상단 모션 이름 표시
+`protomotions/inference_agent.py`가 뷰어 위쪽 가운데에 재생 중인 클립 이름을 표시한다.
+
+### Newton 1.3.0 API 차이 (당시 수정 기록)
+- `ArticulationView(include_joints=...)`가 `dict_keys`를 못 받아 `list(...)`로 넘긴다.
+- `SensorContact`: 인자 `sensing_obj_bodies` → `sensing_bodies`, force 속성 `net_force` → `total_force`(`hasattr`로 양쪽 지원),
+  매칭 수는 `sensing_indices`로 센다.
+- body label이 전체 경로(`humanoid/worldbody/Hips/LeftLeg/LeftShin/LeftFoot`)라 패턴은 `*/LeftFoot` 대신 `*LeftFoot`.
+- 첫 실행의 CUDA graph 컴파일은 2~5분 걸린다(정상, 이후 캐시).
+
+### SOMA가 Newton에서 쓰러짐 (sim2sim 차이)
+원인 1(당시 수정, 현재 코드에는 없음): 클립 0번 프레임의 발이 바닥보다 약 7 cm 위라 자유낙하 뒤 튕김 →
+`_set_simulator_env_state()`에서 리셋 때 가장 낮은 body z를 0으로 내리는 보정을 넣었었다.
+원인 2(미해결): 모델이 IsaacGym/PhysX(단단한 접촉)에서 학습되어 Newton의 부드러운 접촉·다른 마찰에서 균형을 못 잡는다
+(보정 뒤 step 1 접촉 423 N, step 19 root_z 0.78 m). Newton에서 추가 학습이 필요하다.

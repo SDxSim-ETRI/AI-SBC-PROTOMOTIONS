@@ -20,7 +20,6 @@ data/amass/*.pkl
 !.claude/commands/
 .cursor/
 .env
-# tasks/*/recordings/  # recordings are tracked via LFS
 .github/workflows/
 
 # ManiFlow inference results

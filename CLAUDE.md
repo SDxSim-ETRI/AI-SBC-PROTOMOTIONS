@@ -19,6 +19,7 @@ Start with [docs/ai_sbc/HANDOFF.md](docs/ai_sbc/HANDOFF.md) for the current conc
 | Design, code map and debugging | [docs/ai_sbc/AI_SBC_FRAMEWORK.md](docs/ai_sbc/AI_SBC_FRAMEWORK.md) |
 | Integrated evaluation commands | [examples/experiments/assist_skeleton/README.md](examples/experiments/assist_skeleton/README.md) |
 | ManiFlow interface | [protomotions/maniflow/README.md](protomotions/maniflow/README.md) |
+| Suit robot setup, Newton rgba patch, June 2026 tracker tasks (collaborators) | [README_etri.md](README_etri.md) |
 
 Keep status in HANDOFF, conclusions in the summary, and reproducible paths in the version table.
 Do not append session diaries to these instructions or READMEs. `docs/ai_sbc/archive/` is historical evidence,
@@ -72,7 +73,7 @@ A different LLP path or an oracle probe defaults to scale 1; explicit `--assist-
 Historical evaluations must specify their original options from `meta.json`.
 Never pass `--robot-name` to `inference_agent.py`; it loads the checkpoint robot configuration.
 Generic training/config examples are in `examples/experiments/format.py` and the framework document.
-Newton was tested with 1.0.0; MuJoCo is CPU-only with `num_envs=1` for quick checks.
+`sbc` runs Newton 1.2.0.dev0 (the simulator also handles the Newton 1.3 API); MuJoCo is CPU-only with `num_envs=1` for quick checks.
 
 Training outputs live in ignored `results/<experiment>/`; retained models live in
 `checkpoints/<version>/` with `INFO.md` and Git/LFS. Preserve weights, source data and raw evaluation
