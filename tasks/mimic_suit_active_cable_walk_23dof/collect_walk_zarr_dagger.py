@@ -55,7 +55,7 @@ hip_torque[t]를 같은 시점에 기록 (에피소드 첫 프레임 = s₁). �
 에피소드 필터링(자체 낙상/비유한값 감지·폐기)도 기존 수집기와 동일 — 외란이
 과해 넘어진 에피소드는 데이터에 남지 않습니다.
 
-실행 (기본: run02 estimator, Newton):
+실행 (Newton, α<1이면 --maniflow-ckpt 필요):
   # DART: full PD + hip 외란 (σ = 0.3×기준 std, 150ms hold)
   bash tasks/mimic_suit_active_cable_walk_23dof/collect_walk_zarr_dagger.sh \
       dart 384 --perturb-scale 0.3
@@ -78,11 +78,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 TASK_ROOT = "tasks/mimic_suit_active_cable_walk_23dof"
 DEFAULT_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
-DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
-    str(Path.home()),
-    "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42",
-)
+# hip 토크 추정 ManiFlow 모델(newton-hips run02–04)은 2026-11-04에 가중치를 지웠다.
+# 다시 학습한 모델을 --maniflow-ckpt 또는 --maniflow-run-dir로 지정한다.
+DEFAULT_MANIFLOW_RUN_DIR = None
 
 # 채널별 기준 토크 std [N·m] — 2026-07-14 잔여 PD 스윕의 Agent A(순수 RL+PD)
 # 실측 (HIP_DOF_NAMES 순서: flex_r, add_r, rot_r, flex_l, add_l, rot_l).
@@ -519,6 +517,8 @@ def main():
 
     estimator, maniflow_ckpt = None, None
     if args.residual_pd_scale < 1.0:
+        if not (args.maniflow_ckpt or args.maniflow_run_dir):
+            raise SystemExit("ManiFlow hip 토크 추정 모델이 없습니다(2026-11-04 삭제). --maniflow-ckpt 또는 --maniflow-run-dir를 지정하세요.")
         maniflow_ckpt = (args.maniflow_ckpt
                          or discover_best_checkpoint(args.maniflow_run_dir))
         policy, _cfg, mf_info = load_maniflow_policy(

@@ -17,27 +17,27 @@
 
 시뮬레이션 쪽 chunk 소스가 오프라인 예측과 같은 값을 내는지 확인한다.
 `verify_angle_estimator.py`가 estimator 래퍼를 검증하는 것과 같은 논리를
-**chunk 소스(링 버퍼 + 25 ms 격자 재표집 + 부호 변환)** 층에 적용한다.
+**chunk 소스(링 버퍼 + 모델 프레임 격자 재표집 + 부호 변환)** 층에 적용한다.
 
 두 가지 모드를 돌린다:
 
-- **모드 A (dt = 25 ms)**: suit14 프레임을 그대로 흘린다. 재표집이 프레임
-  정확 복원이므로, lead 0~75 ms MAE가 오프라인 기준(`metrics.json`)과
-  일치해야 한다 → **PASS/FAIL 판정 대상**.
+- **모드 A (dt = 모델 프레임 간격)**: suit14 프레임을 그대로 흘린다. 재표집이
+  프레임 정확 복원이므로, 오프라인 기준(`metrics.json`)에 있는 lead의 MAE가
+  기준과 일치해야 한다 → **PASS/FAIL 판정 대상**.
 - **모드 B (dt = 10 ms)**: 같은 데이터를 100 Hz로 선형 업샘플해 흘린다
-  (실제 진자 env의 policy 주기). 판정은 **한쪽 방향** — B가 A보다 나쁘지만
-  않으면 된다. 100 Hz로 25 ms 격자를 복원할 때 지연이 policy 스텝의 절반에
-  걸리는 프레임(25/75/125/175/225 ms 전)만 두 샘플 평균으로 근사되는데
-  (실측 평균 0.16°/최대 1.34°), 이 평활은 실제 env에도 동일하게 존재하며
-  suit14에서는 예측 오차를 오히려 줄인다.
+  (제어 주기). 판정은 **한쪽 방향** — B가 A보다 나쁘지만 않으면 된다.
+  모델 프레임이 10 ms의 정수배가 아니면(옛 40 fps 판의 25 ms) 일부 관측
+  프레임이 두 샘플 평균으로 근사되는데, 이 평활은 실제 env에도 그대로 있다.
+  H1처럼 모델 프레임이 10 ms이면 B는 A와 같으므로 건너뛴다.
 
-lead 100~150 ms는 오프라인 기준 스크립트가 뽑지 않는 구간이므로(그쪽은
-`action` 4프레임만 사용) 판정하지 않고 **측정값을 보고**하며, 오차가 lead에
+오프라인 기준에 없는 lead는 판정하지 않고 **측정값을 보고**하며, 오차가 lead에
 따라 단조 증가하는지만 확인한다.
+
+기본값은 H1 저장소 사본 / suit14-100fps zarr / 같은 H1의 2026-10-29 오프라인 평가
+(`verify_angle_estimator.REFERENCE_METRICS`, denoise 1).
 
 실행:
     python -m protomotions.maniflow.verify_chunk_source            # sbc env
-    python -m protomotions.maniflow.verify_chunk_source --modes A  # 빠르게
 """
 
 import argparse
@@ -51,21 +51,23 @@ import torch
 
 from protomotions.maniflow.angle_estimator import (
     FLEXION_ACTION_CHANNELS,
-    FLEXION_FRAME_DT,
     FLEXION_OBS_CHANNELS,
     ManiFlowAngleEstimator,
+    _frame_dt_from_cfg,
 )
 from protomotions.maniflow.chunk_source import ManiFlowChunkSource
 from protomotions.maniflow.loader import (
+    DEFAULT_H1_CHECKPOINT,
     DEFAULT_MANIFLOW_ROOT,
-    discover_best_checkpoint,
     load_maniflow_policy,
 )
 from protomotions.maniflow.verify_angle_estimator import (
-    FLEXION40_RUN_DIR,
+    REFERENCE_DENOISE,
     REFERENCE_METRICS,
-    SUIT14_40FPS_ZARR,
+    SUIT14_100FPS_ZARR,
 )
+
+CONTROL_DT = 0.01  # 모드 B: 보조 제어 주기 [s]
 
 # 판정 허용오차
 TOL_LEAD_MAE_DEG = 0.15  # 오프라인 기준 대비 (모드 A)
@@ -125,21 +127,19 @@ def run_mode(
     device = padded.device
     all_ids = torch.arange(n_ep, device=device)
     # 스트리밍 총 스텝: 가장 긴 에피소드를 dt 격자로 덮는다
-    total_steps = int(math.ceil((float(lengths.max()) - 1) * FLEXION_FRAME_DT / dt)) + 1
+    # 평가 zarr 프레임 간격 = 모델 프레임 간격 (main에서 확인)
+    frame_dt = src.knot_dt
+    total_steps = int(math.ceil((float(lengths.max()) - 1) * frame_dt / dt)) + 1
 
-    # 워밍업: 모델 관측 창(250 ms)이 실제 데이터로 채워질 때까지 예측 무시
+    # 워밍업: 모델 관측 창이 실제 데이터로 채워질 때까지 예측 무시
     warmup = int(math.ceil((src.n_obs - 1) * src.knot_dt / dt))
-    knot_frames = (
-        torch.arange(src.num_knots, device=device, dtype=torch.float32)
-        * src.knot_dt
-        / FLEXION_FRAME_DT
-    )
+    knot_frames = torch.arange(src.num_knots, device=device, dtype=torch.float32)
 
     src.reset(all_ids, padded[:, 0, :2] * flexion_sign, padded[:, 0, 2:])
     preds, gts = [], []
     for step in range(total_steps):
         t = step * dt
-        frame = torch.full((n_ep, 1), t / FLEXION_FRAME_DT, device=device)
+        frame = torch.full((n_ep, 1), t / frame_dt, device=device)
         obs = _gt_at(padded, lengths, frame)[:, 0]  # (n, 4)
         src.observe(obs[:, :2] * flexion_sign, obs[:, 2:])
 
@@ -177,21 +177,20 @@ def per_lead_mae_deg(pred: np.ndarray, gt: np.ndarray, bias_leads: int = 0):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--run-dir", default=str(FLEXION40_RUN_DIR))
-    p.add_argument("--ckpt", default=None)
-    p.add_argument("--eval-zarr", default=str(SUIT14_40FPS_ZARR))
+    p.add_argument("--ckpt", default=str(DEFAULT_H1_CHECKPOINT))
+    p.add_argument("--eval-zarr", default=str(SUIT14_100FPS_ZARR))
     p.add_argument("--train-zarr", default=None)
     p.add_argument("--reference-metrics", default=str(REFERENCE_METRICS))
-    p.add_argument("--denoise", type=int, default=3)
+    p.add_argument("--denoise", type=int, default=REFERENCE_DENOISE)
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--flexion-sign", type=float, default=-1.0)
-    p.add_argument("--modes", default="AB", help="A(25 ms) / B(10 ms) 조합")
+    p.add_argument("--modes", default="AB", help="A(모델 프레임 간격) / B(10 ms) 조합")
     p.add_argument(
         "--refresh-frames",
         type=int,
-        default=4,
-        help="예측 주기 [모델 프레임] — 오프라인 기준과 동일한 4가 기본",
+        default=None,
+        help="예측 주기 [모델 프레임] — 기본은 오프라인 기준과 같은 n_action_steps",
     )
     p.add_argument("--out-root", default="results/chunk_source_verify")
     args = p.parse_args()
@@ -202,9 +201,13 @@ def main():
     deg = math.degrees
     device = torch.device(args.device)
 
-    ckpt = args.ckpt or discover_best_checkpoint(args.run_dir)
+    ckpt = args.ckpt
     print(f"ckpt: {ckpt}")
     policy, cfg, info = load_maniflow_policy(ckpt, device=args.device)
+    frame_dt = _frame_dt_from_cfg(cfg) or 0.025  # 학습 zarr에 attr이 없으면 옛 40 fps 판
+    eval_dt = float(zarr.open(args.eval_zarr, mode="r").attrs.get("frame_dt", frame_dt))
+    assert abs(eval_dt - frame_dt) < 1e-9, f"평가 zarr 프레임 간격 {eval_dt} s ≠ 모델 {frame_dt} s"
+    refresh_frames = args.refresh_frames or int(policy.n_action_steps)
 
     padded_np, lengths_np, state = _load_suit14(args.eval_zarr)
     n_ep = padded_np.shape[0]
@@ -234,15 +237,19 @@ def main():
 
     results = {}
     for mode in args.modes.upper():
-        dt = FLEXION_FRAME_DT if mode == "A" else 0.01
+        dt = frame_dt if mode == "A" else CONTROL_DT
+        if mode == "B" and "A" in args.modes.upper() and abs(dt - frame_dt) < 1e-9:
+            print(f"\n=== 모드 B: 모델 프레임이 {frame_dt * 1e3:.0f} ms라 모드 A와 같음 — 생략 ===")
+            continue
         # 예측 주기를 모델 프레임 기준으로 맞춘다
-        refresh_steps = max(1, int(round(args.refresh_frames * FLEXION_FRAME_DT / dt)))
+        refresh_steps = max(1, int(round(refresh_frames * frame_dt / dt)))
         estimator = ManiFlowAngleEstimator(
             policy,
             num_envs=n_ep,
             device=device,
             obs_offset=obs_offset,
             denoise_steps=args.denoise,
+            frame_dt=frame_dt,
         )
         src = ManiFlowChunkSource(
             estimator,
@@ -285,7 +292,7 @@ def main():
     if "A" in results:
         mae_a = results["A"]["mae_deg"]
         for k, v in enumerate(mae_a):
-            lead_ms = int(round(k * FLEXION_FRAME_DT * 1e3))
+            lead_ms = int(round(k * frame_dt * 1e3))
             if lead_ms in ref_lead:
                 d = abs(v - ref_lead[lead_ms])
                 ok = d <= TOL_LEAD_MAE_DEG
@@ -335,7 +342,7 @@ def main():
                 "eval_zarr": args.eval_zarr,
                 "denoise": args.denoise,
                 "flexion_sign": args.flexion_sign,
-                "refresh_frames": args.refresh_frames,
+                "refresh_frames": refresh_frames,
                 "obs_offset_rad": [float(v) for v in obs_offset],
                 "modes": results,
                 "bias_leads": "n_action_steps (오프라인 기준과 동일 정의)",

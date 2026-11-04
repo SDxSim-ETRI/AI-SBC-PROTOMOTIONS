@@ -59,20 +59,15 @@ action 채널: 순수 hip 6개 DOF (공통 [0,1,2,5,6,7] — 이름 기반 파�
 # ---------------------------------------------------------------------------
 import argparse
 import sys
-import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 TASK_ROOT = "tasks/mimic_suit_active_cable_walk_23dof"
 DEFAULT_RL_CKPT = f"{TASK_ROOT}/output_newton_flat/score_based.ckpt"
-DEFAULT_MANIFLOW_RUN_DIR = os.path.join(
-    str(Path.home()),
-    "Projects/ManiFlow_Policy/ManiFlow/data/outputs",
-    # 2026-08-06: 기본값 run02 → run04(v2 substep 평균 라벨 DAgger 재학습).
-    # best topk = epoch=0180-val_loss=0.015600.ckpt (discover_best_checkpoint 자동)
-    "walking_flat-maniflow_lowdim_policy_walking-newton-hips-dagger-v2-run04_seed42",
-)
+# hip 토크 추정 ManiFlow 모델(newton-hips run02–04)은 2026-11-04에 가중치를 지웠다.
+# 다시 학습한 모델을 --maniflow-ckpt 또는 --maniflow-run-dir로 지정한다.
+DEFAULT_MANIFLOW_RUN_DIR = None
 
 
 def _create_parser():
@@ -529,6 +524,8 @@ def main():
              f"{ACTION_DOF_INDICES}): {HIP_JOINT_NAMES}")
 
     # ManiFlow 추정기 로드 (RL agent 이후: 시뮬레이터 초기화와 분리)
+    if not (args.maniflow_ckpt or args.maniflow_run_dir):
+        raise SystemExit("ManiFlow hip 토크 추정 모델이 없습니다(2026-11-04 삭제). --maniflow-ckpt 또는 --maniflow-run-dir를 지정하세요.")
     maniflow_ckpt = args.maniflow_ckpt or discover_best_checkpoint(args.maniflow_run_dir)
     policy, mf_cfg, mf_info = load_maniflow_policy(
         maniflow_ckpt, device=str(fabric.device), maniflow_root=args.maniflow_root

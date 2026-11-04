@@ -4,6 +4,10 @@ ManiFlow_Policy에서 학습한 **센서 상태 전용(vision-free) hip torque �
 ProtoMotions 시뮬레이터(기본 Newton) 안에서 폐루프로 돌리고, 예측 토크를 실제
 적용 토크와 비교하는 파이프라인 문서입니다.
 
+> **2026-11-04:** 이 문서의 hip 토크 추정 ManiFlow 모델(newton-hips run02–04)은 가중치를 지웠습니다.
+> 세 스크립트(`infer_maniflow_newton`, `compare_maniflow_control_newton`, `collect_walk_zarr_dagger`)는
+> 기본 모델 없이 `--maniflow-ckpt` 또는 `--maniflow-run-dir`를 직접 받아야 실행됩니다. 아래 수치는 당시 기록입니다.
+
 ---
 
 ## TL;DR — 다시 시작할 때 먼저 읽을 것
@@ -90,7 +94,7 @@ bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh --viewer
 bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
     --record --episode-steps 600
 
-# 다른 run/체크포인트 지정 (기본값은 run02 디렉토리에서 best topk 자동 선택)
+# 모델 지정 (기본값 없음: run 디렉토리를 주면 best topk 자동 선택)
 bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
     --maniflow-run-dir ~/Projects/ManiFlow_Policy/ManiFlow/data/outputs/walking_flat-maniflow_lowdim_policy_walking-newton-hips-run02_seed42
 ```
@@ -100,7 +104,7 @@ bash tasks/mimic_suit_active_cable_walk_23dof/infer_maniflow_newton.sh \
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--rl-checkpoint` | `output_newton_flat/score_based.ckpt` | 보행 RL policy (로봇을 실제로 걷게 하는 주체) |
-| `--maniflow-ckpt` | **newton-hips-dagger-v2-run04_seed42**에서 best topk 자동 (2026-08-06부터 기본값 run02→run04) | ManiFlow 추정기 체크포인트 |
+| `--maniflow-ckpt` | 없음 (옛 기본 run04는 2026-11-04 삭제) | ManiFlow 추정기 체크포인트. 또는 `--maniflow-run-dir` |
 | `--simulator` | `newton` | `isaaclab`도 가능 (학습 도메인 교차검증용) |
 | `--num-envs` / `--episode-steps` | 2 / 1200 | 1200 steps = 60 s @ 20 Hz |
 | `--viewer` | off | 실시간 GUI (skeleton mesh 기본) |
@@ -167,7 +171,7 @@ bash tasks/.../compare_maniflow_control_newton.sh \
 | 옵션 | 기본값 | 설명 |
 |------|--------|------|
 | `--rl-checkpoint` | `output_newton_flat/score_based.ckpt` | 두 agent 모두가 쓰는 보행 RL policy |
-| `--maniflow-ckpt` / `--maniflow-run-dir` | **newton-hips-dagger-v2-run04_seed42** best topk 자동(= `epoch=0180-val_loss=0.015600.ckpt`, 2026-08-06부터 기본값 run02→run04) | ManiFlow 체크포인트 |
+| `--maniflow-ckpt` / `--maniflow-run-dir` | 없음 (옛 기본 run04는 2026-11-04 삭제) | ManiFlow 체크포인트 |
 | `--maniflow-root` | `$MANIFLOW_ROOT` 또는 관례 경로 | maniflow 패키지 위치 |
 | `--episode-steps` | 1200 | 총 rollout 스텝 (에피소드 끝나면 이어서 진행) |
 | `--predict-mode` | `receding` | 4스텝 청크 예측 / `every_step`(매 스텝 재예측) |

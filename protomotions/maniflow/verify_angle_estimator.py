@@ -15,10 +15,10 @@
 #
 """ManiFlowAngleEstimator 오프라인 등가성 검증 (AI-SBC Phase B).
 
-suit14 평가 zarr(40 fps)를 **한 프레임씩 스트리밍**으로
+ETRI suit14 평가 zarr를 **한 프레임씩 스트리밍**으로
 ``ManiFlowAngleEstimator``에 넣고 receding-horizon 예측을 수행해, 오프라인
 기준 스크립트(ManiFlow_Policy/scripts/compare_hip_imu_reference.py — 배치
-window 방식)가 산출한 수치(캘리브레이션 후 MAE 0.95° 등)를 재현하는지
+window 방식)가 산출한 수치(캘리브레이션 후 MAE 등)를 재현하는지
 확인한다. 수치가 허용오차 안에서 일치하면 래퍼의 history 관리·프라이밍·
 캘리브레이션·denoise 설정이 학습/평가 파이프라인과 등가라는 뜻이고, 이후
 시뮬 통합(Phase C)에서 성능 문제가 생겨도 래퍼 구현은 원인 후보에서
@@ -28,10 +28,11 @@ denoise가 확률적(flow matching 초기 노이즈 샘플)이라 bit-exact 재�
 불가능 — 지표 단위 허용오차(MAE ±0.05° 등)로 판정한다.
 
 Usage (sbc conda env, repo 루트에서):
-  python -m protomotions.maniflow.verify_angle_estimator [--denoise 3]
+  python -m protomotions.maniflow.verify_angle_estimator
 
-기본 경로는 flexion40-run01 체크포인트 / suit14-40fps zarr / 2026-08-13
-기준 metrics.json. 결과는 results/angle_estimator_verify/<ts>/에 저장.
+기본값은 H1 저장소 사본(`loader.DEFAULT_H1_CHECKPOINT`) / suit14-100fps zarr /
+같은 H1의 2026-10-29 오프라인 평가(denoise 1). 다른 모델은 --ckpt·--eval-zarr·
+--reference-metrics를 함께 준다. 결과는 results/angle_estimator_verify/<ts>/에 저장.
 """
 
 import argparse
@@ -47,39 +48,27 @@ from protomotions.maniflow.angle_estimator import (
     FLEXION_ACTION_CHANNELS,
     FLEXION_OBS_CHANNELS,
     ManiFlowAngleEstimator,
+    _frame_dt_from_cfg,
 )
 from protomotions.maniflow.loader import (
+    DEFAULT_H1_CHECKPOINT,
     DEFAULT_MANIFLOW_ROOT,
-    discover_best_checkpoint,
     load_maniflow_policy,
 )
 
 # 현역 예측기 H1 — 100 fps(10 ms 격자), 과거 100 ms → 미래 0~50 ms 6점.
-# 2026-10-29부터 flexion100-h15-swap: DiT-X에서 관측 토큰은 self-attention, 노이즈 섞인
-# action 토큰열은 cross-attention(ManiFlow `obs_routing=swap`). ETRI suit14 100 Hz 교차평가
-# (denoise 1): 10 ms 0.23° / 20 ms 0.34° / 50 ms 1.03°, 지연 2.45 ms.
-# 옛 H1(flexion100-h15-run01, 관측 cross-attention; 10/20/50 ms 0.27/0.39/1.07°)은 폐기했고
-# 2026-10-29 이전 결과의 재현용으로 파일만 남겼다. 40 fps 판(FLEXION40_RUN_DIR)은 25 ms 격자·미래 150 ms.
-FLEXION100_RUN_DIR = (
-    DEFAULT_MANIFLOW_ROOT
-    / "data"
-    / "outputs"
-    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42"
-)
-
-FLEXION40_RUN_DIR = (
-    DEFAULT_MANIFLOW_ROOT
-    / "data"
-    / "outputs"
-    / "hip_flexion_seed-maniflow_lowdim_policy_walking-locomotion-flexion40-run01_seed42"
-)
-SUIT14_40FPS_ZARR = DEFAULT_MANIFLOW_ROOT / "data" / "hip-flexion-etri-suit14-40fps.zarr"
-# 재현 대상으로 고정한 기준 평가 (suit14-40fps, denoise 3, cal MAE 0.949°)
+# DiT-X에서 관측 토큰은 self-attention, 노이즈 섞인 action 토큰열은 cross-attention
+# (ManiFlow `obs_routing=swap`). 저장소 사본은 `loader.DEFAULT_H1_CHECKPOINT`.
+# 옛 H1(관측 cross-attention)과 40 fps 판은 2026-11-04에 가중치를 지웠다.
+SUIT14_100FPS_ZARR = DEFAULT_MANIFLOW_ROOT / "data" / "hip-flexion-etri-suit14-100fps.zarr"
+# 재현 대상으로 고정한 기준 평가: 같은 H1, suit14-100fps, denoise 1, seed 0.
+# 보정 후 MAE 0.53°/0.49°, lead 10/20/50 ms 0.23/0.34/1.03°.
+REFERENCE_DENOISE = 1
 REFERENCE_METRICS = (
     DEFAULT_MANIFLOW_ROOT.parent
     / "eval_results"
     / "hip_imu_reference_compare"
-    / "2026-08-13_16-53-24"
+    / "2026-10-29_03-10-21"
     / "metrics.json"
 )
 
@@ -136,15 +125,13 @@ def streaming_predict(estimator, state_padded, ep_lengths, log_every=4000):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--run-dir", default=str(FLEXION40_RUN_DIR))
-    p.add_argument("--ckpt", default=None, help="기본: run-dir의 best topk ckpt")
-    p.add_argument("--eval-zarr", default=str(SUIT14_40FPS_ZARR))
+    p.add_argument("--ckpt", default=str(DEFAULT_H1_CHECKPOINT))
+    p.add_argument("--eval-zarr", default=str(SUIT14_100FPS_ZARR))
     p.add_argument(
         "--train-zarr", default=None, help="관측 캘리브레이션 기준 (기본: ckpt cfg)"
     )
     p.add_argument("--reference-metrics", default=str(REFERENCE_METRICS))
-    p.add_argument("--denoise", type=int, default=3)
-    p.add_argument("--fps", type=float, default=40.0)
+    p.add_argument("--denoise", type=int, default=REFERENCE_DENOISE)
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out-root", default="results/angle_estimator_verify")
@@ -155,7 +142,7 @@ def main():
     torch.manual_seed(args.seed)
     deg = math.degrees
 
-    ckpt = args.ckpt or discover_best_checkpoint(args.run_dir)
+    ckpt = args.ckpt
     print(f"ckpt: {ckpt}")
     policy, cfg, info = load_maniflow_policy(ckpt, device=args.device)
 
@@ -198,11 +185,16 @@ def main():
         device=torch.device(args.device),
         obs_offset=obs_offset,
         denoise_steps=args.denoise,
+        frame_dt=_frame_dt_from_cfg(cfg),
     )
     print(
         f"estimator: n_obs={estimator.n_obs_steps} n_act={estimator.n_action_steps} "
         f"action_dim={estimator.action_dim} denoise={estimator.num_inference_steps} "
         f"(epoch {info['epoch']}, {info['state_key']})"
+    )
+    eval_dt = float(z.attrs.get("frame_dt", estimator.frame_dt))
+    assert abs(eval_dt - estimator.frame_dt) < 1e-9, (
+        f"평가 zarr 프레임 간격 {eval_dt} s ≠ 모델 {estimator.frame_dt} s"
     )
 
     ep_lengths = (ends - starts).astype(np.int64)
@@ -244,7 +236,7 @@ def main():
         mk = compute_metrics(pred_all[sel] - bias, ref_all[sel])
         per_lead.append(
             {
-                "lead_ms": round(k * 1000 / args.fps),
+                "lead_ms": round(k * estimator.frame_dt * 1000),
                 "mae_deg": float(deg(mk["mae"].mean())),
                 "r2": float(mk["r2"].mean()),
                 "corr": float(mk["corr"].mean()),
