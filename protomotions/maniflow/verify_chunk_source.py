@@ -51,6 +51,7 @@ import torch
 
 from protomotions.maniflow.angle_estimator import (
     FLEXION_ACTION_CHANNELS,
+    FLEXION_FRAME_DT,
     FLEXION_OBS_CHANNELS,
     ManiFlowAngleEstimator,
     _frame_dt_from_cfg,
@@ -204,7 +205,7 @@ def main():
     ckpt = args.ckpt
     print(f"ckpt: {ckpt}")
     policy, cfg, info = load_maniflow_policy(ckpt, device=args.device)
-    frame_dt = _frame_dt_from_cfg(cfg) or 0.025  # 학습 zarr에 attr이 없으면 옛 40 fps 판
+    frame_dt = _frame_dt_from_cfg(cfg) or FLEXION_FRAME_DT
     eval_dt = float(zarr.open(args.eval_zarr, mode="r").attrs.get("frame_dt", frame_dt))
     assert abs(eval_dt - frame_dt) < 1e-9, f"평가 zarr 프레임 간격 {eval_dt} s ≠ 모델 {frame_dt} s"
     refresh_frames = args.refresh_frames or int(policy.n_action_steps)

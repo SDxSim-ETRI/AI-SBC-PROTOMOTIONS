@@ -12,7 +12,7 @@
 | 원본과의 관계 | 2026-11-04 확인: 가중치 164개가 원본과 같고, 같은 입력·같은 난수에서 예측 출력도 같다 |
 | SHA-256 | `24355171cf3b7dd87fc0a32cebacfba27773145acd313930328f247af8d90223` |
 | 원본 | ManiFlow_Policy `ManiFlow/data/outputs/hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42/checkpoints/epoch=0008-val_loss=0.000834.ckpt` (169 MB, 학습용 가중치·optimizer 포함, 로컬에만 있음) |
-| 모델 코드 | ManiFlow_Policy 저장소 커밋 `d9e536e` 이후 (`obs_routing: swap`). 체크포인트의 설정으로 모델을 만들므로 ManiFlow 코드가 필요하다 |
+| 모델 코드 | ManiFlow_Policy 저장소 커밋 `d9e536e` 이후 (`obs_routing: swap`). 체크포인트의 설정으로 모델을 만들므로 ManiFlow 코드가 필요하다. 원본 run 폴더와 학습 자료는 ManiFlow_Policy에 남아 있다 |
 | 학습 자료 | `hip-flexion-seed-locomotion-100fps.zarr` (SEED 보행 계열, 100 fps), 12 epoch, seed 42, val_loss 0.000834 |
 
 ## 모델
@@ -22,8 +22,9 @@
 | 구조 | DiT-X 6블록 × 256, 파라미터 10.6 M. flow matching(+consistency) 정책 |
 | 토큰 배치 | 관측 토큰 10개(step당 1개)는 self-attention 앞자리, 노이즈 섞인 미래 action 토큰 15개는 cross-attention 컨텍스트, 출력은 위치 정보만 가진 query 토큰 15개에서 읽는다 |
 | 입력 | 100 Hz, 4채널 × 10 step(과거 100 ms): 좌우 고관절 굴곡각, 몸통 pitch·roll |
+| 프레임 간격 | 10 ms. `ManiFlowAngleEstimator`가 학습 zarr의 `frame_dt`를 읽고, 학습 자료가 없는 환경(실기기 등)에서는 기본값 `FLEXION_FRAME_DT` = 10 ms를 쓴다(2026-11-05 전에는 지운 40 fps 판 기준 25 ms였다) |
 | 출력 | 좌우 고관절 굴곡각 15 step 중 현재~50 ms의 6 step을 쓴다 |
-| 영점 | 착용자의 warmup 구간 평균을 학습 자료(SEED) 평균에 맞추는 오프셋 (`run_system.py --calibration wearer`) |
+| 영점 | 착용자의 warmup 구간 평균을 `skeleton_features.SEED_CHANNEL_MEAN_DEG` = (10.41, 10.42, 7.39, −0.58)°에 맞추는 오프셋 (`run_system.py --calibration wearer`). 이 값은 40 fps 판 SEED 자료의 평균이며, H1 학습 자료(100 fps, 원본 출처가 다름)의 평균 (15.66, 15.67, 13.26, −1.44)°와 다르다(2026-11-05 확인). L15–L18 평가는 모두 앞의 값을 썼다 |
 | 정확도 | ETRI suit14 100 Hz 교차평가, denoise 1: 10 / 20 / 50 ms 앞 MAE 0.23 / 0.34 / 1.03°, 지연 2.45 ms |
 
 ## 사용

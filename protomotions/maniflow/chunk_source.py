@@ -22,12 +22,12 @@
 해결해야 하는 시간축 불일치
 ---------------------------
 - LLP policy 주기 = 10 ms (물리 400 Hz / decimation 4)
-- HLP 모델 native 프레임 = 25 ms (40 fps) — 정수배가 아니다
-- LLP의 관절 히스토리 버퍼는 100 ms만 담지만 HLP는 250 ms(10프레임)를 요구
+- HLP 모델 native 프레임 = ``estimator.frame_dt`` (H1: 10 ms; 지운 40 fps 판은 25 ms라 정수배가 아니었다)
+- LLP의 관절 히스토리 버퍼와 HLP 관측 창(H1: 10프레임 = 100 ms)의 길이가 다르다
 
 따라서 이 모듈이 **자체 링 버퍼**(policy 주기, 320 ms)를 들고, 예측 시각마다
-25 ms 격자로 선형 재표집해 모델 창을 만든다. dt가 25 ms의 약수든 아니든
-동작하며, dt=25 ms면 재표집이 프레임 정확 복원이 된다(검증 하네스가 이용).
+모델 프레임 격자로 선형 재표집해 모델 창을 만든다. dt가 모델 프레임 간격과 같으면
+재표집이 프레임 정확 복원이 된다(검증 하네스가 이용).
 
 부호·채널 규약
 --------------
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 링 버퍼 길이 [s] — 모델 관측 창(250 ms)보다 넉넉하게
+# 링 버퍼 길이 [s] — 모델 관측 창(H1: 100 ms)보다 넉넉하게
 RING_SECONDS = 0.32
 # denoise 스텝 (2026-09-14 실측으로 3 → 1). suit14 교차평가에서 정확도는 스텝 수와
 # 무관했고(lead 25 ms MAE 0.47/0.45/0.45/0.47° @ 1/2/3/6스텝) 지연만 스텝당 ~3 ms씩
@@ -108,7 +108,7 @@ class ManiFlowChunkSource:
         )
         self.last_pred: Optional[Tensor] = None
 
-        # 25 ms 격자 재표집 계수 (창 끝 = 현재 시각)
+        # 모델 프레임 격자 재표집 계수 (창 끝 = 현재 시각)
         lags = (
             torch.arange(self.n_obs - 1, -1, -1, device=self.device, dtype=torch.float32)
             * self.knot_dt
@@ -187,7 +187,7 @@ class ManiFlowChunkSource:
     # 예측
     # ------------------------------------------------------------------
     def _resample_history(self, env_ids: Tensor) -> Tensor:
-        """링 버퍼 → 25 ms 격자 모델 창. (m, n_obs, 4)."""
+        """링 버퍼 → 모델 프레임 격자 창. (m, n_obs, 4)."""
         ring = self._ring[env_ids]  # (m, R, 4)
         hi = ring[:, self._src_hi]  # (m, n_obs, 4)
         lo = ring[:, self._src_lo]

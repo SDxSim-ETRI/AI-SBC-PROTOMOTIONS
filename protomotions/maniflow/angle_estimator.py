@@ -15,46 +15,35 @@
 #
 """AI-SBC HLP — hip flexion 각도 예측 ManiFlow 온라인 래퍼.
 
-BONES-SEED locomotion으로 학습된 flexion 예측 모델(ManiFlow lowdim,
-run: ``...locomotion-flexion40-run01_seed42``)을 시뮬레이션/실기기 루프 안에서
+BONES-SEED locomotion으로 학습한 flexion 예측 모델 H1(ManiFlow lowdim, ``obs_routing=swap``,
+``checkpoints/H1_maniflow_swap/epoch_0008.ckpt``)을 시뮬레이션/실기기 루프 안에서
 receding-horizon으로 돌리기 위한 래퍼. 관측은 ``RobotState``가 아니라 **각도 4채널 벡터**다
 (진자 env·skeleton env·실기기 IMU가 각자 방식으로 이 4ch를 구성).
 
-관측/출력 계약 (flexion40 모델, ``docs/ai_sbc/AI_SBC_FRAMEWORK.md`` §3.1):
+관측/출력 계약 (``docs/ai_sbc/AI_SBC_FRAMEWORK.md`` §3.1):
 
     obs(4)    = [hip_flexion_r, hip_flexion_l, trunk_pitch, trunk_roll]
                 (rad, skeleton hinge 규약; pitch=앞숙임+, roll=오른쪽+)
     action(2) = [hip_flexion_r, hip_flexion_l] 미래 각도 (rad)
-                × n_action_steps(=4) 프레임 chunk
+                × n_action_steps(H1: 6) 프레임 chunk
 
-시간 규약: 모델의 native 프레임은 **40 fps(25 ms)** — :meth:`observe`는 이
-주기로 호출해야 한다 (진자 env policy 100 Hz와는 다름 — 결합 시
-`AssistTargetControl`의 ``hlp_dt=0.025``로 흡수). :meth:`predict`가 반환하는
-chunk의 첫 프레임(lead 0)은 **마지막 observe와 같은 시각**이고, 나머지가
-+25/+50/+75 ms 미래다.
+시간 규약: 모델의 native 프레임 간격은 ``frame_dt``다(H1: **100 fps, 10 ms**). 학습 zarr의
+``frame_dt`` attr에서 읽고, 학습 자료가 없는 환경(실기기 등)에서는 기본값 ``FLEXION_FRAME_DT``(10 ms)를
+쓴다. :meth:`observe`는 이 주기로 호출한다. :meth:`predict`가 반환하는 chunk의 첫 프레임(lead 0)은
+**마지막 observe와 같은 시각**이고, 나머지가 +10…+50 ms 미래다.
 
-⚠️ **horizon 정렬 — 미래는 400 ms가 아니라 150 ms다** (2026-09-08 확인):
-모델의 `horizon`(=16)은 **관측 창과 정렬**돼 있다. `action_pred` index k는
-상대 프레임 `k − (n_obs_steps − 1)`, 즉 k=0..8은 과거(−225…−25 ms),
-k=9가 현재, k=10..15가 미래(+25…**+150 ms**)다. :meth:`predict`가 주는
-`action`은 그 중 k=9..12(현재+75 ms)일 뿐이고, 실제로 쓸 수 있는 미래
-전체는 :meth:`predict_horizon`으로 꺼내야 한다(현재+미래 7프레임).
-lead별 MAE(suit14 walk, denoise 3): +25 ms 0.36° / +50 0.90° / +75 1.44° /
-+100 2.00° / +125 2.58° / +150 3.11°. 더 긴 선행 시간이 필요하면 horizon을
-`n_obs_steps + 미래프레임수`로 늘려 **재학습**해야 한다.
+horizon 정렬: 모델의 `horizon`(H1: 15)은 **관측 창과 정렬**돼 있다. `action_pred` index k는
+상대 프레임 `k − (n_obs_steps − 1)`, 즉 H1에서 k=0..8은 과거(−90…−10 ms), k=9가 현재,
+k=10..14가 미래(+10…+50 ms)다. 미래 창 전체는 :meth:`predict_horizon`으로 꺼낸다.
+ETRI suit14 100 Hz 교차평가(denoise 1)의 lead별 MAE: 10 ms 0.23° / 20 ms 0.34° / 50 ms 1.03°.
+더 긴 선행 시간이 필요하면 horizon을 `n_obs_steps + 미래프레임수`로 늘려 **재학습**해야 한다.
 
-캘리브레이션 (영점 오프셋, §3.1): SEED와 실측(suit) 데이터는 중립자세 각도
-규약이 채널별 상수만큼 다르다. ``obs_offset``(관측에 가산)과
-``output_bias``(예측에서 감산)를 상수로 주입한다 — 오프라인 검증은 데이터
-평균 정렬로 산출했고(suit14 기준 obs +13.9°/+12.0°/−10.2°/−0.1°,
-출력 +13.8°/+12.1°), 실기기에서는 시작 시 중립자세 영점조정으로 대체 예정.
+캘리브레이션 (영점 오프셋, §3.1): SEED와 실측(suit) 데이터는 중립자세 각도 규약이 채널별 상수만큼
+다르다. ``obs_offset``(관측에 가산)과 ``output_bias``(예측에서 감산)를 상수로 주입한다.
 
-denoise 스텝: 권장 3 (suit14 MAE 0.95°, batch-1 지연 5.95 ms). 기본값은
-체크포인트 설정(10)이므로 명시 권장.
-
-등가성 검증: ``python -m protomotions.maniflow.verify_angle_estimator`` —
-suit14 zarr를 스트리밍으로 흘려 오프라인 기준 스크립트
-(ManiFlow_Policy/scripts/compare_hip_imu_reference.py)의 수치를 재현한다.
+등가성 검증: ``python -m protomotions.maniflow.verify_angle_estimator`` — suit14 100 fps zarr를
+스트리밍으로 흘려 오프라인 기준 스크립트(ManiFlow_Policy/scripts/compare_hip_imu_reference.py)의
+수치를 재현한다.
 """
 
 from typing import Optional, Sequence, Union
@@ -63,7 +52,7 @@ import logging
 
 import torch
 
-# flexion40 모델의 채널 계약 — zarr attrs(obs_spec/action_dof_names)와 대조용.
+# H1의 채널 계약 — zarr attrs(obs_spec/action_dof_names)와 대조용.
 FLEXION_OBS_CHANNELS = (
     "hip_flexion_r",
     "hip_flexion_l",
@@ -74,10 +63,10 @@ FLEXION_ACTION_CHANNELS = ("hip_flexion_r", "hip_flexion_l")
 
 logger = logging.getLogger(__name__)
 
-# 모델 native 프레임 간격 [s] — 40 fps 모델의 기본값.
-# 100 fps 등 다른 간격으로 재학습한 모델은 학습 zarr의 `frame_dt` attr에서 읽는다
-# (`_frame_dt_from_cfg`), 없으면 이 값으로 둔다.
-FLEXION_FRAME_DT = 0.025
+# 모델 native 프레임 간격 [s]. 학습 zarr의 `frame_dt` attr을 먼저 읽고(`_frame_dt_from_cfg`),
+# 학습 자료가 없는 환경(실기기 등)에서는 이 값을 쓴다 — 남은 모델 H1은 100 fps.
+# (2026-11-05 전에는 지운 40 fps 판 기준 25 ms였다.)
+FLEXION_FRAME_DT = 0.01
 
 _TensorLike = Union[torch.Tensor, Sequence[float]]
 
@@ -97,7 +86,8 @@ def _frame_dt_from_cfg(cfg) -> Optional[float]:
             logger.info("HLP 프레임 간격을 학습 데이터에서 읽음: %.4f s (%s)", float(dt), path)
             return float(dt)
     except Exception as exc:  # noqa: BLE001 — 진단용, 실패해도 기본값으로 진행
-        logger.debug("frame_dt 자동 인식 실패 (%s) — 기본값 사용", exc)
+        logger.debug("frame_dt 자동 인식 실패 (%s)", exc)
+    logger.warning("학습 zarr에서 HLP 프레임 간격을 읽지 못해 기본값 %.3f s를 쓴다", FLEXION_FRAME_DT)
     return None
 
 
@@ -106,7 +96,7 @@ class ManiFlowAngleEstimator:
 
     사용 패턴:
 
-    - :meth:`observe` — 모델 native 프레임 주기(40 fps)마다 현재 각도 4ch를
+    - :meth:`observe` — 모델 native 프레임 주기(``frame_dt``, H1: 10 ms)마다 현재 각도 4ch를
       history에 push.
     - :meth:`predict` — 새 chunk가 필요할 때 호출 (receding-horizon replay면
       ``n_action_steps`` 프레임마다 한 번).
@@ -297,11 +287,11 @@ class ManiFlowAngleEstimator:
         return result["action"].detach() - self._output_bias_for(None, seq=True)
 
     def set_history(self, env_ids: Optional[torch.Tensor], history: torch.Tensor) -> None:
-        """history를 외부에서 직접 써넣는다 (25 ms 격자 재표집 등).
+        """history를 외부에서 직접 써넣는다 (모델 프레임 격자 재표집 등).
 
         ``observe``와 달리 rolling push가 아니라 창 전체를 덮어쓴다. 시뮬레이션
-        policy 주기(10 ms)가 모델 프레임(25 ms)의 정수배가 아닐 때, 호출자가
-        자체 링 버퍼를 25 ms 격자로 보간해 넣는 용도다.
+        제어 주기와 모델 프레임 간격이 다를 때, 호출자가 자체 링 버퍼를
+        모델 프레임 격자로 보간해 넣는 용도다.
 
         Args:
             env_ids: 대상 env (None이면 전체).
@@ -323,7 +313,7 @@ class ManiFlowAngleEstimator:
 
     @torch.no_grad()
     def predict_horizon(self, env_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """예측 창 **전체**를 반환 (미래 150 ms까지 접근하는 유일한 경로).
+        """예측 창 **전체**를 반환 (미래 창 끝까지 접근하는 유일한 경로).
 
         Args:
             env_ids: 대상 env (None이면 전체).
@@ -332,7 +322,7 @@ class ManiFlowAngleEstimator:
             (m, horizon, action_dim) rad, ``output_bias`` 감산 완료.
             index k = 상대 프레임 ``k − (n_obs_steps − 1)`` — 즉
             ``k = n_obs_steps − 1``이 현재 시각이고 그 이후가 미래다.
-            미래 부분만 쓰려면 ``[:, n_obs_steps - 1:]`` (7프레임).
+            미래 부분만 쓰려면 ``[:, n_obs_steps - 1:]`` (H1: 현재 + 미래 5프레임).
         """
         history = self._history if env_ids is None else self._history[env_ids]
         primed = self._primed if env_ids is None else self._primed[env_ids]
