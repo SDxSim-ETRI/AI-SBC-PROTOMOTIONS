@@ -1359,4 +1359,4 @@ agent:
     ema_alpha: '0.05'
     min_std: '0.02'
     clamp_range: '4.0'
-  initial_actor_checkpoint: /home/bak/Projects/AI-SBC-PROTOMOTIONS/results/llp_R0lim20_s0_20261029/epoch_6000.ckpt
+  initial_actor_checkpoint: /home/bak/Projects/AI-SBC-PROTOMOTIONS/results/llp_L15_s0_20261029/epoch_6000.ckpt

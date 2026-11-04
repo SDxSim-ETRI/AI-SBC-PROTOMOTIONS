@@ -36,7 +36,7 @@
   "hlp_calibration": "4.598162323314862,1.40271338852458,-17.06335958453886,2.3705996455698113",
   "action_rate_weight": -0.005,
   "assist_lpf_hz": 0.0,
-  "initial_actor_checkpoint": "results/llp_R0lim20_s0_20261029/epoch_6000.ckpt",
+  "initial_actor_checkpoint": "results/llp_L15_s0_20261029/epoch_6000.ckpt",
   "exclude_motion_ids": "1",
   "motion_weights": null,
   "segment_start_max": 20.0,

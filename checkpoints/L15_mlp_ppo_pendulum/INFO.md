@@ -6,7 +6,7 @@
 | 항목 | 내용 |
 |---|---|
 | 가중치 | `epoch_6000.ckpt` |
-| 원본 실행 | `results/llp_R0lim20_s0_20261029` (2026-10-29) |
+| 원본 실행 | `results/llp_L15_s0_20261029` (2026-10-29) |
 | 정책 | MLP(512·256·128) + PPO, 좌우 고관절을 한 actor가 출력 |
 | 학습 | `examples/experiments/assist_pendulum/mlp.py --recipe L15` (랜덤화 진자 + 착용자 PD+FF 한 번만 제한하는 토크 경로 + 보조 한계 20 N·m), 4,096 환경, 6,000 epoch, seed 0. 레시피가 이 설정을 그대로 만드는지는 `protomotions/tests/test_pendulum_recipes.py`가 확인한다 |
 | 출력 | 20·tanh, 한계 ±20 N·m, 출력 배율 1, 10 ms 주기 |

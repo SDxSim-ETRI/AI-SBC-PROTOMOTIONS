@@ -5,7 +5,7 @@
   "batch_size": 16384,
   "motion_file": "none",
   "experiment_path": "examples/experiments/assist_pendulum/mlp.py",
-  "experiment_name": "llp_R0lim20_s0_20261029",
+  "experiment_name": "llp_L15_s0_20261029",
   "scenes_file": null,
   "checkpoint": null,
   "use_wandb": false,
