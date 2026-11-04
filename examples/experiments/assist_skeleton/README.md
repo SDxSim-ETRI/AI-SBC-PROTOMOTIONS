@@ -72,33 +72,21 @@ python examples/experiments/assist_skeleton/run_system.py \
 HLP 계산 시간은 별도 기록한다. `--hlp-latency-ms 0`은 계산 지연을 물리 시간에 추가하지 않는 설정이다.
 `--oracle`과 `--mask-window`는 참조·착용자 토크를 사용하는 원인 진단용이다.
 
-`--swing-gate 0.20`은 관절각만 보는 유각 브레이크 게이트다 (2026-10-14, `protomotions/assist/controller.py`).
-각 hip 관절각이 자기 중간값(지수이동평균)을 굴곡 방향으로 지나는 순간부터 같은 hip의 직전 교차 간격 × 0.20
-동안 신전 보조를 0으로 둔다. 걷기에서 유각 중·후반(참조 위상 68–92 %)의 다리 감속은 무릎 결합·중력이 내고
-착용자 hip 토크는 ≈0인데, 진자에서 배운 정책이 감속을 보고 브레이크를 걸어 착용자가 같은 크기로 맞서던 구간을
-끊는 진단이다(2026-10-14, 지금은 지운 진자 모델로 측정: [보관 보고서](../../../docs/ai_sbc/archive/reports/walking_swing_gate.html)).
-손으로 만든 위상 규칙이라 **진단 기준값**이지 배포 후보가 아니다.
-
-```bash
-python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20                 # 걷기
-python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20 --motion-id 1   # 달리기
-```
-
 ## 파일 역할
 
 | 파일 | 역할 |
 |---|---|
 | `run_system.py` | 통합 비교 실행. `SystemRunner`(조립→제어기→훅→루프→기록), `SystemHook`(10 ms 서브스텝 훅), `MocapGaitPhase`(오라클용 특권 위상표), `FullBodyDiagnostic`(`--fullbody-diagnostic`) |
-| `analysis.py` | 기록의 지표 계산 (numpy만). 실행 직후 지표·그림·report.md와 `RunRecord`·`ObjectiveComparison`·`TorqueAlignment`·`PhaseScreen`·`DecelerationMasks`·`WalkingPhaseDigest`·`SwingGateBins` 등 |
+| `analysis.py` | 기록의 지표 계산 (numpy만). 실행 직후 지표·그림·report.md와 `RunRecord`·`ObjectiveComparison`·`WearerStats`·`TorqueAlignment` |
 | `evaluate.py` | 시뮬레이션을 돌리는 평가: `motions`(모션별 A/B), `native-wearer`(새 보행의 무보조 착용자), `wearer`(착용자 사람다움 표) |
-| `report.py` | HTML 보고서: `comparison`, `checkpoint`, `torque`, `finetune`(추가학습 전후·모델 비교: 보행 진행률 구간별 감소량 막대·꺾은선, `--figures`로 발표용 .svg/.png), `swing-gate`. 생성 뒤 `python docs/ai_sbc/organize_reports.py` |
+| `report.py` | HTML 보고서: `comparison`, `checkpoint`, `finetune`(추가학습 전후·모델 비교: 보행 진행률 구간별 감소량 막대·꺾은선, `--figures`로 발표용 .svg/.png). 생성 뒤 `python docs/ai_sbc/organize_reports.py` |
 | `plots.py` | 문서용 PNG: `gait-symmetry`, `timing`, `torque-phase`, `compare`(터미널 표 + 오라클 그림) |
 | `viz.py` | Newton 뷰어 오버레이 (A 고스트 라인, 보조 토크 화살표) |
 | `tracker_human.py`, `train_tracker_human.sh` | W1 착용자 학습 구성·실행 |
-| `llp_walk.py` | W1 + H1 전신 시뮬레이션에서 LLP 학습: 진자 정책 추가학습(`--initial-actor-checkpoint`, `--finetune-assist-limit 20`, `--motion-weights 0.5,0.5`, motion별 `--hlp-calibration`), 같은 조건으로 처음부터 학습(`--actor-init random`), 정책 선택 `--policy mlp_ppo|mlp_fpo|tfm_fpo`(FPO++·Temporal Transformer, `protomotions/agents/fpo/`). 옛 L13/L14 변형은 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관 |
+| `llp_walk.py` | W1 + H1 전신 시뮬레이션에서 LLP 학습: 진자 정책 추가학습(`--initial-actor-checkpoint`, `--finetune-assist-limit 20`, `--motion-weights 0.5,0.5`, motion별 `--hlp-calibration`), 같은 조건으로 처음부터 학습(`--actor-init random`), 정책 선택 `--policy mlp_ppo|mlp_fpo|tfm_fpo`(FPO++·Temporal Transformer, `protomotions/agents/fpo/`). 2026-10-11 이전 변형은 `results/llp_L13_fullbody_walk_20261011/scripts/`에 보관 |
 
 보행 클립 부분집합은 `data/scripts/make_gait_motions.py`로 만든다. 공통 제어기는 `protomotions/assist/`,
 ManiFlow 연결은 `protomotions/maniflow/`에 있다. 진자 쪽 학습·평가는 `../assist_pendulum/`
-(`mlp.py` 프리셋, `runtime.py`, `evaluate.py`, `study.py`, `report.py`).
+(`mlp.py` L15 프리셋, `runtime.py`, `evaluate.py`).
 구체적인 코드 흐름과 주의점은 [프레임워크 문서](../../../docs/ai_sbc/AI_SBC_FRAMEWORK.md)를 참조한다.
 닫힌 연구의 실행기는 `results/<연구>/scripts/`에 있고(각 `SNAPSHOT.md`), 그대로 다시 시작하지 않는다.

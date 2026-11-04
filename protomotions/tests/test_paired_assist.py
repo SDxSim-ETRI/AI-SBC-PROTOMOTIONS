@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Causal-reference reward, common RNG and truncation contracts for L12."""
+"""Causal-reference reward, common RNG and truncation contracts for the paired unassisted reference."""
 
 import random
 

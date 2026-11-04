@@ -494,7 +494,7 @@ class AssistContext:
     tau_agent: Tensor = FieldPath()
     tau_assist: Tensor = FieldPath()
     gain_scale: Tensor = FieldPath()
-    # L12: independently simulated unassisted state, consumed by reward only.
+    # Independently simulated unassisted state (paired whole-body env), consumed by reward only.
     reference_dof_pos: Tensor = FieldPath()
     # 보조 관절 부분집합 상태 (전신 로봇에서 LLP가 hip 2ch만 볼 때; 진자에서는 None)
     dof_pos: Tensor = FieldPath()

@@ -99,7 +99,7 @@ class AssistTargetControlConfig(ControlComponentConfig):
     chunk_noise_std: float = 0.02
     chunk_bias_std: float = 0.03
     chunk_delay_max: float = 0.05
-    # chunk의 정박점 (L4, 2026-09-29). "intent" = 의도 θ_g의 미래 그대로(v3~L3). "actual" = 현재 **실제** 각도에
+    # chunk의 정박점 (2026-09-29). "intent" = 의도 θ_g의 미래 그대로(기본). "actual" = 현재 **실제** 각도에
     # 의도의 증분을 얹은 것 θ(t) + [θ_g(t+k) − θ_g(t)] — 배포 HLP가 실제 각도의 미래를 예측하는 것과 같은 정보량.
     # "intent"면 하중·브레이크로 생긴 의도-실제 어긋남이 chunk에 그대로 드러나 정책이 그것을 읽는 법을 배우는데,
     # 배포에선 그 신호가 없다(W1 유각 말기 오방향의 원인 후보, docs/ai_sbc/NEXT_SESSION.md §2-J).

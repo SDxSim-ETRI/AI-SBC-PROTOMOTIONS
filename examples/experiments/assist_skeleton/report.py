@@ -13,17 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""run_system.py 기록의 HTML 보고서 — 공통 틀(HtmlShell·Svg·Fmt·Figures)과 보고서 네 종류.
+"""run_system.py 기록의 HTML 보고서 — 공통 틀(HtmlShell·Svg·Fmt·Figure)과 보고서 세 종류.
 
   `ComparisonReport` (`comparison`)  실행 여러 개를 한 표로: 비교표 + 위상 그림 + 위상표 (옛 report_html)
   `CheckpointReport` (`checkpoint`)  체크포인트 하나를 깊게: 핵심 숫자·비교표·위상·시계열·주기 평균·학습 궤적 (옛 report_checkpoint_html)
-  `TorqueReport`     (`torque`)      시퀀스 comparison.json의 phase/time 토크 보고서 + 개발 단계 통과 판정 (옛 report_torque_html)
-  `SwingGateReport`  (`swing-gate`)  걷기 68–92 % 구간 분석과 관절각 유각 게이트 (옛 report_swing_gate)
-`WalkingRecords.gather()`는 보관된 W1 기준 기록(L1 ±10/15/20, R0 ±15/20)의 색인이다 (진자 `report.py`가 쓴다).
+  `FinetuneReport`   (`finetune`)    추가학습 전후 비교: 보행 진행률 10 % 구간별 토크 실효값 감소량 + 전체 지표
 수치 계산은 전부 `analysis.py`에 있고 여기서는 HTML·SVG만 만든다. 생성 뒤 `python docs/ai_sbc/organize_reports.py`를 실행한다.
+2026-11-04 L1 계보 정리로 `torque`·`swing-gate` 보고서는 `results/llp_wide100_sequence/scripts/`,
+`results/walk_phase_analysis_20261014/scripts/`로 옮겼다.
 
-    python examples/experiments/assist_skeleton/report.py swing-gate --out docs/ai_sbc/walking_swing_gate.html
-    python examples/experiments/assist_skeleton/report.py torque --manifest results/<seq>/comparison.json --out <html>
     python examples/experiments/assist_skeleton/report.py comparison --out <html> --walk base=results/oracle/*_tracker_base ...
     python examples/experiments/assist_skeleton/report.py checkpoint --out <html> --name v13 --walk <glob> --run <glob> ...
 """
@@ -31,8 +29,6 @@
 import argparse
 import glob
 import html
-import io
-import json
 import os
 import re
 import subprocess
@@ -46,15 +42,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analysis import (  # noqa: E402
     A,
     B,
-    ROOT,
     ObjectiveComparison,
-    PhaseScreen,
     RunRecord,
-    SwingGateBins,
     TorqueAlignment,
-    assist_output_limit,
     latest_run,
-    read_json,
 )
 
 
@@ -132,43 +123,6 @@ svg .bar:hover{{opacity:.75}}
 </script>
 """
 
-    STUDY_CSS = ("html{scroll-behavior:smooth}body{margin:0;background:#f4f6f8;color:#1c2d3d;font:16px/1.8 system-ui,sans-serif}"
-                 "main{max-width:1180px;margin:auto;padding:28px 26px 70px}h1{font-size:30px;line-height:1.4}h2{font-size:23px;margin:38px 0 12px}"
-                 "a{color:#245aa0}table{width:100%;border-collapse:collapse;background:white;font-size:14px;line-height:1.6}th{background:#e5edf5;text-align:left}"
-                 "td,th{padding:8px 11px;border:1px solid #dce3eb;vertical-align:top}strong{color:#185b4a}code{font-size:.88em;overflow-wrap:anywhere}"
-                 "nav{display:flex;gap:18px;flex-wrap:wrap;border-bottom:1px solid #d8e1ea;padding-bottom:15px}"
-                 "details{background:white;border:1px solid #d8e1ea;border-radius:8px;padding:15px 20px;margin:20px 0}summary{cursor:pointer;font-weight:650}"
-                 ".note{color:#62748a;font-size:14px}.plot{background:white;border:1px solid #dce3eb;border-radius:10px;padding:10px;margin:12px 0}"
-                 ".plot svg{width:100%;height:auto;display:block}.status{padding:16px 18px;background:#e5eef9;border-radius:8px;border-left:5px solid #245aa0}"
-                 ".ok{color:#185b4a;font-weight:650}.part{color:#9a6700;font-weight:650}.no{color:#b42318;font-weight:650}small{color:#62748a}"
-                 ".scroll{overflow-x:auto}@media(max-width:750px){main{padding:20px 16px}h1{font-size:25px}table{display:block;overflow-x:auto}}")
-
-    TORQUE_TEMPLATE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LLP | 보행 phase와 토크 분담</title><style>
-:root{--ink:#15232d;--ink2:#59656b;--grid:#e8e7e2;--zero:#929995;--limit:#97afc4}
-*{box-sizing:border-box}body{margin:0;background:#fafaf7;color:var(--ink);font:15px/1.65 system-ui,sans-serif}main{max-width:1080px;margin:auto;padding:36px 24px 70px}h1{font-size:30px;margin:6px 0 12px}h2{font-size:21px;margin:26px 0 8px}h3{font-size:16px;margin:0 0 8px}.eyebrow{color:#2275ce;font-size:12px;letter-spacing:.12em;font-weight:700}.note{color:var(--ink2);font-size:13px;margin:8px 0 16px}.explain{background:#edf3f4;border-left:3px solid #2275ce;padding:15px 20px;margin:22px 0}.controls{position:sticky;top:0;background:#fafaf7f5;z-index:2;border-bottom:1px solid #dadeda;padding:16px 0;display:flex;gap:12px;align-items:end;flex-wrap:wrap}.controls label{font-size:12px;color:var(--ink2);display:grid;gap:3px}select,button{font:inherit;padding:8px 12px;border:1px solid #cbd2d1;border-radius:6px;background:white;color:var(--ink);cursor:pointer}select:focus,button:focus{outline:2px solid #2275ce}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}.cards>div{background:#f0f0e9;padding:14px;border-radius:8px}.cards span{display:block;font-size:12px;color:var(--ink2)}.cards strong{display:block;font-size:23px;font-weight:600}.plot{padding:18px 18px 6px;background:white;border:1px solid #e4e6e1;border-radius:8px;margin:14px 0}.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px}.lg i{display:inline-block;width:16px;height:3px;margin-right:6px;vertical-align:middle}svg{width:100%;height:auto;display:block}svg .grid{stroke:var(--grid);stroke-width:1}svg .zero{stroke:var(--zero)}svg .mark{stroke:var(--zero);stroke-dasharray:4 4}svg .limit{stroke:var(--limit);stroke-dasharray:6 4}svg .tick{fill:var(--ink2);font:11px system-ui}svg .axis{fill:var(--ink2);font:12px system-ui}.scroll{overflow-x:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums}td,th{padding:9px 10px;border-bottom:1px solid #e0e3dc;text-align:right;white-space:nowrap}th:first-child{text-align:left}thead{background:#f0f0e9}button.pick{border:0;padding:0;background:none;color:#1763a5;text-align:left}details{margin:25px 0;color:var(--ink2);font-size:13px}summary{cursor:pointer;font-weight:600}.path{overflow-wrap:anywhere}.download{margin:12px 0}[hidden]{display:none!important}.footer{margin-top:40px;border-top:1px solid #ddd;padding-top:16px;color:var(--ink2);font-size:13px}
-@media(max-width:650px){main{padding:20px 12px}h1{font-size:24px}.cards{grid-template-columns:1fr 1fr}.cards strong{font-size:20px}.plot{padding:12px 4px}.controls{gap:8px}.controls select{max-width:94vw;font-size:13px}}
-</style></head><body><main>
-<header><div class="eyebrow">AI-SBC / TORQUE ANALYSIS</div><h1>보행 phase와 토크 분담</h1><p>L1 ×0.5 기준선과 최대 3개 후보만 비교합니다. 전체 평균과 phase별 악화를 함께 봅니다.</p></header>
-<div class="explain"><b>A = 무보조, B = 보조 사용.</b> τ_agent는 두 경우 모두 <b>착용자만 낸 토크</b>입니다.<br>
-τ_assist는 장치가 보탠 토크이며, τ_total = τ_agent + τ_assist입니다.<br>
-보조에 따라 움직임과 착용자의 반응이 달라지므로, B의 합계가 A와 반드시 같지는 않습니다.</div>
-<details><summary>선정 후보 비교표 열기 · 행을 누르면 해당 그래프로 이동</summary><div class="scroll"><table><thead><tr><th>모델 / 동작</th><th>착용자 τ² 변화</th><th>몸체 오차 변화</th><th>보조 RMS [N·m]</th><th>결과</th></tr></thead><tbody>__SUMMARY__</tbody></table></div></details>
-<p class="note">선정 기준: 걷기·달리기 모두 40초 완주하고 전체 τ²가 모두 감소한 후보 중, 최악 phase의 RMS 증가가 작은 순입니다. 동률은 phase 악화 평균·전체 τ² 순으로 비교합니다. 유효 후보가 3개 미만이면 그 수만 표시합니다. 선정은 합격이나 일반화 입증을 뜻하지 않습니다.</p>
-<details><summary>개발 단계 통과 기준 · L8 결과 이전에 고정</summary><p>걷기·달리기 모두 40초 완주, 추론 배율 1과 ±100 N·m. 전체 τ², 최악 phase, 20–40% 및 70–90% 구간의 RMS 증가가 L1×0.5보다 나빠지면 미달입니다. 각 10% 구간의 L1 대비 RMS 변화 악화는 1 N·m 이내, 몸체 오차 증가는 무보조 대비 1 mm 이내, 각속도 변화 크기는 L1보다 2%p 이내 추가 변화, 전진 속도 변화는 ±2% 이내로 제한합니다. 이는 개발용 선별 기준이며 여러 seed·미사용 조건 검증을 대신하지 않습니다.</p></details>
-<div class="controls"><label>모델 / 학습 시점<select id="model">__OPTIONS__</select></label><label>동작<select id="motion"><option value="0">걷기</option><option value="1">달리기</option></select></label><label>그래프<select id="view"><option value="phase">보행 phase별</option><option value="time">시간별 · 오른쪽 hip</option></select></label></div>
-<p class="note">phase 0% = 기준 mocap에서 해당 다리의 최대 hip 굴곡. 실제 발 접촉 검출 기반 phase가 아닙니다. A/B에 동일한 기준 phase를 사용합니다.</p>
-__PANELS__
-<p id="empty" hidden>해당 조건의 평가 기록이 아직 없습니다.</p>
-<div class="footer">시뮬레이션 개발 평가 · 학습 seed 0 / 평가 seed 42. τ²는 토크 부담의 대리지표이며 실제 근활성이나 대사량이 아닙니다. 모델마다 별도의 A/B 실행을 사용했습니다. 동작 변화·추종 오차·낙상과 함께 판단해야 합니다.</div>
-</main><script id="data" type="application/json">__PAYLOAD__</script><script>
-const data=JSON.parse(document.getElementById('data').textContent),model=document.getElementById('model'),motion=document.getElementById('motion'),view=document.getElementById('view');
-function update(){let found=false;document.querySelectorAll('.panel').forEach(p=>{const active=p.dataset.model===model.value&&p.dataset.motion===motion.value;p.hidden=!active;if(active)found=true;p.querySelector('.phase-view').hidden=view.value!=='phase';p.querySelector('.time-view').hidden=view.value!=='time';});document.getElementById('empty').hidden=found;}
-[model,motion,view].forEach(x=>x.addEventListener('change',update));
-document.querySelectorAll('.pick').forEach(b=>b.addEventListener('click',()=>{model.value=b.dataset.model;motion.value=b.dataset.motion;update();document.querySelector('.controls').scrollIntoView({behavior:'smooth'});}));
-document.querySelectorAll('.download').forEach(b=>b.addEventListener('click',()=>{const rows=data[b.dataset.key][b.dataset.kind],keys=Object.keys(rows[0]);const csv='\uFEFF'+keys.join(',')+'\n'+rows.map(r=>keys.map(k=>r[k]===null?'':r[k]).join(',')).join('\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=b.dataset.key+'_'+b.dataset.kind+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}));update();
-</script></body></html>"""
-
 
 class Fmt:
     @staticmethod
@@ -177,17 +131,6 @@ class Fmt:
             return "—"
         return f"{v:+.{digits}f}" if sign else f"{v:.{digits}f}"
 
-    @staticmethod
-    def number(v, signed=False):
-        return "—" if v is None else format(v, "+.1f" if signed else ".1f")
-
-    @staticmethod
-    def f1(v, signed=False):
-        return "—" if v is None or (isinstance(v, float) and not np.isfinite(v)) else format(v, "+.1f" if signed else ".1f")
-
-    @staticmethod
-    def plain(v, spec=".1f"):
-        return "—" if v is None else format(v, spec)
 
     @staticmethod
     def cell(t, spec=".1f"):
@@ -388,25 +331,6 @@ class Svg:
         parts.append("</svg>")
         return "\n".join(parts)
 
-    @staticmethod
-    def reduction_bars(rows):
-        w, h, ml, mr, mt, mb = 900, 230, 65, 15, 20, 45
-        bound = max(5, max(abs(r["rms_reduction_Nm"] or 0) for r in rows)) * 1.18
-        y = lambda v: mt + (bound - v) / (2 * bound) * (h - mt - mb)  # noqa: E731
-        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="phase별 착용자 토크 RMS 감소량">']
-        for v in (-bound / 2, 0, bound / 2):
-            out.append(f'<line class="grid" x1="{ml}" x2="{w-mr}" y1="{y(v)}" y2="{y(v)}"/><text class="tick" x="{ml-8}" y="{y(v)+4}" text-anchor="end">{v:+.1f}</text>')
-        dx = (w - ml - mr) / len(rows)
-        for i, r in enumerate(rows):
-            v = r["rms_reduction_Nm"]
-            if v is None:
-                continue
-            x = ml + dx * (i + .15)
-            color = "#178463" if v >= 0 else "#cf543b"
-            out.append(f'<rect x="{x}" y="{min(y(v),y(0))}" width="{dx*.7}" height="{max(1,abs(y(v)-y(0)))}" fill="{color}"><title>{i*10}–{(i+1)*10}%: {v:+.2f} N·m 감소</title></rect>')
-            out.append(f'<text class="tick" x="{x+dx*.35}" y="{y(v)-6 if v>=0 else y(v)+14}" text-anchor="middle">{v:+.1f}</text>')
-            out.append(f'<text class="tick" x="{x+dx*.35}" y="{h-22}" text-anchor="middle">{i*10}–{(i+1)*10}</text>')
-        return "".join(out) + f'<text class="axis" x="{ml}" y="12">RMS 감소량 [N·m] · 양수 = 부담 감소</text><text class="axis" x="{w-mr}" y="{h-3}" text-anchor="end">보행 phase [%]</text></svg>'
 
     @staticmethod
     def _bins_frame(series, h, w):
@@ -485,120 +409,6 @@ class Svg:
             out.append(Svg.legend_auto(legend, pts, ml, mt, pw, ph))
         out.append(axes)
         return "".join(out)
-
-    @staticmethod
-    def bins_line(series, ylabel, ylim, shade=None, h=250, w=900, bins=25):
-        """series: [(label, color, y[bins], dash)] — x = 구간 중심 (유각 게이트 보고서)."""
-        ml, mr, mt, mb = 60, 15, 18, 40
-        x = lambda p: ml + p / 100 * (w - ml - mr)  # noqa: E731
-        y = lambda v: mt + (ylim[1] - v) / (ylim[1] - ylim[0]) * (h - mt - mb)  # noqa: E731
-        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(ylabel)}">']
-        if shade:
-            out.append(f'<rect x="{x(shade[0])}" y="{mt}" width="{x(shade[1]) - x(shade[0])}" height="{h - mt - mb}" fill="#f3d9c6" opacity=".6"/>')
-        step = 25 if ylim[1] - ylim[0] > 80 else 10
-        v = np.ceil(ylim[0] / step) * step
-        while v <= ylim[1]:
-            out.append(f'<line x1="{ml}" x2="{w - mr}" y1="{y(v)}" y2="{y(v)}" stroke="#e3e7ec"/>'
-                       f'<text x="{ml - 6}" y="{y(v) + 4}" text-anchor="end" font-size="11" fill="#555">{v:+.0f}</text>')
-            v += step
-        for p in range(0, 101, 10):
-            out.append(f'<line x1="{x(p)}" x2="{x(p)}" y1="{mt}" y2="{h - mb}" stroke="#eef1f4"/>'
-                       f'<text x="{x(p)}" y="{h - mb + 14}" text-anchor="middle" font-size="11" fill="#555">{p}</text>')
-        out.append(f'<line x1="{ml}" x2="{w - mr}" y1="{y(0)}" y2="{y(0)}" stroke="#999"/>')
-        for label, color, ys, dash in series:
-            pts = " ".join(f"{x((i + .5) * 100 / bins):.1f},{y(v):.1f}" for i, v in enumerate(ys) if np.isfinite(v))
-            dash_attr = 'stroke-dasharray="6 4"' if dash else ""
-            out.append(f'<polyline fill="none" stroke="{color}" stroke-width="2" {dash_attr} points="{pts}"><title>{html.escape(label)}</title></polyline>')
-        out.append(f'<text x="{ml}" y="12" font-size="12" fill="#333">{html.escape(ylabel)}</text>'
-                   f'<text x="{w - mr}" y="{h - 4}" text-anchor="end" font-size="12" fill="#333">보행 위상 [%] · 0 = 참조 최대 굴곡</text></svg>')
-        legend = " ".join(f'<span style="display:inline-block;margin-right:14px"><span style="display:inline-block;width:22px;border-top:3px {"dashed" if dash else "solid"} {color};vertical-align:middle"></span> {html.escape(label)}</span>'
-                          for label, color, _, dash in series)
-        return f'<div class="legend">{legend}</div>' + "".join(out)
-
-    @staticmethod
-    def grouped_bars(rows_list, labels, colors, h=260, w=900):
-        """구간별 착용자 RMS 변화 (B − A) 막대, 실행 여러 개 나란히. 양수 = 부담 증가."""
-        ml, mr, mt, mb = 60, 15, 18, 40
-        vals = [[r["B_rms"] - r["A_rms"] for r in rows] for rows in rows_list]
-        bound = max(5.0, max(abs(v) for vs in vals for v in vs)) * 1.15
-        y = lambda v: mt + (bound - v) / (2 * bound) * (h - mt - mb)  # noqa: E731
-        out = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="구간별 착용자 토크 RMS 변화">']
-        for v in (-bound / 2, 0, bound / 2):
-            out.append(f'<line x1="{ml}" x2="{w - mr}" y1="{y(v)}" y2="{y(v)}" stroke="#ddd"/><text x="{ml - 6}" y="{y(v) + 4}" text-anchor="end" font-size="11" fill="#555">{v:+.1f}</text>')
-        n = len(rows_list[0]); dx = (w - ml - mr) / n; k = len(rows_list); bw = dx * .8 / k
-        for i in range(n):
-            for j in range(k):
-                v = vals[j][i]
-                xx = ml + dx * (i + .1) + j * bw
-                out.append(f'<rect x="{xx:.1f}" y="{min(y(v), y(0)):.1f}" width="{bw:.1f}" height="{max(1, abs(y(v) - y(0))):.1f}" fill="{colors[j]}"><title>{html.escape(labels[j])} {i * 4}–{(i + 1) * 4} %: {v:+.1f} N·m</title></rect>')
-            if i % 2 == 0:
-                out.append(f'<text x="{ml + dx * (i + .5):.1f}" y="{h - mb + 14}" text-anchor="middle" font-size="11" fill="#555">{i * 4}</text>')
-        out.append(f'<text x="{ml}" y="12" font-size="12" fill="#333">착용자 토크 RMS 변화 B − A [N·m] · 양수 = 부담 증가</text>'
-                   f'<text x="{w - mr}" y="{h - 4}" text-anchor="end" font-size="12" fill="#333">보행 위상 [%]</text></svg>')
-        legend = " ".join(f'<span style="display:inline-block;margin-right:14px"><span style="display:inline-block;width:14px;height:12px;background:{c};vertical-align:middle"></span> {html.escape(l)}</span>' for l, c in zip(labels, colors))
-        return f'<div class="legend">{legend}</div>' + "".join(out)
-
-
-class Figures:
-    """matplotlib 그림 → 인라인 SVG (한글 폰트·Agg 설정은 한 번만)."""
-
-    FONT_FILE = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-    PREVIEW = Path(os.environ["GEN_REPORT_PNG"]) if os.environ.get("GEN_REPORT_PNG") else None
-    _plt = None
-
-    @classmethod
-    def pyplot(cls):
-        if cls._plt is None:
-            import matplotlib
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-            from matplotlib.font_manager import FontProperties
-
-            font = FontProperties(fname=cls.FONT_FILE)
-            plt.rcParams.update({"font.family": font.get_name(), "font.size": 10, "axes.unicode_minus": False, "svg.fonttype": "path",
-                                 "axes.spines.top": False, "axes.spines.right": False})
-            cls._plt = plt
-        return cls._plt
-
-    @classmethod
-    def embed(cls, fig, identity, preview_dir=None):
-        plt = cls.pyplot()
-        preview = cls.PREVIEW if preview_dir is None else Path(preview_dir)
-        if preview:
-            preview.mkdir(parents=True, exist_ok=True)
-            fig.savefig(preview / f"{identity}.png", dpi=110, bbox_inches="tight")
-        plt.rcParams["svg.hashsalt"] = identity
-        buf = io.StringIO()
-        fig.savefig(buf, format="svg", bbox_inches="tight")
-        plt.close(fig)
-        text = buf.getvalue()
-        return '<div class="plot">' + text[text.index("<svg"):] + "</div>"
-
-
-class WalkingRecords:
-    """보관된 W1 기준 기록의 색인: L1 ±10/15/20 (2026-10-16), R0 ±15/20 (2026-10-20), R0 일반화 조건 (2026-10-21)."""
-
-    OUTPUT_SCALE = ROOT / "results/llp_output_scale_20261016"
-    RELATIVE = ROOT / "results/llp_relative_20261020/walking"
-    GENERALIZATION = ROOT / "results/llp_r0_generalization_20261021"
-    SEEDS = (42, 7)
-    LIMITS = {"L1": (10, 15, 20), "R0": (15, 20)}
-
-    @classmethod
-    def gather(cls):
-        """(condition, model, limit, seed) -> record with a repository-relative path."""
-        out = {}
-        old = read_json(cls.OUTPUT_SCALE / "runs.json")
-        relative = read_json(cls.RELATIVE / "runs.json")
-        for seed in cls.SEEDS:
-            for limit in cls.LIMITS["L1"]:
-                out["walk", "L1", limit, seed] = old[f"L1_{limit}Nm_seed{seed}"]
-            for limit in cls.LIMITS["R0"]:
-                out["walk", "R0", limit, seed] = relative[f"R0_s0_{limit}Nm_seed{seed}"]
-        if (cls.GENERALIZATION / "runs.json").exists():
-            for r in read_json(cls.GENERALIZATION / "runs.json").values():
-                out[r["condition"], r["model"], r["limit_Nm"], r["seed"]] = r
-        return out
 
 
 # ---------------------------------------------------------------------------
@@ -975,267 +785,6 @@ class CheckpointReport:
 
 
 # ---------------------------------------------------------------------------
-# 시퀀스 토크 보고서 (comparison.json → phase/time, 개발 단계 통과 판정)
-# ---------------------------------------------------------------------------
-class TorqueReport:
-    COLORS = {"a": "#77766f", "b": "#d55b26", "assist": "#2275ce", "total": "#8b55ac"}
-
-    @classmethod
-    def series(cls, data, key, color, dash=None):
-        return {"y": [np.nan if r[key] is None else r[key] for r in data],
-                "color": cls.COLORS[color], "width": 2, "dash": dash}
-
-    @classmethod
-    def torque_plots(cls, x, rows, xlabel, xlim, limit, marks=()):
-        plots = []
-        # A shared physical torque scale makes separate agent/assist panels comparable.
-        largest = max([limit] + [abs(r[k]) for r in rows for k in ("agent_A", "agent_B", "assist_B", "total_B") if r[k] is not None])
-        ylim = (-np.ceil(largest / 25) * 25 * 1.08, np.ceil(largest / 25) * 25 * 1.08)
-        specs = [
-            ("착용자가 낸 토크 · τ_agent", [("agent_A", "a", "무보조 A · τ_agent"), ("agent_B", "b", "보조 B · τ_agent")]),
-            ("장치가 낸 토크 · τ_assist", [("assist_A", "a", "무보조 A · τ_assist = 0"), ("assist_B", "assist", "보조 B · τ_assist")]),
-            ("착용자 + 장치 · τ_total", [("agent_A", "a", "무보조 A · τ_total = τ_agent"), ("total_B", "total", "보조 B · τ_total = τ_agent + τ_assist")]),
-        ]
-        for title, lines in specs:
-            leg = Svg.legend([(label, cls.COLORS[color], False) for key, color, label in lines])
-            svg = Svg.line(x, [cls.series(rows, key, color) for key, color, label in lines],
-                           ylabel="토크 [N·m]", xlabel=xlabel, xlim=xlim, ylim=ylim, H=240,
-                           xtick=10 if xlim == (0, 100) else None, vlines=marks,
-                           hlines=(-limit, limit) if "τ_assist" in title else (), label=title)
-            plots.append(f'<div class="plot"><h3>{title}</h3>{leg}{svg}</div>')
-        return "".join(plots)
-
-    @staticmethod
-    def phase_table(rows):
-        number = Fmt.number
-        headers = ["phase", "τ_agent A RMS", "τ_agent B RMS", "RMS 감소량", "τ² 변화", "τ_assist B 평균", "τ_assist B RMS"]
-        body = []
-        for r in rows:
-            body.append('<tr><th>' + f'{r["phase_start_pct"]:.0f}–{r["phase_end_pct"]:.0f}%' + '</th>' +
-                        ''.join(f'<td>{number(r[k], k in ("rms_reduction_Nm", "tau2_change_pct", "assist_B"))}{"%" if k == "tau2_change_pct" else ""}</td>'
-                                for k in ("agent_A_rms", "agent_B_rms", "rms_reduction_Nm", "tau2_change_pct", "assist_B", "assist_B_rms")) + '</tr>')
-        return '<div class="scroll"><table><thead><tr>' + ''.join(f'<th>{h}</th>' for h in headers) + '</tr></thead><tbody>' + ''.join(body) + '</tbody></table></div>'
-
-    @classmethod
-    def build(cls, manifest, output):
-        T = TorqueAlignment
-        manifest, output = Path(manifest), Path(output)
-        all_records = json.loads(manifest.read_text())
-        records, ranking = T.rank_candidates(all_records)
-        screen = PhaseScreen.screen_records(all_records, ranking["evaluations"])
-        manifest.with_name("phase_screen.json").write_text(json.dumps(screen, indent=2, ensure_ascii=False, allow_nan=False))
-        manifest.with_name("phase_diagnostics.json").write_text(json.dumps(ranking, indent=2, ensure_ascii=False, allow_nan=False))
-        panels, summary, payload, options = [], [], {}, {}
-        for key, m in records.items():
-            run = Path(m["run_dir"])
-            meta = json.loads((run / "meta.json").read_text())
-            with np.load(run / "traces.npz") as f:
-                tr = {k: f[k] for k in ("t", "gait_phase", "tau_pd_prev", "tau_ff_prev", "tau_assist")}
-            data = T.aligned_torques(tr, meta)
-            fine, coarse = T.phase_profile(data, 50), T.phase_profile(data, 10)
-            times, marks = T.time_rows(data)
-            motion = int(meta["motion_id"])
-            name = T.label(key)
-            model_id = key.rsplit("_m", 1)[0]
-            options[model_id] = name
-            duration = float(meta["seconds"])
-            status = f'{duration:g}초 완주' if meta["survived_s"] is None else f'{meta["survived_s"]:.2f}초 낙상'
-            title = f'{name} · {"걷기" if motion == 0 else "달리기"}'
-            limit = abs(meta["assist_scale"]) * min(meta["torque_limit"], meta.get("policy_torque_limit", meta["torque_limit"]))
-            summary.append(f'<tr><th><button class="pick" data-model="{model_id}" data-motion="{motion}">{html.escape(title)}</button></th><td>{m["τ²"]:+.1f}%</td><td>{m["body"]:+.1f}%</td><td>{m["assist_rms"]:.1f}</td><td>{status}</td></tr>')
-            phaseplots = cls.torque_plots([r["phase_pct"] for r in fine], fine, "보행 phase [%]", (0, 100), limit)
-            timeplots = cls.torque_plots([r["time_s"] for r in times], times, "실험 시작 후 시간 [s]", (times[0]["time_s"], times[-1]["time_s"]), limit, marks)
-            payload[key] = {"phase": coarse, "time": times}
-            worst_harm = ranking["evaluations"][key]["worst_phase_rms_increase_Nm"]
-            bad_bins = sum((r["rms_reduction_Nm"] or 0) < 0 for r in coarse)
-            cards = ''.join(f'<div><span>{k}</span><strong>{v}</strong></div>' for k, v in [
-                ("착용자 τ² 변화", f'{m["τ²"]:+.1f}%'), ("최악 phase RMS 증가", f'+{worst_harm:.1f} N·m'),
-                ("부담이 늘어난 phase", f'{bad_bins} / 10 구간'), ("보조 RMS", f'{m["assist_rms"]:.1f} N·m'),
-                ("몸체 추종 오차 변화", f'{m["body"]:+.1f}%'), ("평가 결과", status)])
-            screening = "기준선" if key.startswith("reference") else ("개발 기준 통과 · 일반화 미검증" if screen["candidate_pass"].get(model_id) else "개발 기준 미달")
-            panels.append(f'''
-<article class="panel" data-model="{model_id}" data-motion="{motion}" hidden>
-<h2>{html.escape(title)}</h2><p><strong>{screening}</strong> · 후보 순위와 통과 판정은 별도입니다.</p><div class="cards">{cards}</div>
-<p class="note">추론 배율 {meta['assist_scale']:g} · 출력 제한 ±{limit:g} N·m · warmup {meta['warmup']:g}초 제외.
-{'낙상 전 기록만 포함하므로 완주 모델과 동등한 비교가 아닙니다.' if meta['survived_s'] is not None else '40초 기록 중 warmup 이후를 분석했습니다.'}</p>
-<section class="phase-view"><h2>어느 phase에서 착용자 부담이 줄었나?</h2>
-<p class="note">RMS 감소량 = 무보조 A − 보조 B. 초록/양수는 감소, 빨강/음수는 증가입니다. RMS는 구간 안에서 토크를 제곱·평균한 뒤 제곱근을 취합니다.</p>
-{Svg.reduction_bars(coarse)}{cls.phase_table(coarse)}
-<p class="note">토크 단위 N·m. τ² 변화는 B/A − 1로, 음수일수록 감소입니다. 좌·우 hip을 각 다리의 기준 phase로 모았습니다.</p>
-<h2>Phase별 토크를 역할별로 보기</h2><p class="note">아래 곡선은 부호를 가진 평균 토크입니다. +굴곡 / −신전. 세 그래프의 토크 축 범위는 같습니다.</p>
-{phaseplots}
-<button class="download" data-key="{key}" data-kind="phase">phase 수치 CSV 저장</button></section>
-<section class="time-view" hidden><h2>실제 시간에 따른 토크 · 오른쪽 hip</h2>
-<p class="note">위상 0% 경계부터 최대 세 주기를 표시합니다. 세로 점선은 기준 phase 0%. 모든 토크는 동일한 물리 시간 구간으로 정렬했습니다.</p>
-{timeplots}<button class="download" data-key="{key}" data-kind="time">시계열 CSV 저장</button></section>
-<details><summary>원본 기록과 해석 기준</summary><p class="path">{html.escape(str(run))}</p>
-<p>τ_agent = tau_pd_prev + tau_ff_prev, τ_assist = 실제 주입 명령. τ_agent[i]와 τ_assist[i−1]을 같은 창으로 맞추고 그 창의 중앙 시각·중앙 phase로 표시했습니다.
-τ_total은 이 두 구동 토크의 합이며 관절의 모든 수동·접촉 힘을 포함한 역동역학 토크가 아닙니다.</p></details></article>
-''')
-        default = ranking["selected_groups"][0] if ranking["selected_groups"] else next(iter(options))
-        option_html = ''.join(f'<option value="{k}" {"selected" if k==default else ""}>{html.escape(v)}</option>' for k, v in options.items())
-        page = HtmlShell.TORQUE_TEMPLATE.replace("__OPTIONS__", option_html).replace("__SUMMARY__", ''.join(summary)).replace("__PANELS__", ''.join(panels)).replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False, allow_nan=False))
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(page)
-        print(f"saved {output} ({len(records)} evaluations)")
-
-
-# ---------------------------------------------------------------------------
-# 유각 브레이크 게이트 보고서
-# ---------------------------------------------------------------------------
-class SwingGateReport:
-    """run_system.py 기록만 읽어 HTML 하나를 만든다 (2026-10-14). 새 시뮬레이션은 돌리지 않는다."""
-
-    RUNS = {
-        "L1 ×0.5 · 걷기": ("baseline", "reference_L1_x0.5_m0"),
-        "L1 ×0.5 · 달리기": ("baseline", "reference_L1_x0.5_m1"),
-        "β 오라클 0.5 · 걷기": ("probe", "beta05_m0"),
-        "L1 ×0.5 + 참조위상 70–90 % 차단 · 걷기": ("probe", "L1s05_mask70_90_m0"),
-        "L1 ×0.5 + 참조위상 70–90 % 차단 · 달리기": ("probe", "L1s05_mask70_90_m1"),
-        "L1 ×0.5 + 참조위상 20–30 % 차단 · 걷기": ("probe", "L1s05_mask20_30_m0"),
-        "L1 ×0.5 + 참조위상 20–40 % 차단 · 걷기": ("probe", "L1s05_mask20_40_m0"),
-        "L1 ×0.5 + 유각 게이트 0.20 · 걷기": ("probe", "L1s05_gate020_m0"),
-        "L1 ×0.5 + 유각 게이트 0.20 · 달리기": ("probe", "L1s05_gate020_m1"),
-        "L1 ×0.5 + 유각 게이트 0.15 · 걷기": ("probe", "L1s05_gate015_m0"),
-        "L1 ×0.5 + 유각 게이트 0.25 · 걷기": ("probe", "L1s05_gate025_m0"),
-        "L1 ×0.5 · 걷기 · seed 7": ("probe", "L1s05_seed7_m0"),
-        "L1 ×0.5 + 유각 게이트 0.20 · 걷기 · seed 7": ("probe", "L1s05_gate020_seed7_m0"),
-        "L1 ×0.5 · 달리기 · seed 7": ("probe", "L1s05_seed7_m1"),
-        "L1 ×0.5 + 유각 게이트 0.20 · 달리기 · seed 7": ("probe", "L1s05_gate020_seed7_m1"),
-    }
-
-    @staticmethod
-    def phase_table(rows, lo, hi, gate=False):
-        f1 = Fmt.f1
-        hdr = ["위상", "착용자 A 평균", "착용자 B 평균", "보조 평균", "B − A", "상쇄비 c", "A와 반대 %", "A RMS", "B RMS", "τ² 기여", "hip 각 A", "각속도 A", "각가속도 A", "B − A 각"]
-        if gate:
-            hdr.append("게이트 %")
-        body = []
-        for r in rows:
-            if r["lo"] < lo or r["hi"] > hi:
-                continue
-            cells = [f'{r["lo"]:.0f}–{r["hi"]:.0f}', f1(r["A"], 1), f1(r["B"], 1), f1(r["S"], 1), f1(r["dAB"], 1), f1(r["c"], 1) if np.isfinite(r["c"]) else "—",
-                     f'{r["oppA"]:.0f}', f1(r["A_rms"]), f1(r["B_rms"]), f1(r["contrib"], 1), f1(r["pos"], 1) + "°", f1(r["vel"], 1), f1(r["acc"], 1), f1(r["dpos"], 1) + "°"]
-            if gate:
-                cells.append(f'{r.get("gate_pct", 0):.0f}')
-            body.append("<tr><th>" + cells[0] + "</th>" + "".join(f"<td>{c}</td>" for c in cells[1:]) + "</tr>")
-        return '<div class="scroll"><table><thead><tr>' + "".join(f"<th>{h}</th>" for h in hdr) + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>"
-
-    @classmethod
-    def build(cls, out, baseline_dir, probe_dir):
-        G = SwingGateBins
-        folders = {"baseline": baseline_dir, "probe": probe_dir}
-        runs = {name: G.find_run(folders[kind], tag) for name, (kind, tag) in cls.RUNS.items()}
-        runs = {k: v for k, v in runs.items() if v is not None}
-        rec = {}
-        for name, run in runs.items():
-            meta, d, tr = G.load(run)
-            s = G.run_summary(run)
-            rows = G.bins(d)
-            rec[name] = dict(meta=meta, d=d, s=s, rows=rows, run=run,
-                             harm_68_92=G.window_contribution(rows, 68, 92), harm_20_40=G.window_contribution(rows, 20, 40),
-                             worst=max(r["B_rms"] - r["A_rms"] for r in rows), gate=G.gate_accuracy(d))
-
-        base, beta, mask, gate = (rec.get(k) for k in ("L1 ×0.5 · 걷기", "β 오라클 0.5 · 걷기", "L1 ×0.5 + 참조위상 70–90 % 차단 · 걷기", "L1 ×0.5 + 유각 게이트 0.20 · 걷기"))
-        base_r, gate_r, mask_r = (rec.get(k) for k in ("L1 ×0.5 · 달리기", "L1 ×0.5 + 유각 게이트 0.20 · 달리기", "L1 ×0.5 + 참조위상 70–90 % 차단 · 달리기"))
-
-        # ---- 표: 전체 수치
-        head = ["조건", "착용자 τ² 변화", "보조 RMS [N·m]", "몸체 오차 변화", "40초 유지", "가장 나빠진 4 % 구간 [N·m]", "68–92 % τ² 기여", "20–40 % τ² 기여"]
-        body = []
-        for name, r in rec.items():
-            s = r["s"]
-            body.append("<tr><th>" + html.escape(name) + "</th>" + "".join(f"<td>{c}</td>" for c in (
-                f'{s["τ²"]:+.1f} %', f'{s["assist_rms"]:.1f}', f'{s["body"]:+.1f} %', "예" if s["survived_s"] is None else f'{s["survived_s"]:.1f} s 낙상',
-                f'{r["worst"]:+.1f}', f'{r["harm_68_92"]:+.1f}', f'{r["harm_20_40"]:+.1f}')) + "</tr>")
-        summary_table = '<div class="scroll"><table><thead><tr>' + "".join(f"<th>{h}</th>" for h in head) + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>"
-
-        def ys(r, key):
-            return [row[key] for row in r["rows"]]
-
-        plots = ""
-        if base and gate and beta:
-            plots += "<h3>착용자가 낸 토크 · 걷기 (부호 있는 평균, 좌우 hip을 각자 위상으로 모음)</h3>"
-            plots += Svg.bins_line([("무보조 A", "#77766f", ys(base, "A"), False), ("보조 B · L1 ×0.5", "#d55b26", ys(base, "B"), False),
-                                    ("보조 B · 게이트 0.20", "#1f7a4d", ys(gate, "B"), False), ("보조 B · β 오라클", "#8b55ac", ys(beta, "B"), True)],
-                                   "τ_agent [N·m] · +굴곡 / −신전", (-100, 50), shade=(68, 92))
-            plots += "<h3>장치가 낸 토크 · 걷기</h3>"
-            plots += Svg.bins_line([("L1 ×0.5", "#d55b26", ys(base, "S"), False), ("게이트 0.20", "#1f7a4d", ys(gate, "S"), False), ("β 오라클", "#8b55ac", ys(beta, "S"), True)],
-                                   "τ_assist [N·m]", (-40, 40), shade=(68, 92))
-            plots += "<h3>hip 각속도·각가속도 · 무보조 A · 걷기</h3>"
-            plots += Svg.bins_line([("각속도 ×10 [rad/s]", "#2275ce", [10 * v for v in ys(base, "vel")], False), ("각가속도 [rad/s²]", "#c9a227", ys(base, "acc"), False)],
-                                   "각속도 ×10, 각가속도", (-60, 60), shade=(68, 92))
-            plots += "<h3>구간별 착용자 토크 RMS 변화 · 걷기</h3>"
-            plots += Svg.grouped_bars([base["rows"], mask["rows"], gate["rows"]] if mask else [base["rows"], gate["rows"]],
-                                      ["L1 ×0.5", "참조위상 70–90 % 차단", "게이트 0.20"] if mask else ["L1 ×0.5", "게이트 0.20"],
-                                      ["#d55b26", "#999", "#1f7a4d"] if mask else ["#d55b26", "#1f7a4d"])
-
-        def pct(r):
-            return f'{r["s"]["τ²"]:+.1f} %' if r else "—"
-
-        ga = gate["gate"] if gate else None
-        gate_text = ""
-        if ga:
-            gate_text = (f"게이트가 켜진 표본은 전체의 {ga['on_pct']:.1f} %이고, 그 표본의 참조 위상은 평균 {ga['on_phase_mean']:.0f} %, "
-                         f"66–92 % 안에 {ga['in_66_92_pct']:.0f} %, 70–90 % 안에 {ga['in_70_90_pct']:.0f} %가 들어간다. "
-                         f"창 시작은 참조 위상 {ga['start_phase'][0]:.1f} ± {ga['start_phase'][1]:.1f} %, 끝은 {ga['end_phase'][0]:.1f} ± {ga['end_phase'][1]:.1f} %다.")
-
-        conclusion = f"""
-<p><strong>걷기에서 L1 ×0.5가 착용자를 방해하는 구간은 68–92 %(유각 중·후반) 하나다.</strong> 이 구간에서 착용자 hip 토크는 거의 0인데
-(다리 감속은 무릎 결합·중력이 낸다) 정책은 −15~−20 N·m 신전 브레이크를 걸고, 착용자는 같은 크기의 굴곡으로 맞선다(상쇄비 c ≈ 1).
-20–40 %는 손해 구간이 아니다 — 보조를 끊어도 전체 수치가 변하지 않는다({pct(rec.get('L1 ×0.5 + 참조위상 20–30 % 차단 · 걷기'))}, {pct(rec.get('L1 ×0.5 + 참조위상 20–40 % 차단 · 걷기'))}).</p>
-<p><strong>관절각만 보는 게이트로 이 브레이크를 막으면 걷기 {pct(base)} → {pct(gate)}</strong>
-(참조 위상을 아는 차단 {pct(mask)}, β 오라클 상한 {pct(beta)}). 달리기는 {pct(base_r)} → {pct(gate_r)} (참조 위상 차단 {pct(mask_r)}).</p>
-<p>다른 난수 초기값(seed 7)으로 다시 돌려도 같다: 걷기 {pct(rec.get('L1 ×0.5 · 걷기 · seed 7'))} → {pct(rec.get('L1 ×0.5 + 유각 게이트 0.20 · 걷기 · seed 7'))},
-달리기 {pct(rec.get('L1 ×0.5 · 달리기 · seed 7'))} → {pct(rec.get('L1 ×0.5 + 유각 게이트 0.20 · 달리기 · seed 7'))}.
-게이트 비율 0.15 / 0.20 / 0.25는 걷기 {pct(rec.get('L1 ×0.5 + 유각 게이트 0.15 · 걷기'))} / {pct(gate)} / {pct(rec.get('L1 ×0.5 + 유각 게이트 0.25 · 걷기'))} —
-0.20과 0.25의 차이는 재실행 산포 안이다.</p>
-<p class="report-limit">가상 착용자 W1 한 모델, 걷기·달리기 각 한 클립의 결과다. 게이트 비율 0.20은 W1 걷기의 위상표에서 정한 값이며 여러 착용자·속도에서 검증하지 않았다.</p>
-"""
-
-        cause = ""
-        if base:
-            cause += "<h3>걷기 · L1 ×0.5 · 60–100 %</h3>" + cls.phase_table(base["rows"], 60, 100)
-            cause += "<h3>걷기 · L1 ×0.5 · 12–40 %</h3>" + cls.phase_table(base["rows"], 12, 40)
-        if gate:
-            cause += "<h3>걷기 · 게이트 0.20 · 60–100 % (마지막 열 = 게이트가 켜진 표본 비율)</h3>" + cls.phase_table(gate["rows"], 60, 100, gate=True)
-        if base_r and gate_r:
-            cause += "<h3>달리기 · L1 ×0.5 · 76–100 %</h3>" + cls.phase_table(base_r["rows"], 76, 100)
-            cause += "<h3>달리기 · 게이트 0.20 · 76–100 %</h3>" + cls.phase_table(gate_r["rows"], 76, 100, gate=True)
-
-        sources = "".join(f"<li>{html.escape(k)} — <code>{html.escape(str(v['run']))}</code></li>" for k, v in rec.items())
-
-        page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>걷기 유각 브레이크 분석과 관절각 게이트</title>
-<style>body{{font:16px/1.7 system-ui,sans-serif;margin:30px auto;max-width:1180px;padding:0 20px;color:#1c2d3d}}table{{border-collapse:collapse;font-size:13px}}th,td{{border:1px solid #d8e0e7;padding:4px 8px;text-align:right;white-space:nowrap}}th:first-child{{text-align:left}}thead th{{background:#eef2f6}}.scroll{{overflow-x:auto}}.legend{{font-size:13px;margin:6px 0}}svg{{width:100%;height:auto;background:white;border:1px solid #e3e7ec;margin:6px 0 18px}}h2{{margin-top:34px}}code{{font-size:12px}}.report-limit{{color:#526474;font-size:14px}}</style></head><body>
-<p>AI-SBC · 원인 진단과 수정 · 2026-10-14</p>
-<h1>걷기 유각 브레이크 분석과 관절각 게이트</h1>
-<p>L1 ×0.5가 걷기에서 착용자를 방해하는 구간을 4 % 단위로 나눠 원인을 찾고, 관절각만으로 그 구간의 신전 보조를 끊는 게이트를 만들어 같은 조건에서 비교했다.</p>
-<h2>결론</h2>{conclusion}
-<h2>조건</h2>
-<p>가상 착용자 W1 + 각도 예측기 H1 + L1(출력 0.5배, 한계 ±20 N·m), 10 ms 제어, 40초, seed 42, 영점은 착용자 기준. 무보조 A와 보조 B를 같은 초기 상태에서 함께 돌린다.
-τ_agent는 A·B 모두 착용자(W1)가 낸 토크(tau_pd + tau_ff), τ_assist는 장치가 보탠 토크다. 위상 0 %는 참조 mocap의 그 다리 최대 굴곡이며 발 착지 검출이 아니다.
-"참조위상 차단"은 mocap 위상표를 아는 특권 진단이고, "유각 게이트"는 제어기 안에서 hip 관절각만으로 창을 잡는 배포 가능한 규칙이다
-(관절각이 지수이동평균 중간값을 굴곡 방향으로 지나는 순간부터, 같은 hip의 직전 교차 간격 × 비율 동안 신전 보조를 0으로).
-상쇄비 c = −(B − A)/보조: 1이면 착용자가 보조를 전부 되받아 총 토크가 무보조와 같다.</p>
-<h2>전체 수치</h2>{summary_table}
-<p>τ² 기여 = 그 구간이 전체 τ² 평균 변화에 보탠 양 [(N·m)²]. 걷기 무보조 τ² 평균은 약 1,490, 달리기는 약 3,130이다.</p>
-<h2>위상별 그래프 · 걷기</h2>{plots}
-<p>음영 = 68–92 %. 무보조에서 이 구간의 각가속도는 −25 rad/s² 안팎인데 착용자 토크는 ±10 N·m 안이다 — 감속을 hip이 내지 않는다는 직접 증거다.</p>
-<h2>구간별 수치</h2>{cause}
-<h2>게이트 창이 실제로 걸린 위치</h2><p>{gate_text or "게이트 기록 없음."}</p>
-<p>리셋 뒤 주기가 잡히기까지(약 2초) 게이트는 꺼져 있다. 창 시작은 관절각 중간값 교차(≈ 69 %), 끝은 직전 주기 × 0.20 뒤다.</p>
-<h2>한계</h2>
-<ul><li>한 착용자·한 클립·한 seed. 재실행 산포는 L1 ×0.5 기준으로 걷기 τ² ±0.7 %p 정도였다(2026-10-13 재평가).</li>
-<li>게이트는 걷기의 "자유 감속" 구간을 주기 비율로 자른다. 보행 종류·속도가 바뀌면 비율이 달라질 수 있다. 달리기 결과는 같은 0.20으로만 확인했다.</li>
-<li>20–40 %의 추가 이득은 β 오라클도 작다(비례 보조여도 그 구간 토크가 작다). 남은 격차는 착지 0–12 %의 크기(비례성)다.</li></ul>
-<h2>원본 기록</h2><ul>{sources}</ul>
-</body></html>"""
-        Path(out).write_text(page, encoding="utf-8")
-        print(f"saved {out} ({len(rec)} runs)")
-        for k, r in rec.items():
-            print(f"  {k}: τ² {r['s']['τ²']:+.1f} %, 68–92 {r['harm_68_92']:+.1f}, 20–40 {r['harm_20_40']:+.1f}, worst {r['worst']:+.1f}")
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -1464,10 +1013,6 @@ def main(argv=None):
     s.add_argument("--notes", default="")
     s.add_argument("--out", default="docs/report_ckpt.html")
 
-    s = sub.add_parser("torque", help="시퀀스 comparison.json의 phase/time 토크 보고서")
-    s.add_argument("--manifest", default="results/llp_wide100_sequence/comparison.json")
-    s.add_argument("--out", default="docs/ai_sbc/l6_l7_torque_report.html")
-
     s = sub.add_parser("finetune", help="추가학습 전후 비교: 보행 진행률 10 % 구간별 토크 실효값 감소량 + 전체 지표")
     s.add_argument("--walk", nargs="+", required=True, help="이름=glob (걷기 실행; glob이 seed 여러 개에 맞으면 평균)")
     s.add_argument("--run", nargs="*", default=[], help="이름=glob (달리기 실행)")
@@ -1483,22 +1028,13 @@ def main(argv=None):
     s.add_argument("--figures", default=None, help="발표 자료용 그림 폴더: 걷기·달리기 구간별 감소량 막대·꺾은선을 큰 검은 글자의 .svg/.png로 저장")
     s.add_argument("--out", default="docs/ai_sbc/finetune_report.html")
 
-    s = sub.add_parser("swing-gate", help="걷기 유각 브레이크 분석과 관절각 게이트")
-    s.add_argument("--out", default="docs/ai_sbc/walking_swing_gate.html")
-    s.add_argument("--baseline-dir", default="results/pendulum_reeval_20261013/evaluations")
-    s.add_argument("--probe-dir", default="results/walk_phase_analysis_20261014/evaluations")
-
     args = p.parse_args(argv)
     if args.command == "comparison":
         ComparisonReport.build(args)
     elif args.command == "checkpoint":
         CheckpointReport.build(args)
-    elif args.command == "torque":
-        TorqueReport.build(args.manifest, args.out)
-    elif args.command == "finetune":
-        FinetuneReport.build(args)
     else:
-        SwingGateReport.build(args.out, args.baseline_dir, args.probe_dir)
+        FinetuneReport.build(args)
 
 
 if __name__ == "__main__":

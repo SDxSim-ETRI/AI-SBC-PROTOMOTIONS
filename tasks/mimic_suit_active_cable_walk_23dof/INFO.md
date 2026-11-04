@@ -85,18 +85,13 @@ tasks/mimic_suit_active_cable_walk_23dof/
 ├── output_isaaclab_mixed/                 ← IsaacLab 혼합 지형 계열 (train_isaaclab_mixed.sh)
 │   └── mixed_slope13_discrete15/          ←   smooth_slope 40% + discrete 40% + flat 20%
 │
-├── zarr_data/                             ← zarr 에피소드 수집 결과
-│   └── {terrain_tag}/
-│       └── {terrain_tag}-{timestamp}.zarr
-│
-├── infer_maniflow_newton.{py,sh}          ← ManiFlow 추정기 관찰(passive) inference — 제어에 영향 없음
-├── compare_maniflow_control_newton.{py,sh}←   ManiFlow 토크를 실제 제어에 사용하는 A/B 비교
-│                                              (Agent A=순수 RL 고스트, Agent B=ManiFlow+RL 메시)
-├── MANIFLOW_INFERENCE.md                  ←   두 스크립트 실행법·주의사항 문서 (GUI/녹화 포함)
-├── MANIFLOW_CONTROL_ANALYSIS.md           ←   예측 완벽↔제어 낙상 괴리 분석 메모 (2026-07-10)
-├── maniflow_infer_results/                ←   passive inference 결과 (gitignore)
-└── maniflow_control_results/              ←   A/B 비교 결과 (gitignore)
+└── zarr_data/                             ← zarr 에피소드 수집 결과
+    └── {terrain_tag}/
+        └── {terrain_tag}-{timestamp}.zarr
 ```
+
+ManiFlow 고관절 토크 예측기 실험(추론·제어 A/B·DAgger 수집, 2026-07~08)의 스크립트·문서·결과는
+2026-11-04에 모델 가중치를 지우면서 `results/hip_torque_estimator_20260710/`로 옮겼다.
 
 각 `output_*/하위폴더/`에는 `config.yaml`이 있어 학습 파라미터를 기록.  
 `-in <하위폴더>` 옵션으로 해당 config.yaml을 읽어 학습 실행.

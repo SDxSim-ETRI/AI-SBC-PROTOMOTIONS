@@ -75,7 +75,7 @@ class AssistEnvConfig(EnvConfig):
     # Route FF through the built-in actuator so its effort limit applies to the
     # complete human PD+FF torque. False preserves historical external-FF runs.
     human_feedforward_inside_pd: bool = False
-    # L11: fixed per-environment mixture of position-PD and velocity-FF wearers.
+    # Fixed per-environment mixture of position-PD and velocity-FF wearers.
     # Zero preserves the old FF path without consuming an extra random draw.
     human_feedforward_disable_prob: float = 0.0
 
@@ -100,7 +100,7 @@ class AssistEnvConfig(EnvConfig):
     hip_inertia_com: float = 0.1316  # 대퇴 질량중심 관성 (hip_pendulum.xml, MuJoCo 계산)
     hip_inertia_parallel: float = 0.2863  # m·d² 평행축 항 (질량 배율에 비례)
 
-    # ---- L2 (2026-09-29) ----
+    # ---- 질량·보조 한계 랜덤화 (2026-09-29) ----
     # 질량을 관성 배율 r과 함께 r^p 로 키운다 (p=0이면 v4처럼 질량 고정). v4는 관성만 ×1~25라 중력/관성 비
     # m·g·d/I 가 실제 다리(≈15 s⁻²)의 1/4까지 떨어졌고, 그래서 진자 다리는 유각 말기에 스스로 감속하지 않아
     # 정책이 "감속 = 브레이크 도움"을 배웠다(사람 범위 착용자 W1에서 유각 말기 오방향의 원인). p=0.43이면
@@ -389,7 +389,7 @@ class AssistEnv(BaseEnv):
         action_dict = self._process_action(action, self.context)
         self.requested_assist_torque = action_dict["processed_action"].clone()
         lim = getattr(self, "_assist_limit", None)
-        if lim is not None:  # env마다 다른 한계 (L2)
+        if lim is not None:  # env마다 다른 한계
             tau_assist = torch.maximum(torch.minimum(action_dict["processed_action"], lim), -lim)
         else:
             tau_assist = torch.clamp(

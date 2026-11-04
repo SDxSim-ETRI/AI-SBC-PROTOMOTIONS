@@ -37,13 +37,14 @@ Retained weights live in `checkpoints/<version>/` (Git LFS) with an `INFO.md` ea
 - L18 is the default LLP: Temporal Transformer + FPO++ trained from scratch on walk+run in the full-body simulation,
   `checkpoints/L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt`. Other retained LLPs: L17 (MLP+PPO from scratch),
   L16 (L15 walk+run fine-tune), L15_ft walk/run, L15 (pendulum, 20 N·m). All use 20·tanh, ±20 N·m, output scale 1, 10 ms control.
-- L1 and every LLP trained before L15 (L1–L14, G0–G4, F1/F2, R0/R1, motion_leg) were deleted on 2026-11-04 together
-  with the old cross-attention H1. Do not use or compare against them; their reports are in `docs/ai_sbc/archive/reports/`.
+- Every LLP trained before L15 was deleted on 2026-11-04 together with the old cross-attention H1, and the code that
+  only served them (leg-shared LLP, swing-brake gate, baseline comparison reports, pendulum per-leg study, July hip-torque
+  estimator) moved to `results/<study>/scripts/retired_20261104/`. Do not use, compare against or resurrect them;
+  their reports are in `docs/ai_sbc/archive/reports/`.
 - W1: frozen suit wearer, `checkpoints/W1_wearer_human/last.ckpt`; one model follows both walk and run.
 - Current priority and open checks: follow HANDOFF. The mid-October pendulum-only plan (archived at
   `docs/ai_sbc/archive/20261104/pendulum_pretrain_discussion.md`) predates the finding that full-body training from scratch beats pendulum pretraining.
-- The hip-angle swing-brake gate (`--swing-gate`, `AssistController.swing_gate_fraction`, off by default) is a diagnostic
-  option only: hand-made phase rules are excluded from deployment.
+- Hand-made phase rules (gates, fixed output scales) are excluded from the controller; improve the LLP by training instead.
 - `Axxx` denotes the source motion performer's `actor_uid`, not an experiment or model version.
 - New native walking clips still need unassisted wearer tracking validation. Follow HANDOFF before resuming training.
 - Use `protomotions/maniflow/` for simulation integration; never import external `maniflow` directly.
@@ -104,8 +105,8 @@ These files carry the design docs; read the relevant one before changing that ar
 - `protomotions/utils/simulator_imports.py` — IsaacGym/IsaacLab must be imported before torch.
 - `protomotions/assist/` — independent HLP + LLP controller, actor loading and skeleton features. `protomotions/simulator/newton/substep_hook.py` runs assistance inside the wearer step.
 - `protomotions/agents/fpo/` — FPO++ flow-policy agent (`FPO(PPO)`: CFM-loss ratio instead of log-prob ratio, ASPO clip, actor EMA baked into checkpoints with raw weights under `fpo_actor_raw`) and the `FlowActor` / `TemporalTransformer` models. Selected with `llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`; `LLPPolicy` evaluates flow actors through `act_deterministic`. On the pendulum (`assist_pendulum/mlp.py --policy mlp_fpo|tfm_fpo`) the default flow output scale 0.25 barely learns; `--fpo-actor-scale 4.0` learns but stays below L15 (2026-11-04 study).
-- `examples/experiments/assist_pendulum/` — `mlp.py` (one experiment file, `--recipe R0|L15|motion_leg`, default L15; `protomotions/tests/test_pendulum_recipes.py` pins the presets to the saved configs), `runtime.py` (`PendulumRuntime`: play/compare/check-env/abc), `evaluate.py`, `study.py`, `report.py`. Pendulum disturbances live in `protomotions/envs/control/assist_disturbance_control.py` (`DisturbedAssistTargetControl`).
-- `examples/experiments/assist_skeleton/` — `run_system.py` (`SystemRunner`), `analysis.py` (metric classes), `report.py` (HTML: comparison/checkpoint/torque/swing-gate), `evaluate.py` (motions/native-wearer/wearer), `plots.py`, `viz.py`, `llp_walk.py`, `tracker_human.py`. Closed studies keep their original scripts under `results/<study>/scripts/` with a `SNAPSHOT.md` pointing at snapshot commit `8058f3c`; do not resurrect them into `examples/`.
+- `examples/experiments/assist_pendulum/` — `mlp.py` (one experiment file, `--recipe L15`; `protomotions/tests/test_pendulum_recipes.py` pins it to the saved L15 config), `runtime.py` (`PendulumRuntime`: play/compare/check-env/abc), `evaluate.py` (paired/prepare-etri). Pendulum disturbances live in `protomotions/envs/control/assist_disturbance_control.py` (`DisturbedAssistTargetControl`).
+- `examples/experiments/assist_skeleton/` — `run_system.py` (`SystemRunner`), `analysis.py` (metric classes), `report.py` (HTML: comparison/checkpoint/finetune), `evaluate.py` (motions/native-wearer/wearer), `plots.py`, `viz.py`, `llp_walk.py`, `tracker_human.py`. Closed studies keep their original scripts under `results/<study>/scripts/` with a `SNAPSHOT.md` pointing at the snapshot commit (`8058f3c` for the 2026-10-26 consolidation, `e74e83e` for the 2026-11-04 retirement); do not resurrect them into `examples/`.
 
 ## Gotchas
 

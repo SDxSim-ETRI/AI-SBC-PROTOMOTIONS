@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""L13: independent, synchronized unassisted whole-body reference for LLP learning.
+"""Independent, synchronized unassisted whole-body reference for LLP learning.
 
 Reference state is reward-only. Neither actor inputs nor policy size changes.
 Both wearers keep their own frozen tracker and real HLP; common random numbers
@@ -97,7 +97,7 @@ class PairedSkeletonAssistEnv(SkeletonAssistEnv):
     def __init__(self, config, robot_config, device, terrain, simulator,
                  scene_lib, motion_lib, *args, **kwargs):
         if not simulator.headless or not terrain.is_flat() or scene_lib.num_scenes():
-            raise ValueError("L13 pilot supports headless flat walking without scenes")
+            raise ValueError("The paired whole-body env supports headless flat walking without scenes")
         self.reference_env = None
         ref_config = copy.deepcopy(config)
         ref_config._target_ = "protomotions.envs.base_env.skeleton_assist_env.SkeletonAssistEnv"

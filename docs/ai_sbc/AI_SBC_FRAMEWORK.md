@@ -125,7 +125,7 @@ cross-attention에 둔다(ManiFlow `obs_routing=swap`). 관측을 cross-attentio
 
 기본 LLP는 L18(Temporal Transformer + FPO++, 전신 시뮬레이션에서 걷기·달리기를 처음부터 학습)이다.
 보관한 LLP는 L15(진자, 20 N·m)·L15_ft·L16(L15에서 이어서 학습)·L17(MLP+PPO 처음부터)·L18이며,
-모두 20·tanh 출력·한계 ±20 N·m를 출력 배율 1과 10 ms 제어 주기로 쓴다. L15 이전 모델(L1–L14 등)은 2026-11-04에 지웠다.
+모두 20·tanh 출력·한계 ±20 N·m를 출력 배율 1과 10 ms 제어 주기로 쓴다. L15 이전 모델은 2026-11-04에 지웠다.
 관측은 고관절 상태·히스토리·예측이며, 학습용 무보조 정답을 실행 입력으로 쓰지 않는다.
 성능과 적용 한계는 실험 요약·버전표를 참조한다.
 
@@ -165,14 +165,11 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/action/action_functions.py` | `normalized_torque_action` (tanh × torque_scale) |
 | `protomotions/robot_configs/hip_pendulum.py` | 로봇 정의 (factory.py에 등록) + `protomotions/data/assets/mjcf/hip_pendulum.xml` |
 | `protomotions/simulator/newton/fixed_base.py` | `FixedBaseNewtonSimulator` — 고정 베이스용 root write/velocity 무해화 |
-| `examples/experiments/assist_pendulum/mlp.py` | 진자 LLP 레시피 하나. `--recipe R0`(랜덤화 진자 + 토크 경로 수정, 40 N·m), `L15`(R0 + 20 N·m, 기본), `motion_leg`(L15 + SEED 동작 의도·단일 관절). `Recipe` 사전이 chunk 파라미터·보상 weight·PPO 구조를 겹쳐 쌓고, `protomotions/tests/test_pendulum_recipes.py`가 R0/L15/A0D0 `resolved_configs.pt`와 필드 단위로 일치하는지 검사 |
+| `examples/experiments/assist_pendulum/mlp.py` | 진자 LLP 레시피 `--recipe L15`(랜덤화 진자 + 토크 경로 수정 + 20 N·m). env 설정 함수가 chunk 파라미터·보상 weight·PPO 구조를 차례로 쌓고, `protomotions/tests/test_pendulum_recipes.py`가 L15 `resolved_configs.pt`와 필드 단위로 일치하는지 검사 |
 | `protomotions/envs/control/assist_disturbance_control.py` | `DisturbedAssistTargetControl` — 랜덤화 하중·수동 감쇠·구조화 사건·위상 사건·PD/FF 목표 유지(옛 pendulum_research/general control을 흡수, 새 항목은 기본 꺼짐). `protomotions/tests/test_pendulum_disturbance_events.py`가 병합 전 결과와 일치하는지 검사 |
 | `examples/experiments/assist_pendulum/runtime.py` | `PendulumRuntime` — ckpt/실험 파일에서 env+agent 재구성, 기록 rollout(lazy init 강제), paired 비교, 시각화(θ_g 고스트/토크 화살표), env 점검, A/B/C 평가(`abc`: 보조 없음 / 에뮬 chunk / 실 ManiFlow chunk) |
-| `examples/experiments/assist_pendulum/evaluate.py` | `PairedPendulumEvaluation`(고정 코호트 쌍 평가·실제 H1 예측), `ChunkDiagnosis`(학습 때 예측 신호 vs 실제 H1), `TrainingDistributionAudit`, `EtriEvalData`(ETRI 13동작 평가 데이터 준비) |
-| `protomotions/agents/common/shared_joint_mlp.py` | 외부 관측 형식은 그대로 두고 다리별 입력과 출력을 분리하는 공유 가중치 actor (`motion_leg` 단일 관절 학습에 사용) |
-| `examples/experiments/assist_pendulum/study.py` | `MotionLegStudy` — 20 N·m 단일 관절 연구의 준비·학습 lane·평가·진단·검증 순차 실행(소스 해시 고정, 재시도). 닫힌 연구 폴더가 기본값이므로 새 실행은 `--study results/llp20_motion_<date>` |
-| `examples/experiments/assist_pendulum/report.py` | `MotionLegReport` — 위 연구의 HTML 보고서 (스켈레톤 `analysis.py`/`report.py`를 importlib로 불러 씀) |
-| `results/<study>/scripts/` | 닫힌 진자 연구(L2–L12, 23 N·m 일반화, 적응, 한계 제어, F1/F2, R1)의 당시 실행 스크립트 보관. `SNAPSHOT.md`가 통합 전 스냅샷 커밋 `8058f3c`을 가리킨다 — 재현은 그 커밋의 worktree에서 |
+| `examples/experiments/assist_pendulum/evaluate.py` | `PairedPendulumEvaluation`(고정 코호트 쌍 평가·실제 H1 예측), `EtriEvalData`(ETRI 13동작 평가 데이터 준비) |
+| `results/<study>/scripts/` | 닫힌 연구의 당시 실행 스크립트 보관. `SNAPSHOT.md`가 스냅샷 커밋을 가리킨다: 2026-10-26 통합 전 `8058f3c`, 2026-11-04 L1 계보 정리(다리별 공유 LLP·유각 게이트·L1 기준 비교 보고서·진자 다리별 연구·7월 토크 예측기, `retired_20261104/`) `e74e83e`. 재현은 그 커밋의 worktree에서 |
 
 **Phase C 결합 계층** (2026-09-08 신설 — 위 파일들은 **무변경**, 전부 상속·신규):
 
@@ -196,7 +193,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/assist/verify_controller.py` | 진자 env ↔ 제어기 등가성 검증 (chunk 주입 / 링버퍼 / RNG 페어링) |
 | `protomotions/simulator/newton/substep_hook.py` | `SubstepHookMixin` + `SubstepHook{,FixedBase}NewtonSimulator` — 서브스텝 콜백, 창 단위 PD 토크 평균, fixed-base 루트 z 오프셋 |
 | `examples/experiments/assist_skeleton/run_system.py` | 폐루프 러너 (A 무보조 / B 보조 paired; `--human mocap_pd|tracker`) |
-| `examples/experiments/assist_skeleton/{analysis,report,evaluate,plots,viz}.py` | 지표 클래스(`ObjectiveComparison`, `WalkingPhaseDigest`, `SwingGateBins` 등) / HTML 보고서(`report.py comparison|checkpoint|torque|swing-gate`) / 모션 일괄·착용자 평가(`evaluate.py motions|native-wearer|wearer`) / 그림(`plots.py`) / 뷰어 고스트·토크 화살표 |
+| `examples/experiments/assist_skeleton/{analysis,report,evaluate,plots,viz}.py` | 지표 클래스(`ObjectiveComparison`, `WearerStats`, `TorqueAlignment`) / HTML 보고서(`report.py comparison|checkpoint|finetune`) / 모션 일괄·착용자 평가(`evaluate.py motions|native-wearer|wearer`) / 그림(`plots.py`) / 뷰어 고스트·토크 화살표 |
 | `examples/experiments/assist_skeleton/tracker_human.py`, `train_tracker_human.sh` | W1 착용자 tracker 학습 (옛 v30–v32 tracker 실행기는 `results/mimic_*/scripts/`에 보관) |
 | `protomotions/tests/test_assist_controller.py` | 특징량·interpolation 단위 테스트 (CPU) |
 | `protomotions/envs/base_env/skeleton_assist_env.py` | `SkeletonAssistEnv` — 보행 착용자(동결 tracker) 위 LLP 학습 env (action 2ch, τ_agent hip 계측) |
@@ -211,7 +208,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 |------|------|
 | `protomotions/envs/base_env/paired_skeleton_assist_env.py` | 독립 무보조 A / 보조 B 전신 시뮬레이션. 같은 초기 상태·모션·난수, paired 부담·동작 비악화 보상. A 정보는 actor에 넣지 않음 |
 | `protomotions/agents/ppo/assist_finetune.py` | actor만 전이, critic/optimizer 새 초기화. 진자 −굴곡 → 전신 +굴곡 좌표를 정규화·첫층·출력층까지 등가 변환. 전신 소스 +굴곡은 그대로 복사 |
-| `protomotions/agents/fpo/` (2026-11-02) | FPO++(flow policy) agent. `config.py`(`FPOAgentConfig`·`FlowActorConfig`·`TemporalTransformerConfig`), `model.py`(`FlowActor`: context 한 번 → Euler N step 속도 MLP, `cfm_loss`; `TemporalTransformer`: 평탄 관측 137을 시간별 토큰 29개로 되돌려 self-attention 뒤 현재 토큰 읽기), `agent.py`(`FPO(PPO)`: actor 손실 = CFM 손실 비율 exp(L_old − L_new)·ASPO clip 0.05, actor EMA를 checkpoint actor에 구워 넣고 원 가중치는 `fpo_actor_raw`). `llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`으로 쓰고, `LLPPolicy`는 `act_deterministic`(초기 잡음 0)으로 평가. `protomotions/tests/test_fpo_agent.py`. 진자 학습은 `examples/experiments/assist_pendulum/mlp.py --recipe R0 --assist-limit 20 --policy mlp_fpo\|tfm_fpo`(같은 `recipe.py`); 기본 출력 배율 0.25는 진자에서 거의 학습되지 않아 `--fpo-actor-scale 4.0`이 필요하고 그래도 L15에 못 미친다(2026-11-04, `docs/ai_sbc/261103_fpo_pendulum/`) |
+| `protomotions/agents/fpo/` (2026-11-02) | FPO++(flow policy) agent. `config.py`(`FPOAgentConfig`·`FlowActorConfig`·`TemporalTransformerConfig`), `model.py`(`FlowActor`: context 한 번 → Euler N step 속도 MLP, `cfm_loss`; `TemporalTransformer`: 평탄 관측 137을 시간별 토큰 29개로 되돌려 self-attention 뒤 현재 토큰 읽기), `agent.py`(`FPO(PPO)`: actor 손실 = CFM 손실 비율 exp(L_old − L_new)·ASPO clip 0.05, actor EMA를 checkpoint actor에 구워 넣고 원 가중치는 `fpo_actor_raw`). `llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`으로 쓰고, `LLPPolicy`는 `act_deterministic`(초기 잡음 0)으로 평가. `protomotions/tests/test_fpo_agent.py`. 진자 학습은 `examples/experiments/assist_pendulum/mlp.py --recipe L15 --policy mlp_fpo\|tfm_fpo`(같은 `recipe.py`); 기본 출력 배율 0.25는 진자에서 거의 학습되지 않아 `--fpo-actor-scale 4.0`이 필요하고 그래도 L15에 못 미친다(2026-11-04, `docs/ai_sbc/261103_fpo_pendulum/`) |
 | `results/llp_L13_fullbody_walk_20261011/scripts/` (보관) | `llp_walk_finetune.py`(L13: W1/실제 HLP 동결, 137차원 actor, 100 Hz, gain 1 / 최종 ±100 N·m), `llp_walk_finetune_relative.py`(L13R 상대 국소 비용), `llp_walk_tempo.py`(L14 .90/1/1.10 시간배율), `verify_walk_finetune.py`, `run_walk_{finetune,relative,tempo}_sequence.py`, `validate_walk_finetune.py`. 2026-10-26 닫힌 연구로 보관; 재현은 `SNAPSHOT.md`의 스냅샷 커밋에서 |
 
 현재 paired 전신 env는 headless / flat / scene 없음만 지원한다. 두 env가 contact
@@ -226,7 +223,6 @@ label을 각각 smoothing하므로 motion library는 독립 사본이어야 한�
 | 파일 | 역할 | 재사용성 |
 |------|------|----------|
 | `loader.py` | maniflow 패키지 경로 해석(MANIFLOW_ROOT) + workspace ckpt→추론 정책 로드 | **범용** — flexion 모델도 그대로 사용 |
-| `torque_estimator.py` | 레거시 torque 모델용 온라인 래퍼 (88차원 obs 전용) | 히스토리/priming 패턴만 재사용 |
 | `hybrid_control.py` | `JointTorqueOverride` — per-env/DOF qfrc 주입 | **현역** (LLP가 사용) |
 | `channels.py` | hip DOF 채널 계약 (`hip_dof_indices()`) | skeleton 단계에서 재사용 |
 | `angle_estimator.py` | `ManiFlowAngleEstimator` — flexion 모델용 온라인 래퍼 (4ch 각도 obs → 2ch chunk, 영점 캘리브레이션·denoise 오버라이드 내장) | **HLP 실행기** (Phase C에서 결합) |

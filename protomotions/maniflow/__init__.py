@@ -28,9 +28,6 @@ Modules:
                        truth shared by collection, training, and inference.
     loader           — resolve/import the ``maniflow`` package and load
                        workspace checkpoints into inference-ready policies.
-    torque_estimator — closed-loop wrapper turning ProtoMotions
-                       ``RobotState`` into ManiFlow observations and hip
-                       torque predictions.
     angle_estimator  — AI-SBC HLP: online receding-horizon wrapper for the
                        hip-flexion angle prediction model (4ch angle obs →
                        2ch flexion chunk, with zero-offset calibration).
@@ -41,7 +38,7 @@ Modules:
                        subset of joints while the rest stay PD-driven.
     chunk_source     — AI-SBC Phase C: feed the HLP's real predictions into
                        the LLP chunk buffer (own ring buffer at policy rate,
-                       resampled onto the model's 25 ms grid). Equivalence
+                       resampled onto the model's frame grid). Equivalence
                        check: ``python -m
                        protomotions.maniflow.verify_chunk_source``.
 """
@@ -56,7 +53,6 @@ from protomotions.maniflow.loader import (  # noqa: F401
     ensure_maniflow_importable,
     load_maniflow_policy,
 )
-from protomotions.maniflow.torque_estimator import ManiFlowTorqueEstimator  # noqa: F401
 from protomotions.maniflow.angle_estimator import (  # noqa: F401
     FLEXION_ACTION_CHANNELS,
     FLEXION_OBS_CHANNELS,

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Actor-only L9 initialization with an exact change of hip coordinate signs."""
+"""Actor-only initialization from a pendulum LLP with an exact change of hip coordinate signs."""
 
 from dataclasses import dataclass
 from pathlib import Path

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""L13 policy transfer and paired objective invariants."""
+"""Pendulum-to-walk policy transfer and paired objective invariants."""
 
 import torch
 

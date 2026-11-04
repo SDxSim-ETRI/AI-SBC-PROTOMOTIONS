@@ -1,6 +1,6 @@
 # AI-SBC — 현재 상태와 다음 작업
 
-2026-11-04 가중치를 정리하고 기본 LLP를 L18(Transformer+FPO++)로 정했다. L1과 그 계보는 더 쓰지 않는다. 같은 날 Transformer+FPO++ 등 세 정책을 진자 학습에 적용한 비교도 끝냈다(진자에서는 L15를 넘지 못함). 이 파일에는 현재 판단만 쓴다. 지난 세션의 진행 상황을 덧붙이지 않는다. 정리 전 판본은 [archive/20261104/HANDOFF.md](archive/20261104/HANDOFF.md)에 있다.
+2026-11-04 가중치를 정리하고 기본 LLP를 L18(Transformer+FPO++)로 정했다. L15 이전 계보는 더 쓰지 않는다. 같은 날 Transformer+FPO++ 등 세 정책을 진자 학습에 적용한 비교도 끝냈다(진자에서는 L15를 넘지 못함). 이 파일에는 현재 판단만 쓴다. 지난 세션의 진행 상황을 덧붙이지 않는다. 정리 전 판본은 [archive/20261104/HANDOFF.md](archive/20261104/HANDOFF.md)에 있다.
 
 ## 2026-11-04 정리: 남긴 모델, 기본 조합, 인수인계
 
@@ -16,16 +16,17 @@
 | L15_ft | `L15_ft_mlp_ppo_walk/epoch_1200.ckpt`, `L15_ft_mlp_ppo_run/epoch_400.ckpt` — 동작별 추가학습 | −26.6 / —, — / −25.5 % |
 | L15 | `L15_mlp_ppo_pendulum/epoch_6000.ckpt` — 진자 학습 20 N·m | −18.0 / −21.8 % |
 
-- 지운 것: `results/`의 나머지 LLP checkpoint 903개(4.4 GB; L1–L14, G0–G4, F1/F2, R0/R1, 20 N·m 다리별 4종, 진자 FPO++, 남긴 run의 다른 epoch·`last.ckpt`)와 git의 `checkpoints/L1_llp_pendulum`·`llp_v{3,4,5,6,10}_*`, H1 외 ManiFlow checkpoint 21개(8.8 GB; 옛 H1 포함). 각 run의 설정·로그·평가 기록과 학습 자료(zarr)는 남겼다. 착용자 모델은 모두 남겼다.
-- L1을 없앤 코드: `run_system.py` 기본 LLP·H1과 출력 배율(항상 1), `verify_controller` 기본 모델(L15), 진자 레시피 `mlp.py --recipe R0|L15|motion_leg`(기본 L15; R0 토크 경로 이전 프리셋 삭제), H1 기본 경로를 `protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT` 하나로 모음. `test_pendulum_recipes.py`는 L15 설정을 고정한다. 제어기 일치 검증(L15 + H1 사본)은 세 부분 모두 정확히 일치했다.
-- L1 계보의 보고서 17개(2026-10-01 ~ 10-22)는 `docs/ai_sbc/archive/reports/`로 옮겼고 옛 주소에는 안내 페이지가 남는다. 요약·버전표·이 파일의 정리 전 판본은 `docs/ai_sbc/archive/20261104/`에 있다.
-- 인수인계: H1·L15–L18을 `checkpoints/`에 Git LFS로 올린다(쓰기·LFS 업로드 권한 확인, 커밋·push는 사용자 확인 뒤). 받는 쪽에는 ManiFlow 코드(`d9e536e` 이후)가 필요하다. 각 폴더의 `INFO.md`에 입출력·학습 조건·로드 방법이 있다.
+- 지운 것: `results/`의 나머지 LLP checkpoint 903개(4.4 GB; L15 이전 계보 전부, 진자 FPO++, 남긴 run의 다른 epoch·`last.ckpt`)와 git의 옛 LLP 폴더 6개, H1 외 ManiFlow checkpoint 21개(8.8 GB; 옛 H1 포함). 각 run의 설정·로그·평가 기록과 학습 자료(zarr)는 남겼다. 착용자 모델은 모두 남겼다.
+- 기본값: `run_system.py` 기본 LLP·H1과 출력 배율(항상 1), `verify_controller` 기본 모델(L15), 진자 레시피 `mlp.py --recipe L15`(유일한 프리셋), H1 기본 경로는 `protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT` 하나. `test_pendulum_recipes.py`는 L15 설정을 고정한다. 제어기 일치 검증(L15 + H1 사본)은 세 부분 모두 정확히 일치했고, ManiFlow 검증 2개도 인자 없이 H1을 검증한다(PASS).
+- 옛 계보에만 쓰던 코드를 뺐다: 한쪽 다리 모델을 양다리에 따로 돌리는 공유 LLP(`share_legs`·`SingleJointMLP`·`motion_leg` 레시피·진자 연구 실행기와 보고서), 제어기의 유각 브레이크 게이트, L1 출력 절반 기준 비교 보고서(`report.py torque|swing-gate`, `PhaseScreen` 등), 7월 고관절 토크 예측기(`torque_estimator.py`, `tasks/`의 추론·제어 비교·DAgger 스크립트). 원본은 각 연구의 `results/<연구>/scripts/retired_20261104/`(스냅샷 커밋 `e74e83e`)에 있다. 지금 LLP는 모두 actor 하나가 양다리 관측을 함께 받아 오른쪽·왼쪽 토크를 한 번에 낸다.
+- L15 이전 계보의 보고서 17개(2026-10-01 ~ 10-22)는 `docs/ai_sbc/archive/reports/`로 옮겼고 옛 주소에는 안내 페이지가 남는다. 요약·버전표·이 파일의 정리 전 판본은 `docs/ai_sbc/archive/20261104/`에 있다.
+- 인수인계: H1·L15–L18을 `checkpoints/`에 Git LFS로 올렸다(2026-11-04 push, LFS 파일 20개). 받는 쪽에는 ManiFlow 코드(`d9e536e` 이후)가 필요하다. 각 폴더의 `INFO.md`에 입출력·학습 조건·로드 방법이 있다.
 
 ## 진자 학습에 적용한 Temporal Transformer + FPO++ 대 MLP+PPO(L15) (2026-11-03 ~ 04, 새 H1)
 
-**전신 학습에서 비교한 세 정책(MLP+PPO, MLP+FPO++, Transformer+FPO++)을 L15와 같은 진자 학습 조건(R0 레시피, ±20 N·m, 4,096 환경 × 32 step, seed 0, 1,200 epoch 예산)에 적용해 W1 걷기·달리기로 전이 평가했다. 전신 학습과 같은 기본 설정(flow 출력 배율 0.25, actor lr 1e-4)의 FPO++ 두 모델은 진자에서 거의 학습되지 않았다(1,200 epoch 동안 W1 보조 RMS 1~2 N·m, τ² −0.6 ~ −1.4 %; 진자 환경 자체 평가도 같음). 학습률 3e-4·1e-3은 효과가 없고 출력 배율만 효과가 있어(200 epoch 진단, 배율 1·2·4·8) 배율 4.0으로 두 모델을 1,200 epoch 다시 학습했다. 평가 동작별 best checkpoint(1,200 epoch 이하)의 착용자 고관절 τ² 변화: 걷기 L15 −24.1 %(1,000 epoch) · Transformer+FPO++ 배율 4 −14.6 %(400) · MLP+FPO++ 배율 4 −11.0 %(1,000); 달리기 L15 −22.1 %(1,000) · Transformer+FPO++ 배율 4 −16.4 %(600) · MLP+FPO++ 배율 4 −11.3 %(1,200). 진자 학습에서는 FPO++가 L15에 못 미친다(전신 학습에서는 걷기에서 PPO보다 좋았음). 낙상 0.** [보고서: 설정 진단·그래프·영상·지연](261103_fpo_pendulum/report.html). 학습 seed 하나, 평가 seed 둘(설정 진단은 하나).
+**전신 학습에서 비교한 세 정책(MLP+PPO, MLP+FPO++, Transformer+FPO++)을 L15와 같은 진자 학습 조건(L15 레시피, ±20 N·m, 4,096 환경 × 32 step, seed 0, 1,200 epoch 예산)에 적용해 W1 걷기·달리기로 전이 평가했다. 전신 학습과 같은 기본 설정(flow 출력 배율 0.25, actor lr 1e-4)의 FPO++ 두 모델은 진자에서 거의 학습되지 않았다(1,200 epoch 동안 W1 보조 RMS 1~2 N·m, τ² −0.6 ~ −1.4 %; 진자 환경 자체 평가도 같음). 학습률 3e-4·1e-3은 효과가 없고 출력 배율만 효과가 있어(200 epoch 진단, 배율 1·2·4·8) 배율 4.0으로 두 모델을 1,200 epoch 다시 학습했다. 평가 동작별 best checkpoint(1,200 epoch 이하)의 착용자 고관절 τ² 변화: 걷기 L15 −24.1 %(1,000 epoch) · Transformer+FPO++ 배율 4 −14.6 %(400) · MLP+FPO++ 배율 4 −11.0 %(1,000); 달리기 L15 −22.1 %(1,000) · Transformer+FPO++ 배율 4 −16.4 %(600) · MLP+FPO++ 배율 4 −11.3 %(1,200). 진자 학습에서는 FPO++가 L15에 못 미친다(전신 학습에서는 걷기에서 PPO보다 좋았음). 낙상 0.** [보고서: 설정 진단·그래프·영상·지연](261103_fpo_pendulum/report.html). 학습 seed 하나, 평가 seed 둘(설정 진단은 하나).
 
-- 학습·평가: `examples/experiments/assist_pendulum/mlp.py --recipe R0 --assist-limit 20 --policy mlp_fpo|tfm_fpo [--fpo-actor-scale 4.0]`(FPO 설정은 전신 `llp_walk.py`와 공용 `protomotions/agents/fpo/recipe.py`), checkpoint 200 epoch마다, W1 + H1 40 s seed 42·7 배율 1. 기준선 L15는 2026-10-29 run의 500~6,000 epoch checkpoint를 같은 조건으로 평가했다(비교는 1,200 이하의 500·1,000 중 best; 전체로는 달리기 1,500 epoch −24.2 %가 best). run `results/llp_fpo_pend_{mlp,tfm}_20261103/`(기본 설정), `results/llp_fpo_pend_{mlp,tfm}_scale4_20261103/`(배율 4; 이 연구의 checkpoint는 2026-11-04에 모두 지움), 진단 `results/llp_fpo_pend_mlp_diag_*_20261103/`·`results/llp_fpo_pend_tfm_diag_scale4_20261103/`, 평가·스크립트 `results/llp_fpo_pendulum_20261103/`(`summary.json`, `latency.json`, `best_setting.json`).
+- 학습·평가: `examples/experiments/assist_pendulum/mlp.py --recipe L15 --policy mlp_fpo|tfm_fpo [--fpo-actor-scale 4.0]`(FPO 설정은 전신 `llp_walk.py`와 공용 `protomotions/agents/fpo/recipe.py`), checkpoint 200 epoch마다, W1 + H1 40 s seed 42·7 배율 1. 기준선 L15는 2026-10-29 run의 500~6,000 epoch checkpoint를 같은 조건으로 평가했다(비교는 1,200 이하의 500·1,000 중 best; 전체로는 달리기 1,500 epoch −24.2 %가 best). run `results/llp_fpo_pend_{mlp,tfm}_20261103/`(기본 설정), `results/llp_fpo_pend_{mlp,tfm}_scale4_20261103/`(배율 4; 이 연구의 checkpoint는 2026-11-04에 모두 지움), 진단 `results/llp_fpo_pend_mlp_diag_*_20261103/`·`results/llp_fpo_pend_tfm_diag_scale4_20261103/`, 평가·스크립트 `results/llp_fpo_pendulum_20261103/`(`summary.json`, `latency.json`, `best_setting.json`).
 - 기본 설정이 학습되지 않은 원인: 학습 rollout의 보조 토크(RMS ≈ 5 N·m)는 거의 탐색 잡음(초기 잡음 × 배율 0.25 → 20·tanh)이고 결정적 출력(초기 잡음 0에서 적분)은 0 근처에 머문다. TensorBoard에서 진자 FPO++ run은 actor gradient norm 0.15~0.8(clip 1.0에 거의 안 걸림)·비율 clip(0.05)에 걸린 비율 1 % 안팎, 전신 run은 gradient가 항상 clip되고 clip 비율 4~18 % → 신뢰영역이 아니라 작은 기울기가 병목. 진자 최적은 20 N·m 한계 근처(tanh 입력 ≥ 2~3)인데 배율 0.25로는 flow가 x₀를 8~12만큼 옮겨야 하고, 전신 학습의 최적(10 N·m 수준)은 가까웠다. 기본 설정 Transformer run은 1,000 epoch 뒤 gradient norm이 10²~10⁷로 튀었으나(clip이 막음) 결과는 그대로였다.
 - 설정 진단(MLP+FPO++ 200 epoch, 진자 paired 평가 legacy 128 env·W1 seed 42): lr 3e-4·1e-3 → W1 보조 0.3~0.8 N·m(효과 없음); 출력 배율 1.0 걷기/달리기 −4.0/−2.5 %, 2.0 −7.4/−2.6, 4.0 −7.8/−6.8(진자 −15.8 %, L15 500 epoch −14.7 수준), 8.0 진자 −18.4 %지만 W1 +2.1/+0.6(전이 깨짐; 거의 ±20 bang-bang). 배율 s는 20·tanh(s·x₀)의 s라 초기 토크 분포가 tanh 선형 구간(|토크| < 19)에 남는 비율이 97/73/42/22 %(s = 1/2/4/8)이고, 결정적 출력이 ±19에 닿는 데 필요한 x₀ 이동은 2.2/s다. Transformer+FPO++ 배율 4의 200 epoch 확인 run은 걷기 −13.8 %·달리기 −9.2 %(보조 8.3/13.2 N·m)로 같은 설정이 Transformer에도 듣는다.
 - 배율 4 본 학습의 추세(걷기 / 달리기, τ² %): Transformer+FPO++ 200 → 400 → 600 → 800 → 1,000 → 1,200 epoch −9.8 → −14.6 → −13.0 → −11.7 → −7.3 → −10.6 / −8.2 → −14.8 → −16.4 → −15.6 → −11.1 → −9.8; MLP+FPO++ −6.8 → −6.1 → −4.7 → −10.6 → −11.0 → −10.8 / −0.0 → −3.2 → −3.1 → −8.3 → −9.6 → −11.3. 두 모델 모두 보조 RMS 9 → 18~20 N·m, 최대출력 95% 이상 사용 시간비율 0 → 65~92 %로 출력이 한계 쪽으로 커지며(L15도 500 → 6,000 epoch에 0 → 77 %) Transformer는 정점 뒤 전이가 나빠진다. best의 최대출력 95% 이상 사용 시간비율: Transformer 배율 4 걷기 8 %·달리기 68 %, MLP 배율 4 77 / 92 %, L15 32 / 45 %.
@@ -79,10 +80,10 @@
 
 ## 20 N·m 진자 학습 L15와 예측기 토큰 자리 맞바꿈 (2026-10-29)
 
-- L15 = 진자 학습(`mlp.py --recipe L15` = R0 토크 경로 + 보조 한계 20 N·m, 4,096 환경·6,000 epoch·seed 0) → `checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt`. 최대출력 95% 이상 사용 시간비율(|보조 토크| ≥ 19 N·m인 시간의 비율) 76–84 %로 출력이 거의 항상 최대다. 새 H1에서 W1 걷기 −18.0 % · 달리기 −21.8 %. 이전 진자 모델들은 23–40 N·m로 학습했으므로 20 N·m로 학습한 현재 계보는 L15부터다.
+- L15 = 진자 학습(`mlp.py --recipe L15` = 토크 경로 수정 + 보조 한계 20 N·m, 4,096 환경·6,000 epoch·seed 0) → `checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt`. 최대출력 95% 이상 사용 시간비율(|보조 토크| ≥ 19 N·m인 시간의 비율) 76–84 %로 출력이 거의 항상 최대다. 새 H1에서 W1 걷기 −18.0 % · 달리기 −21.8 %. 이전 진자 모델들은 23–40 N·m로 학습했으므로 20 N·m로 학습한 현재 계보는 L15부터다.
 - 추가학습: `llp_walk.py --initial-actor-checkpoint <진자 ckpt> --exclude-motion-ids 1|0 --finetune-assist-limit 20` (정책의 관측 구성과 20·tanh 출력은 그대로 두고 actor 가중치만 이어받으며 critic·optimizer는 새로 시작한다. 보상은 같은 난수로 나란히 걷는 무보조 착용자 대비 고관절 토크 감소. 기록의 앞 20 s 안에서 8 s씩 잘라 학습, 256 환경·seed 13, 착용자 영점은 걷기·달리기 각각 측정값).
 - 예측기: DiT-X의 관측 토큰(4ch × 10)을 self-attention 열로, 노이즈 섞인 15프레임 action 토큰열을 cross-attention으로 보내고 출력을 위치 전용 15 query 토큰에서 읽는 구조(ManiFlow `obs_routing=swap`)를 옛 H1과 같은 데이터·12 epoch·seed로 학습해 ETRI 14동작 100 Hz에서 비교했다. denoise 1에서 평균 MAE 0.51° vs 0.56°, 지연 2.45 vs 2.20 ms. 정확도는 우열이 없지만 원래 구상한 구조이므로 **사용자 결정으로 이 모델을 H1로 채택했다.** 옛 H1(관측 cross-attention)의 가중치는 2026-11-04에 지웠다. 이 구조는 ManiFlow 저장소 커밋 `d9e536e`(`obs_routing`, `sample_as_context`)에 있다. 원본 `results/hlp_routing_swap_20261029/`, 채택 평가 `results/h1_swap_adoption_20261029/`.
-- 코드: `llp_walk.py` 추가학습 옵션, `report.py finetune`, 2026-10-14/15 진자 checkpoint 저장 설정을 읽기 위한 호환 모듈 `protomotions/envs/control/pendulum_research_control.py`. [보고서](261029_lim20_finetune/report.html).
+- 코드: `llp_walk.py` 추가학습 옵션, `report.py finetune`. [보고서](261029_lim20_finetune/report.html).
 
 ## 목표와 현재 위치
 
@@ -108,16 +109,17 @@
 | L18(Transformer+FPO++) 대 MLP+PPO | [결과](261102_fpo_transformer/report.html) · 원본 `results/llp_fpo_study_20261102/` |
 | L15_ft·L16·L17(처음부터 학습) | [결과](261029_L16_joint_finetune/report.html) · 원본 `results/llp_L16_study_20261029/` |
 | L15·H1 토큰 자리 맞바꿈 | [결과](261029_lim20_finetune/report.html) · 원본 `results/llp_lim20_finetune_20261029/`, `results/hlp_routing_swap_20261029/` |
-| 지난 L1 계보 (가중치 삭제) | [보관 보고서](reports.html#past) · 정리 전 [HANDOFF](archive/20261104/HANDOFF.md)·[버전표](archive/20261104/AI_SBC_VERSIONS.md)·[요약](archive/20261104/experiment_summary.html) |
+| L15 이전 계보 (가중치 삭제) | [보관 보고서](reports.html#past) · 정리 전 [HANDOFF](archive/20261104/HANDOFF.md)·[버전표](archive/20261104/AI_SBC_VERSIONS.md)·[요약](archive/20261104/experiment_summary.html) |
 | 코드 구조·관측 계약·운영 주의 | [AI_SBC_FRAMEWORK.md](AI_SBC_FRAMEWORK.md) |
 | 2026-10-26 코드 통합 이전 상태 | 스냅샷 커밋 `8058f3c`(`git worktree add ../AI-SBC-PROTOMOTIONS-8058f3c 8058f3c`). 닫힌 연구의 당시 스크립트는 `results/<study>/scripts/`(각 `SNAPSHOT.md`) |
+| 2026-11-04 옛 계보 코드 정리 이전 상태 | 스냅샷 커밋 `e74e83e`. 뺀 파일의 원본은 `results/<연구>/scripts/retired_20261104/` |
 | 새 보행 변환 / 무보조 평가 코드 | `data/scripts/retarget_soma23_to_suit.py` / `examples/experiments/assist_skeleton/evaluate.py native-wearer` |
 | 실제 보행 변환본 | `results/real_walk_retarget_20261012_224957/` |
 | 무보조 평가·참조 교체 실험 | `results/native_walk_validation_20261013/validation_summary.json` |
 
-진자는 `examples/experiments/assist_pendulum/{mlp,runtime,evaluate,study,report}.py`(`mlp.py --recipe R0|L15|motion_leg`, 기본 L15),
+진자는 `examples/experiments/assist_pendulum/{mlp,runtime,evaluate}.py`(`mlp.py --recipe L15`),
 스켈레톤은 `examples/experiments/assist_skeleton/{run_system,analysis,report,evaluate,plots,viz,llp_walk,tracker_human}.py`다.
-연구 외란 제어는 `DisturbedAssistTargetControl` 하나, 양다리 공유 LLP는 `LLPPolicy(share_legs=True)`다.
+연구 외란 제어는 `DisturbedAssistTargetControl` 하나다. LLP 추론은 `LLPPolicy`가 맡고, actor 하나가 양다리 관측을 함께 받아 토크 2개를 낸다.
 
 실행 Python은 `/home/bak/miniconda3/envs/sbc/bin/python`이다. Full access에서 GPU 계산과 Newton 평가를 완료했다.
 예전 접근 오류로 현재 실행을 막지 말고 실제 명령 결과를 확인한다. 남긴 모델·원본 결과는 보존한다.

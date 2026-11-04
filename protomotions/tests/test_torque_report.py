@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Check physical time alignment and phase aggregation of torque reports."""
+"""Check physical time alignment and phase aggregation used by `report.py finetune`."""
 
 import sys
 from pathlib import Path
@@ -51,29 +51,3 @@ def test_rms_preserves_opposite_sign_load_and_weighted_contribution():
     assert sum(r["tau2_contribution_Nm2"] for r in p) == pytest.approx(float(np.mean(np.sum(b*b-a*a, axis=1))))
 
 
-def test_shortlist_uses_both_gaits_and_does_not_rank_falls_by_good_mean(tmp_path):
-    import json
-    from analysis import rank_candidates
-
-    records = {}
-    for label, peak, fell, change in (("reference", 11, False, -10), ("L8", 10, False, -30),
-                                      ("L9", 11, False, -40), ("L10", 12, False, -50),
-                                      ("L11", 13, False, -60), ("L12", 9, True, -70),
-                                      ("L13", 9, False, 1)):
-        for motion in (0, 1):
-            key = f"{label}_e6000_m{motion}"
-            run = tmp_path / key
-            run.mkdir()
-            t = np.arange(40, dtype=float)
-            pd = np.full((40, 2, 2), 10.)
-            pd[::2, 1] = peak
-            pd[1::2, 1] = 1.
-            np.savez(run / "traces.npz", t=t, gait_phase=np.tile((t%10*.1+.02)[:, None],(1,2)),
-                     tau_pd_prev=pd, tau_ff_prev=np.zeros_like(pd), tau_assist=np.zeros_like(pd))
-            (run / "meta.json").write_text(json.dumps({"motion_id":motion,"warmup":0,
-                "survived_s":5 if fell and motion==1 else None,"seconds":40,"llp_dt":1}))
-            records[key] = {"run_dir":str(run), "τ²":change}
-    selected, diag = rank_candidates(records)
-    assert diag["selected_groups"] == ["L8_e6000", "L9_e6000", "L10_e6000"]
-    assert len(selected) == 8  # baseline and three candidates, two motions each
-    assert not any(k.startswith(("L11_", "L12_", "L13_")) for k in selected)

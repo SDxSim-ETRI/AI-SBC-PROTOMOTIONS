@@ -13,9 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""LLP 20 N·m 다리별·동작 의도 학습(2026-10-21) 구성 요소 단위 테스트.
+"""진자 env의 동작 의도 집단·실현 가능성 검사·관절 마스크 단위 테스트.
 
-    pytest protomotions/tests/test_llp_motion_leg.py
+`evaluate.py paired`의 동작 조건(seed_val·etri)이 쓰는 의도 집단과, 보상·종료 항의 관절 마스크를 확인한다.
+
+    pytest protomotions/tests/test_motion_intent_pools.py
 """
 
 from types import SimpleNamespace
@@ -24,10 +26,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from tensordict import TensorDict
 
-from protomotions.agents.common.config import MLPLayerConfig
-from protomotions.agents.common.shared_joint_mlp import SingleJointMLP, SingleJointMLPConfig
 from protomotions.envs.control.assist_disturbance_control import (
     DisturbedAssistTargetControl,
     DisturbedAssistTargetControlConfig,
@@ -191,21 +190,3 @@ def test_joint_masks_restrict_rewards_and_terminations():
     assert compute_dof_vel_failure_term(vel, 25.0).item()
 
 
-@pytest.mark.parametrize("joint", [0, 1])
-def test_single_joint_actor_reads_only_its_joint(joint):
-    cfg = SingleJointMLPConfig(num_out=2, normalize_obs=True, joint_index=joint,
-                               in_keys=["assist_proprio", "assist_target", "previous_actions"],
-                               out_keys=["mu"], layers=[MLPLayerConfig(units=16)])
-    model = SingleJointMLP(cfg).eval()
-    obs = TensorDict({"assist_proprio": torch.randn(4, 104),
-                      "assist_target": torch.randn(4, 13),
-                      "previous_actions": torch.randn(4, 20)}, batch_size=[4])
-    mu = model(obs.clone())["mu"]
-    assert torch.all(mu[:, 1 - joint] == 0)
-    changed = obs.clone()
-    for key in cfg.in_keys:
-        stop = -1 if key == "assist_target" else None
-        changed[key][..., :stop][..., 1 - joint::2] += 5.0
-    torch.testing.assert_close(model(changed)["mu"], mu, rtol=0, atol=0)
-    model(obs.clone())["mu"].sum().backward()
-    assert all(p.grad is not None for p in model.parameters())

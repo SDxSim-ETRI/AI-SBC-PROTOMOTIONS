@@ -17,9 +17,8 @@
 
 BONES-SEED locomotion으로 학습된 flexion 예측 모델(ManiFlow lowdim,
 run: ``...locomotion-flexion40-run01_seed42``)을 시뮬레이션/실기기 루프 안에서
-receding-horizon으로 돌리기 위한 래퍼. ``ManiFlowTorqueEstimator``와 같은
-history 관리 구조를 쓰되, 관측이 ``RobotState``가 아니라 **각도 4채널 벡터**라는
-점이 다르다 (진자 env·skeleton env·실기기 IMU가 각자 방식으로 이 4ch를 구성).
+receding-horizon으로 돌리기 위한 래퍼. 관측은 ``RobotState``가 아니라 **각도 4채널 벡터**다
+(진자 env·skeleton env·실기기 IMU가 각자 방식으로 이 4ch를 구성).
 
 관측/출력 계약 (flexion40 모델, ``docs/ai_sbc/AI_SBC_FRAMEWORK.md`` §3.1):
 
@@ -105,7 +104,7 @@ def _frame_dt_from_cfg(cfg) -> Optional[float]:
 class ManiFlowAngleEstimator:
     """rolling 관측 history 기반 receding-horizon flexion 각도 예측기.
 
-    사용 패턴 (``ManiFlowTorqueEstimator``와 동일):
+    사용 패턴:
 
     - :meth:`observe` — 모델 native 프레임 주기(40 fps)마다 현재 각도 4ch를
       history에 push.

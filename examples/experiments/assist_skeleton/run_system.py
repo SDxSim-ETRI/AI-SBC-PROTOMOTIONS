@@ -112,8 +112,6 @@ def parse_args(argv=None):
     p.add_argument("--motion-id", type=int, default=0)
     p.add_argument("--start-time", type=float, default=0.0, help="클립 시작 시각 [s]")
     p.add_argument("--llp-checkpoint", default=DEFAULT_LLP_CHECKPOINT)
-    p.add_argument("--llp-share-legs", action="store_true",
-                   help="단일 관절로 학습한 --llp-checkpoint 하나를 양쪽 다리에 같은 가중치로 적용 (2026-10-21)")
     p.add_argument("--hlp-checkpoint", default=DEFAULT_HLP_CHECKPOINT,
                    help="H1 flexion100-h15-swap(관측 토큰 → self-attention, 노이즈 action 토큰 → cross-attention) 체크포인트")
     p.add_argument("--denoise", type=int, default=1,
@@ -152,11 +150,6 @@ def parse_args(argv=None):
                    help="assist 출력 1차 저역통과 차단주파수 [Hz] (0 = 끔) — 구동기 대역 모사")
     p.add_argument("--torque-slew-limit", type=float, default=None,
                    help="assist 출력 변화율 한계 [N·m/s] (None = 끔)")
-    p.add_argument("--swing-gate", type=float, default=0.0,
-                   help="유각 브레이크 게이트: hip 관절각이 중간값을 굴곡 방향으로 지난 뒤 보행 주기의 이 비율 동안 "
-                        "신전 보조를 0으로 (관절각만 사용, 진단 기준값). 0 = 끔")
-    p.add_argument("--swing-gate-mean-tau", type=float, default=1.5,
-                   help="게이트 중간값 지수이동평균 시정수 [s]")
     p.add_argument("--fixed-base-z", type=float, default=0.6, help="mocap_pd: 골반을 올릴 높이 [m]")
     p.add_argument("--no-feedforward", action="store_true", help="mocap_pd: 속도 피드포워드 Kd·θ̇_g 끄기")
     p.add_argument("--human-kp-scale", type=float, default=12.4,
@@ -499,8 +492,6 @@ class SystemHook:
             "chunk": z(2, K, 2), "chunk_t0": z(2), "root_z": z(2), "root_xy": z(2, 2),
             # 오라클 진단용: 정책이 내려던 토크와 실제 보행 위상
             "tau_policy": z(2, 2), "gait_phase": z(2),
-            # 유각 브레이크 게이트 창 (관절각 기반, 1 = 신전 보조 차단 중)
-            "swing_gate": z(2, 2),
         }
         self.t_sim = 0.0
         self.diagnostic = None
@@ -607,7 +598,6 @@ class SystemHook:
         L["chunk_t0"][i] = self.ctrl._chunk_t0
         L["tau_policy"][i] = tau_policy
         L["gait_phase"][i] = phase
-        L["swing_gate"][i] = self.ctrl.swing_gate_active.float()
         if not self.mocap_pd:
             root_pos = sim._get_simulator_root_state().root_pos
             L["root_z"][i] = root_pos[:, 2]
@@ -874,10 +864,7 @@ class SystemRunner:
                 obs_horizon_ms=args.obs_horizon_ms,
                 torque_lpf_hz=args.torque_lpf_hz,
                 torque_slew_limit=args.torque_slew_limit,
-                swing_gate_fraction=args.swing_gate,
-                swing_gate_mean_tau=args.swing_gate_mean_tau,
                 measure_timing=True,
-                llp_share_legs=args.llp_share_legs,
             ),
             num_envs=2,
             device=self.env.device,
@@ -1028,7 +1015,6 @@ class SystemRunner:
             "motion_id": args.motion_id,
             "start_time": args.start_time,
             "llp_checkpoint": str(Path(args.llp_checkpoint).resolve()),
-            "llp_share_legs": bool(args.llp_share_legs),
             "llp_epoch": ctrl.llp.epoch,
             "hlp_checkpoint": ctrl.hlp_checkpoint,
             "denoise": args.denoise,
@@ -1057,8 +1043,6 @@ class SystemRunner:
             "obs_horizon_ms": args.obs_horizon_ms,
             "torque_lpf_hz": args.torque_lpf_hz or None,
             "torque_slew_limit": args.torque_slew_limit,
-            "swing_gate": args.swing_gate or None,
-            "swing_gate_mean_tau": args.swing_gate_mean_tau if args.swing_gate else None,
             "feedforward": hook.use_ff,
             "human_kp_scale": args.human_kp_scale if args.human == "mocap_pd" else None,
             "human_kd_scale": args.human_kd_scale if args.human == "mocap_pd" else None,

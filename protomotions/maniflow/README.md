@@ -44,11 +44,9 @@ H1을 별도 환경에서 로드할 때는 `frame_dt=0.01`을 명시하고 모�
 | `hybrid_control.py` | Newton의 PD 토크와 독립적인 추가 토크 주입 |
 | `channels.py` | 관절 이름에서 고관절 DOF 인덱스 도출 |
 | `verify_angle_estimator.py`, `verify_chunk_source.py` | 스트리밍 예측과 오프라인 기준 비교 |
-| `torque_estimator.py` | 이전 토크 직접 예측 연구용 래퍼. 과거 task 스크립트가 사용 |
 
-검증 스크립트의 기본 자료·기준값은 **이전 H0/40 Hz 실험**이다.
-인자 없이 실행한 결과를 H1 검증으로 보고하지 않는다. H1 검증에는 체크포인트와
-100 Hz 평가 자료·시간 설정·기준 지표를 함께 지정해야 한다.
+검증 스크립트는 인자 없이 H1(저장소 사본)을 ETRI suit14 100 Hz 자료로 돌려 같은 H1의
+2026-10-29 오프라인 평가(denoise 1)와 비교한다. 다른 모델은 체크포인트·평가 자료·기준 지표를 함께 지정한다.
 
 ## 각도 예측기 사용
 
@@ -82,7 +80,6 @@ current_and_future = prediction[:, estimator.n_obs_steps - 1:]
 
 ## 과거 토크 직접 예측 연구
 
-88채널 상태 → 고관절 6채널 토크를 예측하던 모델은 현재 HLP와 별개다.
+88채널 상태 → 고관절 6채널 토크를 예측하던 모델(2026-07~08)은 현재 HLP와 별개다. 2026-11-04에 모델 가중치를
+지웠고, 래퍼 `torque_estimator.py`와 `tasks/` 실행 스크립트는 `results/hip_torque_estimator_20260710/scripts/`로 옮겼다.
 채널 순서·이전 제어 예제는 [이전 README](../../docs/ai_sbc/archive/20261013/maniflow_README.md)에 보존했다.
-관련 `tasks/mimic_suit_active_cable_walk_23dof/` 스크립트가 래퍼를 사용하므로
-`torque_estimator.py`와 공개 import를 임의로 삭제하지 않는다.

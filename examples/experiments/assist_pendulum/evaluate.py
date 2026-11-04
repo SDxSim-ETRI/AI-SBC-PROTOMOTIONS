@@ -17,25 +17,19 @@
 
 `PairedPendulumEvaluation` (`paired`)
   조건
-  * legacy / phase / hold50: 합성 궤적 프로토콜·seed (2026-10-20 R0 평가와 같음). phase = 구조화 힘장·
+  * legacy / phase / hold50: 합성 궤적 프로토콜·seed (2026-10-20 진자 평가와 같음). phase = 구조화 힘장·
     유각 감속 외란 50 %, hold50 = 착용자 명령 50 ms 유지 (`DisturbedAssistTargetControlConfig`의 스위치).
   * seed_val: SEED 고관절 동작 중 H1·LLP 모두 학습하지 않은 클립 (H1 validation 분할). 학습과 같은
     두 플랜트 집단(가벼운 다리 50 %: 달리기·조깅·점프 / 일반 50 %)과 같은 실현 가능성 규칙.
   * etri: ETRI 슈트 13동작 평가용 사본 (`prepare-etri`), 같은 두 집단에 동작별 같은 시간.
   모든 조건에서 보조 진자의 미래 목표 관측은 동결 H1의 실제 예측이다 (`H1Forecast`, 플랜트와 분리된
-  난수 스트림; 동작 조건은 데이터의 몸통 기울기도 H1에 준다). 단일 관절 모델은 `--share-legs`로
-  양쪽 다리에 같은 가중치로 적용한다. `--checkpoint`를 생략하면 무보조 짝 동일성 점검이다.
-`ChunkDiagnosis` (`chunk`): 학습 분포 진자에서 미래 목표 관측이 에뮬레이션 예측일 때와 실제 H1일 때의
-  차이 — 보조 관절 하나의 착용자 τ² 감소를 집단별로 비교 (2026-10-22 진단).
-`TrainingDistributionAudit` (`audit`): motion_leg 학습 env를 무작위 action으로 돌려 실제 의도·관성 분포와
-  다리별 계약(비담당 관절 보조 0, 보상 원시값이 담당 관절만으로 계산)을 기록.
+  난수 스트림; 동작 조건은 데이터의 몸통 기울기도 H1에 준다). `--checkpoint`를 생략하면 무보조 짝 동일성 점검이다.
 `EtriEvalData` (`prepare-etri`): ETRI 슈트 14동작 → 평가용 사본 (SEED 영점 정렬, 고관절 ±86° 클램프,
   복제본 제거) + 동작 이름을 종류로 쓰는 metadata parquet.
 
-    python examples/experiments/assist_pendulum/evaluate.py paired --base-checkpoint <R0 ckpt> \\
-        --checkpoint <ckpt> --share-legs --condition seed_val --hlp-checkpoint <H1> --out <dir>
-    python examples/experiments/assist_pendulum/evaluate.py chunk --config-checkpoint <llp20 ckpt> --checkpoint <ckpt> [--hlp-checkpoint <H1>] --out <json>
-    python examples/experiments/assist_pendulum/evaluate.py audit --checkpoint <llp20 ckpt> --out <json>
+    python examples/experiments/assist_pendulum/evaluate.py paired \\
+        --base-checkpoint checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt --checkpoint <ckpt> \\
+        --condition seed_val --hlp-checkpoint checkpoints/H1_maniflow_swap/epoch_0008.ckpt --out <dir>
     python examples/experiments/assist_pendulum/evaluate.py prepare-etri --out <dir>
 """
 
@@ -306,8 +300,7 @@ class PairedPendulumEvaluation:
 
     def policy(self, env):
         args = self.args
-        assert args.checkpoint or not args.share_legs, "--share-legs needs --checkpoint"
-        policy = LLPPolicy(args.checkpoint, env.device, share_legs=args.share_legs) if args.checkpoint else None
+        policy = LLPPolicy(args.checkpoint, env.device) if args.checkpoint else None
         if policy:
             lay = policy.layout
             assert lay.action_transform == "tanh"
@@ -422,165 +415,6 @@ class PairedPendulumEvaluation:
         return report
 
 
-# ---------------------------------------------------------------------------
-# 진단·점검·데이터
-# ---------------------------------------------------------------------------
-class ChunkDiagnosis:
-    """학습 분포 진자에서 미래 목표 관측 = 에뮬레이션 예측 vs 실제 H1 예측 (보조 관절 하나)."""
-
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
-
-    def run(self):
-        args = self.args
-        seed_all(args.plant_seed)
-        env, _ = build_env_agent(args.config_checkpoint, args.num_envs, overrides={"env._target_": PAIRED_ENV})
-        env._lazy_init_assist()
-        ref = env.reference_env
-        env.max_episode_length = args.steps + 2
-        joint = int(tuple(env.config.assist_active_joints)[0])
-        policy = LLPPolicy(args.checkpoint, env.device)
-        assert policy.layout.history_steps == env.config.num_state_history_steps
-        pools = env.assist_component.env_pool.cpu().numpy()
-        names = [s["name"] for s in env.assist_component.pool_summary]
-        n = args.num_envs
-        logs = {k: [] for k in ("a", "b", "s", "v", "valid")}
-        with torch.no_grad():
-            seed_all(args.trajectory_seed)
-            obs, _ = env.reset()
-            h1 = None
-            if args.hlp_checkpoint:
-                h1 = H1Forecast(args.hlp_checkpoint, env)
-                h1.reset(env.context.current.dof_pos, args.hlp_seed)
-            first = torch.full((n,), -1, device=env.device)
-            for step in range(args.steps):
-                valid = first < 0
-                if h1 is not None:
-                    predicted = h1.predict(env.context.current.dof_pos, step * env.dt, observe=step > 0)
-                    obs["assist_target"] = compute_assist_target_obs(
-                        predicted, env.context.current.dof_pos, torch.zeros(n, 1, device=env.device))
-                obs, _, _, terminal, _ = env.step(policy.act(obs))
-                failed = (terminal | ref.terminate_buf) & (first < 0)
-                first[failed] = step
-                if step >= args.warmup_steps:
-                    logs["a"].append(ref.context.assist.tau_agent[:, joint].cpu().numpy())
-                    logs["b"].append(env.context.assist.tau_agent[:, joint].cpu().numpy())
-                    logs["s"].append(env.context.assist.tau_assist[:, joint].cpu().numpy())
-                    logs["v"].append(ref.context.current.dof_vel[:, joint].cpu().numpy())
-                    logs["valid"].append(valid.cpu().numpy())
-        z = {k: np.stack(v) for k, v in logs.items()}
-        result = dict(protocol=vars(args), joint=joint, pools={})
-        for k, name in [(k, nm) for k, nm in enumerate(names)] + [(None, "all")]:
-            m = z["valid"] & (True if k is None else (pools == k)[None, :])
-            a, b, s, v = z["a"][m], z["b"][m], z["s"][m], z["v"][m]
-            fast = np.abs(v) > 4.0
-            result["pools"][name] = dict(
-                reference_tau_sq_Nm2=float(np.mean(a * a)), torque_sq_change_percent=float(100 * (np.mean(b * b) / np.mean(a * a) - 1)),
-                assist_rms_Nm=float(np.sqrt(np.mean(s * s))), assist_vs_unassisted_torque_corr=float(np.corrcoef(s, a)[0, 1]),
-                fast_torque_sq_change_percent=float(100 * (np.mean(b[fast] ** 2) / np.mean(a[fast] ** 2) - 1)) if fast.sum() > 100 else None)
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(result, indent=2, ensure_ascii=False))
-        print(json.dumps(result["pools"], indent=1))
-        return result
-
-
-class TrainingDistributionAudit:
-    """motion_leg 학습 환경 점검: 실제 의도·관성 분포와 다리별 계약 (무작위 action, 정책 무관)."""
-
-    def __init__(self, args: argparse.Namespace):
-        self.args = args
-
-    def run(self):
-        from protomotions.envs.control.motion_intent import group_clip_probabilities
-
-        args = self.args
-        torch.manual_seed(args.seed)
-        env, _ = build_env_agent(args.checkpoint, args.num_envs)
-        env._lazy_init_assist()
-        comp = env.assist_component
-        cfg = comp.config
-        joint = int(tuple(env.config.assist_active_joints)[0])
-        other = 1 - joint
-        intent = comp._intent
-        names = [str(g[0]) for g in cfg.motion_groups]
-        _, group_index = group_clip_probabilities(
-            intent.table.clip_type, intent.table.clip_len.cpu().numpy(), cfg.motion_groups,
-            [(names[0], 1.0)], intent.min_frames,
-        )
-        group_index = torch.as_tensor(group_index, device=env.device)
-        pools = comp.env_pool
-        motion_env = comp._motion_env
-        n_pools = len(comp.pool_summary)
-        inertia = env.hip_inertia_eff()[:, joint]
-
-        fast = torch.zeros(n_pools, device=env.device)
-        total = torch.zeros(n_pools, device=env.device)
-        group_time = torch.zeros(n_pools, len(names) + 1, device=env.device)  # 마지막 = hold/전환
-        infeasible = 0.0
-        other_assist_max = 0.0
-        reward_err = {}
-        vel_abs = []
-        env.reset()
-        with torch.no_grad():
-            for _ in range(args.steps):
-                action = torch.randn(args.num_envs, 2, device=env.device)
-                _, goal_vel = comp.get_pd_targets_and_vel()
-                v = goal_vel[:, joint].abs()
-                vel_abs.append(v.cpu())
-                for k in range(n_pools):
-                    m = pools == k
-                    fast[k] += (v[m] > 4.0).float().sum()
-                    total[k] += m.float().sum()
-                clip = intent._clip[0]
-                hold = intent._hold[0] | ~motion_env
-                g = torch.where(hold, torch.full_like(clip, len(names)), group_index[clip])
-                group_time.index_put_((pools, g), torch.ones_like(v), accumulate=True)
-                need = intent.table.clip_accel99[clip][:, joint]
-                cap = intent._accel_cap[:, joint]
-                infeasible += float(((need > cap) & ~hold).float().mean())
-                _, _, _, _, extras = env.step(action)
-                ctx = env.context
-                other_assist_max = max(other_assist_max, float(ctx.assist.tau_assist[:, other].abs().max()))
-                tau = ctx.assist.tau_agent
-                manual = {
-                    "human_torque_sq": tau[:, joint] ** 2,
-                    "human_power": (tau[:, joint] * ctx.current.dof_vel[:, joint]).abs(),
-                    "assist_effort": ctx.assist.tau_assist[:, joint] ** 2,
-                }
-                grace = env.progress_buf <= env.config.reset_grace_period
-                for name, value in manual.items():
-                    # 리셋 직후 env는 보상 계산 뒤 상태가 바뀌므로 제외
-                    raw, value = extras["raw_r/" + name][~grace], value[~grace]
-                    if raw.numel() == 0:
-                        continue
-                    reward_err[name] = max(reward_err.get(name, 0.0), float((raw - value).abs().max()))
-
-        vel_abs = torch.cat(vel_abs).numpy()
-        report = dict(
-            checkpoint=str(args.checkpoint), active_joint=joint, num_envs=args.num_envs, steps=args.steps,
-            pools=[dict(summary, env_count=int((pools == k).sum()),
-                        hip_inertia_kgm2=[float(inertia[pools == k].min()), float(inertia[pools == k].max())],
-                        fast_time_fraction=float(fast[k] / total[k]),
-                        group_time_fraction={n: float(group_time[k, j] / total[k]) for j, n in enumerate(names)},
-                        hold_or_synthetic_time_fraction=float(group_time[k, -1] / total[k]))
-                   for k, summary in enumerate(comp.pool_summary)],
-            overall_fast_time_fraction=float(fast.sum() / total.sum()),
-            intent_speed_percentiles_rad_s={str(q): float(np.percentile(vel_abs, q)) for q in (50, 90, 99, 99.9)},
-            fallback_clips=int(intent.fallback_count),
-            infeasible_current_clip_fraction=infeasible / args.steps,
-            other_joint_assist_max_Nm=other_assist_max,
-            reward_raw_max_abs_error=reward_err,
-        )
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(report, indent=2, ensure_ascii=False))
-        print(json.dumps(report, indent=2, ensure_ascii=False))
-        assert other_assist_max == 0.0, "non-assigned joint received assistance"
-        assert all(v < 1e-3 for v in reward_err.values()), reward_err
-        return report
-
-
 class EtriEvalData:
     """ETRI 슈트 14동작 → 진자 평가용 사본 (학습에 쓰지 않는다; W1 평가 걷기·달리기와 같은 출처)."""
 
@@ -649,9 +483,8 @@ def main(argv=None):
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("paired", help="무보조/보조 진자 짝 평가 (동결 H1 예측)")
-    s.add_argument("--base-checkpoint", required=True, help="플랜트·관측 config의 출처 (예: R0 epoch_6000.ckpt)")
+    s.add_argument("--base-checkpoint", required=True, help="플랜트·관측 config의 출처 (예: L15 epoch_6000.ckpt)")
     s.add_argument("--checkpoint", default=None, help="생략하면 무보조 짝 동일성 점검")
-    s.add_argument("--share-legs", action="store_true", help="단일 관절 모델 하나를 양쪽 다리에 같은 가중치로 적용")
     s.add_argument("--output-scale", type=float, default=1.)
     s.add_argument("--evaluation-limit", type=float, default=20.)
     s.add_argument("--condition", choices=[*SYNTHETIC, *MOTION], required=True)
@@ -666,25 +499,6 @@ def main(argv=None):
     s.add_argument("--etri-dir", default=str(ETRI_EVAL_DIR), help="prepare-etri 출력 폴더 (etri 조건)")
     s.add_argument("--out", required=True)
 
-    s = sub.add_parser("chunk", help="에뮬레이션 예측 vs 실제 H1 예측 진단 (학습 분포 진자)")
-    s.add_argument("--config-checkpoint", required=True, help="학습 환경 설정을 가져올 motion_leg 체크포인트")
-    s.add_argument("--checkpoint", required=True)
-    s.add_argument("--hlp-checkpoint", default=None, help="주면 실제 H1 예측, 없으면 에뮬레이션")
-    s.add_argument("--num-envs", type=int, default=1024)
-    s.add_argument("--steps", type=int, default=1000)
-    s.add_argument("--warmup-steps", type=int, default=50)
-    s.add_argument("--plant-seed", type=int, default=123)
-    s.add_argument("--trajectory-seed", type=int, default=7)
-    s.add_argument("--hlp-seed", type=int, default=991)
-    s.add_argument("--out", required=True)
-
-    s = sub.add_parser("audit", help="motion_leg 학습 환경의 의도·관성 분포와 다리별 계약 점검")
-    s.add_argument("--checkpoint", required=True)
-    s.add_argument("--num-envs", type=int, default=4096)
-    s.add_argument("--steps", type=int, default=2000)
-    s.add_argument("--seed", type=int, default=0)
-    s.add_argument("--out", required=True)
-
     s = sub.add_parser("prepare-etri", help="ETRI 슈트 동작의 진자 평가용 사본 만들기")
     s.add_argument("--etri", default=str(EtriEvalData.DATA / "hip-flexion-etri-suit14-100fps.zarr"))
     s.add_argument("--seed-ref", default=str(EtriEvalData.DATA / "hip-flexion-seed-locomotion-100fps.zarr"))
@@ -693,10 +507,6 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.command == "paired":
         PairedPendulumEvaluation(args).run()
-    elif args.command == "chunk":
-        ChunkDiagnosis(args).run()
-    elif args.command == "audit":
-        TrainingDistributionAudit(args).run()
     else:
         EtriEvalData(args.etri, args.seed_ref, args.out).run()
 

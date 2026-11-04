@@ -30,7 +30,7 @@
 
     python examples/experiments/assist_pendulum/runtime.py play --checkpoint checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt
     python examples/experiments/assist_pendulum/runtime.py compare --checkpoint <ckpt> --num-envs 8 --num-steps 1000
-    python examples/experiments/assist_pendulum/runtime.py check-env --num-envs 64 --steps 1500 -- --recipe R0
+    python examples/experiments/assist_pendulum/runtime.py check-env --num-envs 64 --steps 1500 -- --recipe L15
     python examples/experiments/assist_pendulum/runtime.py abc --checkpoint <ckpt> --zarr <zarr> --split val --out results/eval_abc/seed_val
 
 play 카메라: f 추적 on/off (off면 마우스 자유 시점) · [ ] 궤도 회전 · b/n 후면/정면 · z/x 줌 · r 리셋 · q 종료.
@@ -740,7 +740,7 @@ def main(argv=None) -> int:
     s.add_argument("--seed", type=int, default=42)
     s.add_argument("--out", default="/tmp/assist_compare.npz")
 
-    s = sub.add_parser("check-env", help="학습 전 환경 점검 (뒤에 '--'와 실험 파일 인자, 예: -- --recipe R0)")
+    s = sub.add_parser("check-env", help="학습 전 환경 점검 (뒤에 '--'와 실험 파일 인자, 예: -- --recipe L15)")
     s.add_argument("--experiment", default=str(HERE / "mlp.py"))
     s.add_argument("--num-envs", type=int, default=64)
     s.add_argument("--steps", type=int, default=1500, help="10 ms step 수 (1500 = 15 s)")

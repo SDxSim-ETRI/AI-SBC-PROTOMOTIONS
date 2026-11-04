@@ -39,12 +39,13 @@ LLP는 모두 20·tanh 출력, 한계 ±20 N·m, 출력 배율 1, 10 ms 제어�
 
 ## 2026-11-04 가중치 정리
 
-- 위 표 밖의 LLP 가중치를 지웠다: `results/` 아래 903개(4.4 GB)와 git의 `checkpoints/L1_llp_pendulum`, `checkpoints/llp_v{3,4,5,6,10}_*`.
-  L1·L2–L14·G0–G4·F1/F2·R0/R1·20 N·m 다리별 4종·진자 FPO++ 모델과, 남긴 run의 다른 epoch·`last.ckpt`가 포함된다.
+- 위 표 밖의 LLP 가중치를 지웠다: `results/` 아래 903개(4.4 GB)와 git의 옛 LLP 폴더 6개.
+  L15 이전 계보 전부, 진자 FPO++ 모델, 남긴 run의 다른 epoch·`last.ckpt`가 포함된다.
   각 run 폴더의 학습 설정(`resolved_configs*.pt`, `config.yaml`)·로그·평가 기록은 남아 있다.
 - ManiFlow 체크포인트는 H1 원본 하나만 남기고 21개(8.8 GB)를 지웠다: 옛 H1(관측 cross-attention, flexion100-h15-run01), 40 fps 판(flexion40),
   초기 hips·IMU 모델, 2026-05 이미지 정책. 학습 자료(zarr)는 그대로다.
-- L1은 더 이상 기준 모델이 아니다. 코드 기본값과 진자 레시피에서 빼고, L1 계보의 보고서는 [보관 자료](reports.html#past)로 옮겼다.
+- L15 이전 계보는 기준·비교 대상으로 쓰지 않는다. 그 계보에만 쓰던 코드(다리별 공유 LLP, 유각 게이트, 기준 비교 보고서, 7월 토크 예측기)는
+  `results/<연구>/scripts/retired_20261104/`로 옮겼고(스냅샷 커밋 `e74e83e`), 보고서는 [보관 자료](reports.html#past)에 있다.
 - 남긴 run의 원래 위치(`results/llp_L15_s0_20261029`, `llp_L15_ft_{walk,run}_20261029`, `llp_L16_20261029`,
   `llp_L16scratch_20261102`, `llp_fpo_tfm_20261102`)에는 이제 checkpoint 없이 설정·로그만 있다.
 
@@ -72,7 +73,7 @@ LLP는 모두 20·tanh 출력, 한계 ±20 N·m, 출력 배율 1, 10 ms 제어�
 
 ## 지난 계보
 
-2026-09 ~ 10-22의 L1 계보(L1–L14, G0–G4, F1/F2, R0/R1, 20 N·m 다리별 4종)는 가중치를 지웠고 기록만 남았다.
+2026-09 ~ 10-22의 L15 이전 계보는 가중치를 지웠고 기록만 남았다.
 결과는 [요약의 실험 이력](experiment_summary.html#history), 보고서는 [보관 자료](reports.html#past),
 정리 직전의 경로표는 [2026-11-04 보관 버전표](archive/20261104/AI_SBC_VERSIONS.md),
 그보다 오래된 표는 [2026-10-13 보관 버전표](archive/20261013/AI_SBC_VERSIONS.md)에 있다.

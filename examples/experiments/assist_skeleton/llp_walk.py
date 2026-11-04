@@ -46,7 +46,7 @@ mocap hip 각도는 tracker 자체가 10~14° 벗어나 따라간다. 대신 "�
         --tracker-checkpoint checkpoints/v30_newton_suit_passive_walk/last.ckpt
 평가: examples/experiments/assist_skeleton/run_system.py --human tracker --llp-checkpoint results/llp_skel_walk/last.ckpt
 
-진자 LLP actor 이어받기 추가학습 (`--initial-actor-checkpoint`, 2026-10-11 L13 방식을 옵션으로 통합):
+진자 LLP actor 이어받기 추가학습 (`--initial-actor-checkpoint`, 2026-10-11부터 옵션으로 통합):
     출발 checkpoint의 관측 구성·action 변환·토크 한계를 그대로 쓰고(actor 가중치만 이어받음, critic·optimizer는 새로),
     무보조 착용자를 같은 난수로 나란히 돌려 보상을 계산하는 `PairedSkeletonAssistEnv`를 쓴다.
     에피소드 8 s, 시작 시각은 클립의 0–`--segment-start-max` s. `--exclude-motion-ids`로 걷기(0)·달리기(1)를 고른다.
@@ -133,7 +133,7 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
                         help="주입 전 1차 저역통과 [Hz] (0 = 끔). 구동기 대역을 플랜트에 넣는 방식 — "
                              "정책이 그 한계 안에서 위상을 맞추는 법을 배운다. 실행 시 "
                              "run_system.py --torque-lpf-hz 같은 값으로")
-    # --- 진자 LLP actor 이어받기 추가학습 (L13 방식) ---
+    # --- 진자 LLP actor 이어받기 추가학습 ---
     parser.add_argument("--initial-actor-checkpoint", type=str, default=None,
                         help="진자 LLP checkpoint. 주면 actor 가중치만 이어받고(critic·optimizer 새로), 관측 구성·action 변환·"
                              "토크 한계는 그 checkpoint의 설정을 쓰며, 무보조 착용자를 나란히 돌리는 PairedSkeletonAssistEnv로 학습")
@@ -144,13 +144,13 @@ def additional_experiment_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--segment-start-max", type=float, default=20.0,
                         help="에피소드 시작 시각 상한 [s] (클립 앞부분만 학습에 쓰고 뒷부분은 평가용으로 남김)")
     parser.add_argument("--local-excess-weight", type=float, default=1.0,
-                        help="PairedSkeletonAssistEnv의 관절별 부담 증가 벌점 가중치 (L13 1.0, L13R 0.149 + floor 10)")
+                        help="PairedSkeletonAssistEnv의 관절별 부담 증가 벌점 가중치")
     parser.add_argument("--local-excess-floor", type=float, default=0.0,
                         help="위 벌점의 분모 바닥 [N·m] (0 = 고정 scale로 나눔)")
-    parser.add_argument("--finetune-actor-lr", type=float, default=3e-5, help="이어받은 actor의 학습률 (L13 3e-5)")
+    parser.add_argument("--finetune-actor-lr", type=float, default=3e-5, help="이어받은 actor의 학습률")
     parser.add_argument("--finetune-assist-limit", type=float, default=None,
-                        help="추가학습 중 보조 토크 출력 배율·한계 [N·m] (None = 출발 checkpoint 값). 40·tanh로 학습한 R0에 20을 주면 "
-                             "평가의 R0 ×0.5(20·tanh)와 같은 출력에서 시작해 20 N·m 한계로 학습한다")
+                        help="추가학습 중 보조 토크 출력 배율·한계 [N·m] (None = 출발 checkpoint 값). 40·tanh로 학습한 진자 모델에 20을 주면 "
+                             "20·tanh 출력에서 시작해 20 N·m 한계로 학습한다")
     parser.add_argument("--actor-init", choices=["checkpoint", "random"], default="checkpoint",
                         help="checkpoint: --initial-actor-checkpoint의 actor 가중치를 이어받음(추가학습). "
                              "random: 같은 env·관측·PPO 설정으로 actor를 무작위 초기화해 처음부터 학습 "
@@ -174,7 +174,7 @@ def configure_robot_and_simulator(
 ):
     """tracker와 같은 접촉 센서(발) + LLP 주기: 물리 400 Hz / decimation (기본 2 = 5 ms)."""
     if getattr(args, "initial_actor_checkpoint", None):
-        # L13 방식: 로봇·물리 설정을 착용자 checkpoint의 저장본으로 맞춘다.
+        # 로봇·물리 설정을 착용자 checkpoint의 저장본으로 맞춘다.
         wearer = _tracker_resolved(args)
         robot_cfg.__dict__.update(copy.deepcopy(wearer["robot"].__dict__))
         simulator_cfg.sim = copy.deepcopy(wearer["simulator"].sim)
@@ -408,7 +408,7 @@ def _finetune_source(args: argparse.Namespace):
 
 
 def _env_finetune(cfg: SkeletonAssistEnvConfig, args: argparse.Namespace):
-    """L13 방식 env: 출발 checkpoint의 관측 구성·action 변환·토크 한계를 그대로 쓰고, 무보조 착용자를 같은 난수로
+    """이어받기 env: 출발 checkpoint의 관측 구성·action 변환·토크 한계를 그대로 쓰고, 무보조 착용자를 같은 난수로
     나란히 돌려 보상을 계산한다(PairedSkeletonAssistEnv). 에피소드 8 s, 시작 시각 0–segment_start_max s."""
     from protomotions.envs.base_env.paired_skeleton_assist_env import (
         PairedSkeletonAssistEnvConfig, WalkingSegmentConfig,
@@ -436,7 +436,7 @@ def _env_finetune(cfg: SkeletonAssistEnvConfig, args: argparse.Namespace):
     if args.finetune_assist_limit is not None:
         limit = float(args.finetune_assist_limit)
         assert isinstance(out.action_config, dict) and "torque_scale" in out.action_config, "source action config has no torque_scale"
-        out.action_config["torque_scale"] = limit  # 예: 40·tanh → 20·tanh (R0 ×0.5와 같은 출력)
+        out.action_config["torque_scale"] = limit  # 예: 40·tanh → 20·tanh
         out.assist_torque_limit = limit
     out.reward_components = {}  # 보상은 두 착용자의 물리 step 뒤 PairedSkeletonAssistEnv가 계산
     out.motion_manager = WalkingSegmentConfig(**{f.name: copy.deepcopy(getattr(out.motion_manager, f.name))
