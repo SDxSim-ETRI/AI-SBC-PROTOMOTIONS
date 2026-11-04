@@ -57,7 +57,7 @@ mocap hip 각도는 tracker 자체가 10~14° 벗어나 따라간다. 대신 "�
         --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --num-envs 256 --batch-size 8192 \\
         --training-max-steps 1638400 --seed 13 --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \\
         --hlp-checkpoint <H1> --decimation 4 --human-cost torque_sq --hlp-calibration "p,q,r,s" \\
-        --initial-actor-checkpoint results/llp_relative_R0_s0_20261020/epoch_6000.ckpt --exclude-motion-ids 1 \\
+        --initial-actor-checkpoint checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt --exclude-motion-ids 1 \\
         --finetune-assist-limit 20
     진자 사전학습 없이 같은 조건으로 처음부터 학습하려면(2026-11-02 비교) `--actor-init random`을 더한다:
     출발 checkpoint는 관측 구성·action 변환·PPO 설정의 틀로만 쓰고 actor 가중치는 무작위 초기화한다

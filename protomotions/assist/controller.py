@@ -66,8 +66,8 @@ class AssistControllerConfig:
 
     Attributes:
         llp_checkpoint: `assist_pendulum` 체크포인트 (`last.ckpt`).
-        hlp_checkpoint: ManiFlow flexion 체크포인트. None이면 flexion40 run에서
-            자동 탐색 (`verify_angle_estimator.FLEXION40_RUN_DIR`).
+        hlp_checkpoint: ManiFlow flexion 체크포인트. None이면 현역 H1
+            (`protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT`).
         hlp_denoise_steps: ManiFlow denoise 스텝 (권장 3).
         hlp_obs_offset: HLP 관측 4ch 영점 오프셋 [rad] — 입력 스트림을 HLP 학습
             (SEED) 규약으로 정렬. 관측에 가산되고, 앞 2ch은 예측에서 감산된다.
@@ -153,10 +153,9 @@ class AssistController:
         # --- HLP ---
         hlp_ckpt = config.hlp_checkpoint
         if not hlp_ckpt:
-            from protomotions.maniflow.loader import discover_best_checkpoint
-            from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
+            from protomotions.maniflow.loader import DEFAULT_H1_CHECKPOINT
 
-            hlp_ckpt = str(discover_best_checkpoint(FLEXION100_RUN_DIR))
+            hlp_ckpt = str(DEFAULT_H1_CHECKPOINT)
         self.hlp_checkpoint = hlp_ckpt
         estimator = ManiFlowAngleEstimator.from_checkpoint(
             hlp_ckpt,

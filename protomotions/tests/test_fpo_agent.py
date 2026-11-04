@@ -234,7 +234,7 @@ def test_checkpoint_bakes_ema_into_actor_and_resume_restores_raw_weights():
 # ----------------------------------------------------------------------
 # 레시피: llp_walk.py --policy tfm_fpo 가 출발 checkpoint의 관측 구성을 transformer 토큰 설정으로 옮긴다
 # ----------------------------------------------------------------------
-SOURCE = ROOT / "results/llp_R0lim20_s0_20261029/epoch_6000.ckpt"
+SOURCE = ROOT / "checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt"
 
 
 @pytest.mark.skipif(not (SOURCE.parent / "resolved_configs.pt").exists(), reason="source checkpoint not available")

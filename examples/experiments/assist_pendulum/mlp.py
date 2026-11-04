@@ -13,37 +13,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""AI-SBC LLP 진자 학습 레시피 — L1 → R0 → 20 N·m 다리별(motion_leg) 계보를 프리셋 하나로.
+"""AI-SBC LLP 진자 학습 레시피 — v4 랜덤화 진자 → R0 토크 경로 → L15(20 N·m) / motion_leg 계보를 프리셋 하나로.
 
 사람(BUILT_IN_PD)이 의도 궤적 θ_g를 추종하는 동안 policy가 additive assist torque(τ_assist)를
 출력해 사람 토크를 줄이는 태스크. HLP(ManiFlow) 예측은 노이즈/지연이 주입된 chunk로 에뮬레이션한다.
 정책은 플랜트·외란 값을 관측하지 못하고 각도·각속도 히스토리와 HLP 예측창으로 효과만 본다.
 
-프리셋 (`--recipe`, 기본 L1):
+프리셋 (`--recipe`, 기본 L15):
 
 | 이름 | 내용 | 보관 모델 |
 |------|------|-----------|
-| `L1` | 랜덤화 진자 (v4): 입각 하중·섭동, 관성 ×1–25, 착용자 ω_n 12–24 rad/s·ζ 0.3–0.8, 250 ms 히스토리, \\|τ·ω\\|+τ² 비용, 40·tanh | `checkpoints/L1_llp_pendulum` |
-| `R0` | L1 + 올바른 토크 경로: 착용자 PD+FF를 구동기 하나로 한 번만 제한하고 보조·하중은 독립 주입 | `results/llp_relative_R0_s0_20261020` |
-| `motion_leg` | R0 + 20·tanh(한계 20 N·m, 배율 1) + SEED 실제 동작 의도(가벼운 다리 집단 포함) + 다리 하나만 보조·보상·관측(`SingleJointMLP`); 배포는 같은 가중치를 양다리에 (`LLPPolicy(share_legs=True)`) | `results/llp20_motion_*_right_s0_20261021` |
+| `R0` | 랜덤화 진자 (v4: 입각 하중·섭동, 관성 ×1–25, 착용자 ω_n 12–24 rad/s·ζ 0.3–0.8, 250 ms 히스토리, \\|τ·ω\\|+τ² 비용) + 올바른 토크 경로(착용자 PD+FF를 구동기 하나로 한 번만 제한하고 보조·하중은 독립 주입), 40·tanh | 없음 (2026-11-04 가중치 삭제) |
+| `L15` | R0 + 보조 한계 20 N·m(20·tanh, 배율 1) | `checkpoints/L15_mlp_ppo_pendulum` |
+| `motion_leg` | L15 + SEED 실제 동작 의도(가벼운 다리 집단 포함) + 다리 하나만 보조·보상·관측(`SingleJointMLP`); 배포는 같은 가중치를 양다리에 (`LLPPolicy(share_legs=True)`) | 없음 (2026-11-04 가중치 삭제) |
 
 계보의 단계는 아래 `_env_*`/`_agent_*` 함수가 차례로 적용한다 — v2 기본(`_env_base`) → v3 chunk 형식
-(`_env_hlp_chunk_format`) → v4 외란·플랜트 랜덤화(`_env_randomized_plant`, L1) → R0 토크 경로
+(`_env_hlp_chunk_format`) → v4 외란·플랜트 랜덤화(`_env_randomized_plant`) → R0 토크 경로
 (`_env_corrected_torque_path`) → motion_leg(`_env_motion_intent_per_leg`, `_agent_single_joint_actor`).
 2026-10-26 이전의 mlp_v3.py / mlp_v4.py / mlp_relative.py / mlp_motion_leg.py가 각각 그 함수다.
+R0 토크 경로 이전(v4 원래 경로)의 프리셋은 2026-11-04에 그 모델과 함께 없앴다.
 
 v4 뒤의 실패한 변형(L2–L5, 2026-09-29)은 모두 이 파일의 CLI 인자로 남아 있다: L2 `--mass-exponent 0.43
 --assist-limit 50 --assist-limit-range 10,50`, L3 `--stance-load-per-kg 1.0 --stance-prob 0.6
 --reversal-brake-prob 0.7`, L4 `--chunk-anchor actual`, L5 `--reversal-mode feedforward`. v4 정점(epoch 6,000)
 뒤 두 절약 항이 "덜 밀기"를 이끌어 물러났고(v5 `--assist-effort-weight=-5e-6 --action-rate-weight=-0.002`도
-정점 유지 실패), 보관본 v4@6000 = L1이다.
+정점 유지 실패). 이 실험들은 모두 R0 토크 경로 이전의 것이다.
 
 학습 (sbc env):
     python protomotions/train_agent.py --robot-name hip_pendulum --simulator newton \\
-        --experiment-path examples/experiments/assist_pendulum/mlp.py --recipe motion_leg --leg right \\
-        --experiment-name llp20_motion_A0D0_right_s0 --motion-file none \\
-        --num-envs 4096 --batch-size 16384 --seed 0 --training-max-steps 786432000 \\
-        --assist-effort-weight=0 --action-rate-weight=0
+        --experiment-path examples/experiments/assist_pendulum/mlp.py --recipe L15 \\
+        --experiment-name llp_L15_s0 --motion-file none \\
+        --num-envs 4096 --batch-size 16384 --seed 0 --training-max-steps 786432000
 `--motion-file`은 CLI상 필수지만 이 실험은 모션 라이브러리를 쓰지 않는다. 무보조 평가는
 `--overrides env.assist_torque_limit=0`. 학습 전 환경 점검은 `runtime.py check-env`, 짝 평가는 `evaluate.py`.
 
@@ -105,16 +105,15 @@ class Recipe:
 
     name: str
     assist_limit: float            # --assist-limit 기본값 [N·m]
-    corrected_torque_path: bool    # R0: 착용자 PD+FF 한 구동기, 보조·하중 독립
     motion_intent_per_leg: bool    # motion_leg: 실제 동작 의도 + 다리 하나만
-    fixed_final_epoch: bool        # 마지막 epoch 고정 (주기 평가·best 선택 없음, 체크포인트 500 epoch마다)
     description: str
 
 
+# 모든 프리셋은 R0 토크 경로(`_env_corrected_torque_path`)와 마지막 epoch 고정(`_agent_fixed_final_epoch`)을 쓴다.
 RECIPES = {
-    "L1": Recipe("L1", 40.0, False, False, False, "v4 randomized pendulum (checkpoints/L1_llp_pendulum)"),
-    "R0": Recipe("R0", 40.0, True, False, True, "L1 on the corrected torque path"),
-    "motion_leg": Recipe("motion_leg", 20.0, True, True, True,
+    "R0": Recipe("R0", 40.0, False, "v4 randomized pendulum on the corrected torque path, 40 N·m"),
+    "L15": Recipe("L15", 20.0, False, "R0 at 20 N·m (checkpoints/L15_mlp_ppo_pendulum)"),
+    "motion_leg": Recipe("motion_leg", 20.0, True,
                          "R0 at 20 N·m with SEED motion intents, one joint assisted/observed"),
 }
 
@@ -126,7 +125,7 @@ def leg_joint_mask(leg: str, num_dofs: int = 2):
 
 def resolve_recipe(args: argparse.Namespace) -> Recipe:
     """프리셋을 고르고 프리셋 의존 기본값(보조 한계)을 args에 채운다."""
-    recipe = RECIPES[getattr(args, "recipe", "L1")]
+    recipe = RECIPES[getattr(args, "recipe", "L15")]
     if getattr(args, "assist_limit", None) is None:
         args.assist_limit = recipe.assist_limit
     if recipe.motion_intent_per_leg and not getattr(args, "leg", None):
@@ -167,10 +166,10 @@ def _pair(s: str):
 
 
 def additional_experiment_arguments(parser: argparse.ArgumentParser):
-    parser.add_argument("--recipe", choices=sorted(RECIPES), default="L1",
+    parser.add_argument("--recipe", choices=sorted(RECIPES), default="L15",
                         help="프리셋: " + "; ".join(f"{k} = {v.description}" for k, v in RECIPES.items()))
     g = parser.add_argument_group("v4 plant/disturbance randomization")
-    g.add_argument("--assist-limit", type=float, default=None, help="최종 assist 토크 한계 [N·m] (기본 action 스케일도 이 값). 기본은 프리셋 값: L1·R0 40, motion_leg 20")
+    g.add_argument("--assist-limit", type=float, default=None, help="최종 assist 토크 한계 [N·m] (기본 action 스케일도 이 값). 기본은 프리셋 값: R0 40, L15·motion_leg 20")
     g.add_argument("--action-torque-scale", type=float, default=None, help="raw action의 N·m 스케일. 기본값은 기존처럼 assist-limit")
     g.add_argument("--action-transform", choices=["tanh", "none"], default="tanh", help="none이면 선형 요청 토크를 만든 뒤 assist-limit에서만 제한")
     g.add_argument("--separate-torque-limits", action="store_true", help="보조·착용자 FF를 개별 제한하고 외란과의 합에 착용자 한계를 재적용하지 않음")
@@ -416,7 +415,7 @@ def _env_hlp_chunk_format(cfg: AssistEnvConfig) -> None:
 
 
 def _env_randomized_plant(cfg: AssistEnvConfig, args: argparse.Namespace) -> None:
-    """v4 (2026-09-22, L1): 의도·관측 계약·보상 뼈대는 v3 그대로, 플랜트와 외란의 분포를 넓힌다.
+    """v4 (2026-09-22): 의도·관측 계약·보상 뼈대는 v3 그대로, 플랜트와 외란의 분포를 넓힌다.
 
     | 축 | v3 | v4 |
     |----|----|----|
@@ -535,8 +534,8 @@ def _env_randomized_plant(cfg: AssistEnvConfig, args: argparse.Namespace) -> Non
 def _env_corrected_torque_path(cfg: AssistEnvConfig) -> None:
     """R0 (2026-10-20): 착용자 PD+FF를 구동기 하나로 한 번만 제한하고 보조·하중은 독립으로 주입한다.
 
-    L1(v4)은 보조·착용자 FF·외란의 합에 착용자 한계를 다시 적용했고, 그것이 L1 포화 출력의 주원인이었다.
-    같은 ±20 N·m에서 R0는 L1 이득의 94 %를 유지하며 저부담·최악 위상 손해를 절반 이하로 줄였다.
+    v4 원래 경로는 보조·착용자 FF·외란의 합에 착용자 한계를 다시 적용했고, 그것이 v4 정책이 출력을 한계까지
+    쓰는 주원인이었다. 같은 ±20 N·m에서 R0는 v4 이득의 94 %를 유지하며 저부담·최악 위상 손해를 절반 이하로 줄였다.
     """
     cfg.clamp_combined_injection = False
     cfg.human_feedforward_inside_pd = True
@@ -585,8 +584,7 @@ def env_config(robot_cfg: RobotConfig, args: argparse.Namespace) -> AssistEnvCon
     cfg = _env_base(robot_cfg)
     _env_hlp_chunk_format(cfg)
     _env_randomized_plant(cfg, args)
-    if recipe.corrected_torque_path:
-        _env_corrected_torque_path(cfg)
+    _env_corrected_torque_path(cfg)
     if recipe.motion_intent_per_leg:
         _env_motion_intent_per_leg(cfg, robot_cfg, args)
     return cfg
@@ -711,8 +709,7 @@ def agent_config(
 ) -> PPOAgentConfig:
     recipe = resolve_recipe(args)
     cfg = _agent_base(robot_config, args)
-    if recipe.fixed_final_epoch:
-        _agent_fixed_final_epoch(cfg)
+    _agent_fixed_final_epoch(cfg)
     if recipe.motion_intent_per_leg:
         _agent_single_joint_actor(cfg, robot_config, args)
     if getattr(args, "policy", "mlp_ppo") != "mlp_ppo":

@@ -44,6 +44,11 @@ log = logging.getLogger(__name__)
 # Conventional location of the ManiFlow checkout on dev machines. Used as the
 # last-resort fallback; prefer the MANIFLOW_ROOT env var or an explicit arg.
 DEFAULT_MANIFLOW_ROOT = Path.home() / "Projects" / "ManiFlow_Policy" / "ManiFlow"
+# 현역 각도 예측기 H1(flexion100-h15-swap, epoch 8)의 저장소 사본 (Git LFS). EMA 가중치와 학습 설정만 남겼고
+# 원본과 가중치·예측이 같다 (checkpoints/H1_maniflow_swap/INFO.md). 모델 코드는 ManiFlow 저장소에서 불러온다.
+DEFAULT_H1_CHECKPOINT = (
+    Path(__file__).resolve().parents[2] / "checkpoints" / "H1_maniflow_swap" / "epoch_0008.ckpt"
+)
 
 
 def ensure_maniflow_importable(maniflow_root: Optional[str] = None) -> str:

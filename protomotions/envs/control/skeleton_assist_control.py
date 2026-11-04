@@ -239,10 +239,9 @@ class SkeletonAssistControl(ControlComponent):
         # --- HLP: 실 ManiFlow ---
         from protomotions.maniflow.angle_estimator import ManiFlowAngleEstimator
         from protomotions.maniflow.chunk_source import DEFAULT_DENOISE_STEPS, ManiFlowChunkSource
-        from protomotions.maniflow.loader import discover_best_checkpoint
-        from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
+        from protomotions.maniflow.loader import DEFAULT_H1_CHECKPOINT
 
-        ckpt = config.maniflow_ckpt or str(discover_best_checkpoint(FLEXION100_RUN_DIR))
+        ckpt = config.maniflow_ckpt or str(DEFAULT_H1_CHECKPOINT)
         estimator = ManiFlowAngleEstimator.from_checkpoint(
             ckpt, num_envs=n, device=dev,
             denoise_steps=int(config.maniflow_denoise_steps or DEFAULT_DENOISE_STEPS),

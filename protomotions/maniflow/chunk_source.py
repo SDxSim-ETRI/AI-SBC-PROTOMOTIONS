@@ -138,13 +138,10 @@ class ManiFlowChunkSource:
     def from_config(
         cls, config: "MotionAssistTargetControlConfig", env: "BaseEnv"
     ) -> "ManiFlowChunkSource":
-        """`MotionAssistTargetControlConfig`에서 소스를 만든다 (체크포인트 자동 탐색)."""
-        from protomotions.maniflow.loader import discover_best_checkpoint
-        from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
+        """`MotionAssistTargetControlConfig`에서 소스를 만든다 (체크포인트 생략 시 현역 H1)."""
+        from protomotions.maniflow.loader import DEFAULT_H1_CHECKPOINT
 
-        ckpt = config.maniflow_ckpt
-        if not ckpt:
-            ckpt = str(discover_best_checkpoint(FLEXION100_RUN_DIR))
+        ckpt = config.maniflow_ckpt or str(DEFAULT_H1_CHECKPOINT)
         denoise = config.maniflow_denoise_steps or DEFAULT_DENOISE_STEPS
         estimator = ManiFlowAngleEstimator.from_checkpoint(
             ckpt,

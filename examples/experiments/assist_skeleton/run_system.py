@@ -23,8 +23,8 @@
 두 env는 같은 mocap 클립·같은 초기 상태에서 시작한다 (paired 비교).
 보조 효과를 해석할 때 물리 실행 산포와 동작 추종도 함께 확인한다.
 
-기본 비교 기준: W1 착용자 + H1 각도 예측 + L1 보조(출력 0.5배), 기존 걷기.
-다른 LLP 체크포인트와 오라클 진단의 기본 출력 배율은 1이다.
+기본 조합: W1 착용자 + H1 각도 예측 + L18 보조(Transformer+FPO++, 출력 배율 1 = ±20 N·m), 기존 걷기.
+H1·L18은 저장소 안의 `checkpoints/`(Git LFS)에서 읽는다. 출력 배율 기본값은 모든 LLP와 오라클에서 1이다.
 
 착용자 대역 (--human):
     mocap_pd  골반 고정(fix_base_link + z 상승) + 관절 built-in PD가 mocap 각도를
@@ -85,18 +85,15 @@ from protomotions.assist.skeleton_features import (  # noqa: E402
     lumbar_indices,
 )
 from protomotions.maniflow.hybrid_control import JointTorqueOverride  # noqa: E402
+from protomotions.maniflow.loader import DEFAULT_H1_CHECKPOINT  # noqa: E402
 from protomotions.utils.hydra_replacement import get_class  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analysis import analyze  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
-DEFAULT_LLP_CHECKPOINT = "checkpoints/L1_llp_pendulum/last.ckpt"
-DEFAULT_HLP_CHECKPOINT = str(
-    Path.home() / "Projects/ManiFlow_Policy/ManiFlow/data/outputs"
-    / "hip_flexion_seed-maniflow_lowdim_policy_walking-flexion100-h15-swap-run01_seed42"
-    / "checkpoints/epoch=0008-val_loss=0.000834.ckpt"
-)
+DEFAULT_LLP_CHECKPOINT = "checkpoints/L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt"
+DEFAULT_HLP_CHECKPOINT = str(DEFAULT_H1_CHECKPOINT.relative_to(REPO))
 MIMIC_EXPERIMENT = REPO / "examples" / "experiments" / "mimic" / "mlp.py"
 HOOK_SIM = "protomotions.simulator.newton.substep_hook.SubstepHookNewtonSimulator"
 HOOK_SIM_FIXED = "protomotions.simulator.newton.substep_hook.SubstepHookFixedBaseNewtonSimulator"
@@ -118,7 +115,7 @@ def parse_args(argv=None):
     p.add_argument("--llp-share-legs", action="store_true",
                    help="단일 관절로 학습한 --llp-checkpoint 하나를 양쪽 다리에 같은 가중치로 적용 (2026-10-21)")
     p.add_argument("--hlp-checkpoint", default=DEFAULT_HLP_CHECKPOINT,
-                   help="H1 flexion100-h15-swap(2026-10-29부터, 관측 토큰 → self-attention)의 검증된 체크포인트 (다른 모델은 경로를 명시)")
+                   help="H1 flexion100-h15-swap(관측 토큰 → self-attention, 노이즈 action 토큰 → cross-attention) 체크포인트")
     p.add_argument("--denoise", type=int, default=1,
                    help="HLP denoise 스텝 (기본 비교 기준: 1)")
     p.add_argument("--calibration", default="wearer",
@@ -129,8 +126,8 @@ def parse_args(argv=None):
     p.add_argument("--llp-dt", type=float, default=0.01, help="LLP 주기 [s] (학습 10 ms)")
     p.add_argument("--seconds", type=float, default=40.0)
     p.add_argument("--warmup", type=float, default=1.0, help="지표에서 제외할 초반 구간 [s]")
-    p.add_argument("--assist-scale", type=float, default=None,
-                   help="B에 주입하는 토크 배율 (0 = 차단). 생략하면 보관 L1 정책은 0.5, 다른 정책·오라클은 1")
+    p.add_argument("--assist-scale", type=float, default=1.0,
+                   help="B에 주입하는 토크 배율 (0 = 차단, 1 = 학습한 출력 그대로)")
     # --- 오라클 진단: 학습된 정책 대신 정해진 규칙의 토크를 B에 강제 주입한다 (정책이 아니라 탐침) ---
     p.add_argument("--oracle", choices=["off", "beta", "phase"], default="off",
                    help="off: LLP 정책 / beta: τ = β·(착용자가 직전 창에 실제로 낸 토크) / "
@@ -185,9 +182,6 @@ def parse_args(argv=None):
     p.add_argument("--fullbody-diagnostic", action="store_true",
                    help="전신 상태·PD 목표·400 Hz 동역학/접촉을 별도 파일로 기록 (정책 입력 변경 없음)")
     args = p.parse_args(argv)
-    if args.assist_scale is None:
-        is_l1 = Path(args.llp_checkpoint).resolve() == (REPO / DEFAULT_LLP_CHECKPOINT).resolve()
-        args.assist_scale = 0.5 if is_l1 and args.oracle == "off" else 1.0
     if args.record:
         args.viewer = True
     return args

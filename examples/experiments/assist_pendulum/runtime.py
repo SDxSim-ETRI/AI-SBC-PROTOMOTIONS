@@ -28,7 +28,7 @@
   조건마다 별도 프로세스로 돈다 (chunk 소스는 env 생성 시점에 정해지고 Newton/Fabric을 한 프로세스에서
   재생성하지 않기 위함).
 
-    python examples/experiments/assist_pendulum/runtime.py play --checkpoint checkpoints/L1_llp_pendulum/last.ckpt
+    python examples/experiments/assist_pendulum/runtime.py play --checkpoint checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt
     python examples/experiments/assist_pendulum/runtime.py compare --checkpoint <ckpt> --num-envs 8 --num-steps 1000
     python examples/experiments/assist_pendulum/runtime.py check-env --num-envs 64 --steps 1500 -- --recipe R0
     python examples/experiments/assist_pendulum/runtime.py abc --checkpoint <ckpt> --zarr <zarr> --split val --out results/eval_abc/seed_val

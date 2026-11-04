@@ -33,7 +33,7 @@ chunk_source=maniflow)와 **같은 관측을 조립해 같은 action을 내는�
 
 실행 (sbc env):
     python -m protomotions.assist.verify_controller \
-        --checkpoint checkpoints/L1_llp_pendulum/last.ckpt \
+        --checkpoint checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt \
         --zarr ~/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr
 """
 
@@ -69,7 +69,7 @@ TOL_AGE = 1e-6
 
 def _parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--checkpoint", default="checkpoints/L1_llp_pendulum/last.ckpt")
+    p.add_argument("--checkpoint", default="checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt")
     p.add_argument("--hlp-checkpoint", default=None)
     p.add_argument("--hlp-denoise-steps", type=int, default=1)
     p.add_argument("--zarr", default=DEFAULT_ZARR)
@@ -117,10 +117,9 @@ def _hlp_checkpoint(args) -> str:
     """env의 chunk 소스와 같은 HLP 체크포인트 (ManiFlowChunkSource.from_config 규칙)."""
     if args.hlp_checkpoint:
         return str(Path(args.hlp_checkpoint).expanduser().resolve())
-    from protomotions.maniflow.loader import discover_best_checkpoint
-    from protomotions.maniflow.verify_angle_estimator import FLEXION100_RUN_DIR
+    from protomotions.maniflow.loader import DEFAULT_H1_CHECKPOINT
 
-    return str(discover_best_checkpoint(FLEXION100_RUN_DIR))
+    return str(DEFAULT_H1_CHECKPOINT)
 
 
 def _make_controller(env, comp, args, external_chunk: bool) -> AssistController:

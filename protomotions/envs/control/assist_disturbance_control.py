@@ -36,7 +36,7 @@
 3. **반전 브레이크 (reversal brake, L3 2026-09-29)** — 의도 θ_g가 반전(θ̇_g 부호 바뀜)에 `reversal_brake_lead` 안으로
    다가오면 확률 `reversal_brake_prob`로 외부 점성 토크 −c·θ̇(실제 각속도)를 건다. 실제 보행에서 유각 말기 대퇴는
    무릎 결합·지면으로 **공짜로 감속**하는데(사람 범위 착용자 W1의 그 구간 hip 토크 ≈ 0), 접촉 없는 진자는 감속에
-   토크가 필요해서 정책이 "감속 중 = 브레이크 도움"을 배웠다(L1·L2의 유각 말기 오방향). 이 사건이 그 감속을 대신
+   토크가 필요해서 정책이 "감속 중 = 브레이크 도움"을 배웠다(2026-09 초기 진자 정책들의 유각 말기 오방향). 이 사건이 그 감속을 대신
    해 주어, 브레이크 도움이 평균적으로 손해가 되게 한다. 환경 토크(착용자 토크 미포함).
 
 θ_g 다양화(계단·램프·비주기)는 부모 config의 `blend_range`·`hold_prob`로 실험 파일에서
@@ -102,7 +102,7 @@ class DisturbedAssistTargetControlConfig(MotionAssistTargetControlConfig):
     reversal_brake_min_vel: float = 0.3                # 이보다 느리면 반전으로 안 침 [rad/s]
     # 반전 사건의 종류 (L5, 2026-09-29): "viscous" = −c·θ̇ (L3·L4) | "feedforward" = κ·I_eff·θ̈_g — 의도가 반전에서
     # 요구하는 관성 토크의 κ배를 환경이 대신 낸다(실제 다리의 무릎 결합·중력이 하는 일). 진자 정책은 "의도의 관성
-    # 토크를 대신 내는 피드포워드"를 배우는데, 실제 다리에선 반전 관성이 공짜라 그 브레이크가 손해였다(L1~L4 공통).
+    # 토크를 대신 내는 피드포워드"를 배우는데, 실제 다리에선 반전 관성이 공짜라 그 브레이크가 손해였다(2026-09 초기 진자 정책 공통).
     reversal_brake_mode: str = "viscous"
     reversal_ff_gain_range: Tuple[float, float] = (0.5, 1.2)   # κ
     reversal_ff_after: float = 0.10                           # 반전 뒤에도 이만큼 유지 [s]

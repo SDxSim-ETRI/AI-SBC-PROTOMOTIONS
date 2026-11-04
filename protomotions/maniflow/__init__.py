@@ -51,6 +51,7 @@ from protomotions.maniflow.channels import (  # noqa: F401
     hip_dof_indices,
 )
 from protomotions.maniflow.loader import (  # noqa: F401
+    DEFAULT_H1_CHECKPOINT,
     discover_best_checkpoint,
     ensure_maniflow_importable,
     load_maniflow_policy,
