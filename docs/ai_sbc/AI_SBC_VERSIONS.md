@@ -42,6 +42,7 @@ LLP는 모두 20·tanh 출력, 한계 ±20 N·m, 출력 배율 1, 10 ms 제어�
 - 위 표 밖의 LLP 가중치를 지웠다: `results/` 아래 903개(4.4 GB)와 git의 옛 LLP 폴더 6개.
   L15 이전 계보 전부, 진자 FPO++ 모델, 남긴 run의 다른 epoch·`last.ckpt`가 포함된다.
   각 run 폴더의 학습 설정(`resolved_configs*.pt`, `config.yaml`)·로그·평가 기록은 남아 있다.
+- 2026-11-05 ManiFlow_Policy 정리: 지운 모델의 학습 로그(run 폴더 8개)와 학습 자료(zarr 등 14개, 합계 19 GB)를 지우고, 그 모델에만 쓰던 코드·문서를 뺐다(ManiFlow 커밋 `b048c02`, 원본은 `results/maniflow_retired_20261105/`, 목록은 `results/weights_cleanup_20261104/deleted_maniflow_data_20261105.txt`). 남은 자료는 H1 학습·평가 100 fps zarr, 기본 설정용 mini zarr, 영점 기준값 확인용 40 fps zarr 2개다.
 - ManiFlow 체크포인트는 H1 원본 하나만 남기고 21개(8.8 GB)를 지웠다: 옛 H1(관측 cross-attention, flexion100-h15-run01), 40 fps 판(flexion40),
   초기 hips·IMU 모델, 2026-05 이미지 정책. 학습 자료(zarr)는 그대로다.
 - L15 이전 계보는 기준·비교 대상으로 쓰지 않는다. 그 계보에만 쓰던 코드(다리별 공유 LLP, 유각 게이트, 기준 비교 보고서, 7월 토크 예측기)는
