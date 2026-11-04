@@ -31,7 +31,7 @@ Usage (sbc conda env, repo 루트에서):
   python -m protomotions.maniflow.verify_angle_estimator
 
 기본값은 H1 저장소 사본(`loader.DEFAULT_H1_CHECKPOINT`) / suit14-100fps zarr /
-같은 H1의 2026-10-29 오프라인 평가(denoise 1). 다른 모델은 --ckpt·--eval-zarr·
+같은 H1의 2026-11-05 오프라인 평가(denoise 1, float64 평균). 다른 모델은 --ckpt·--eval-zarr·
 --reference-metrics를 함께 준다. 결과는 results/angle_estimator_verify/<ts>/에 저장.
 """
 
@@ -62,13 +62,13 @@ from protomotions.maniflow.loader import (
 # 옛 H1(관측 cross-attention)과 40 fps 판은 2026-11-04에 가중치를 지웠다.
 SUIT14_100FPS_ZARR = DEFAULT_MANIFLOW_ROOT / "data" / "hip-flexion-etri-suit14-100fps.zarr"
 # 재현 대상으로 고정한 기준 평가: 같은 H1, suit14-100fps, denoise 1, seed 0.
-# 보정 후 MAE 0.53°/0.49°, lead 10/20/50 ms 0.23/0.34/1.03°.
+# 보정 후 MAE 0.53°/0.48°, lead 10/20/50 ms 0.23/0.34/1.04°. (2026-10-29 기록은 학습 자료 평균을 float32로 구해 영점 오프셋이 1.5~1.9° 어긋났다)
 REFERENCE_DENOISE = 1
 REFERENCE_METRICS = (
     DEFAULT_MANIFLOW_ROOT.parent
     / "eval_results"
     / "hip_imu_reference_compare"
-    / "2026-10-29_03-10-21"
+    / "2026-11-05_01-37-40"
     / "metrics.json"
 )
 
@@ -80,7 +80,9 @@ TOL_LEAD_MAE_DEG = 0.10
 
 
 def compute_metrics(pred: np.ndarray, gt: np.ndarray) -> dict:
-    """기준 스크립트의 metrics()와 동일한 정의 (rad 입력)."""
+    """기준 스크립트의 metrics()와 동일한 정의 (rad 입력, float64로 계산)."""
+    pred = pred.astype(np.float64)
+    gt = gt.astype(np.float64)
     err = pred - gt
     mae = np.abs(err).mean(0)
     rmse = np.sqrt((err**2).mean(0))
@@ -169,8 +171,9 @@ def main():
         if not Path(train_zarr).is_absolute():
             train_zarr = str(DEFAULT_MANIFLOW_ROOT / train_zarr)
     zt = zarr.open(train_zarr, mode="r")
-    train_mean = zt["data/state"][:].mean(0)
-    obs_offset = (train_mean - state.mean(0)).astype(np.float32)
+    # 수천만 프레임 평균은 float32로 누적하면 1~2° 어긋난다 → float64로 구한다
+    train_mean = zt["data/state"][:].mean(0, dtype=np.float64)
+    obs_offset = (train_mean - state.mean(0, dtype=np.float64)).astype(np.float32)
     print(
         "obs offset (deg): "
         + ", ".join(
@@ -220,7 +223,7 @@ def main():
     ref_all = np.concatenate(ep_ref)
     lead_all = np.concatenate(ep_lead)
 
-    bias = (pred_all - ref_all).mean(0)
+    bias = (pred_all - ref_all).mean(0, dtype=np.float64)
     print(
         "output bias (deg): "
         + ", ".join(

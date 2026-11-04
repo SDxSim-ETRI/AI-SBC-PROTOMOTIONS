@@ -33,7 +33,7 @@
 오프라인 기준에 없는 lead는 판정하지 않고 **측정값을 보고**하며, 오차가 lead에
 따라 단조 증가하는지만 확인한다.
 
-기본값은 H1 저장소 사본 / suit14-100fps zarr / 같은 H1의 2026-10-29 오프라인 평가
+기본값은 H1 저장소 사본 / suit14-100fps zarr / 같은 H1의 2026-11-05 오프라인 평가
 (`verify_angle_estimator.REFERENCE_METRICS`, denoise 1).
 
 실행:
@@ -171,9 +171,9 @@ def per_lead_mae_deg(pred: np.ndarray, gt: np.ndarray, bias_leads: int = 0):
             MAE를 왜곡한다).
     """
     k_bias = pred.shape[1] if bias_leads <= 0 else min(bias_leads, pred.shape[1])
-    bias = (pred[:, :k_bias] - gt[:, :k_bias]).reshape(-1, pred.shape[-1]).mean(0)
+    bias = (pred[:, :k_bias] - gt[:, :k_bias]).reshape(-1, pred.shape[-1]).mean(0, dtype=np.float64)
     err = np.abs((pred - bias) - gt)  # (S, K, 2)
-    return [float(math.degrees(err[:, k].mean())) for k in range(pred.shape[1])], bias
+    return [float(math.degrees(err[:, k].mean(dtype=np.float64))) for k in range(pred.shape[1])], bias
 
 
 def main():
@@ -224,7 +224,8 @@ def main():
         if not Path(train_zarr).is_absolute():
             train_zarr = str(DEFAULT_MANIFLOW_ROOT / train_zarr)
     obs_offset = (
-        zarr.open(train_zarr, mode="r")["data/state"][:].mean(0) - state.mean(0)
+        zarr.open(train_zarr, mode="r")["data/state"][:].mean(0, dtype=np.float64)  # float32 누적은 1~2° 어긋남
+        - state.mean(0, dtype=np.float64)
     ).astype(np.float32)
     print(
         "obs offset (deg): "
