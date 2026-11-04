@@ -39,9 +39,6 @@ data/motion_for_trackers/skeleton_torque_suit_gait.pt
 !/docs/ai_sbc/AI_SBC_FRAMEWORK.md
 !/docs/ai_sbc/AI_SBC_VERSIONS.md
 !/docs/ai_sbc/experiment_summary.html
-!/docs/ai_sbc/pendulum_pretrain_discussion.md
 !/docs/ai_sbc/organize_reports.py
 !/docs/ai_sbc/reports.html
 !/docs/ai_sbc/report_catalog.json
-!/docs/ai_sbc/l1_w1_report.html
-!/docs/ai_sbc/l1_w1_baseline.json

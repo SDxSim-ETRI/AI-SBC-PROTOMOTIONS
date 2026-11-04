@@ -12,23 +12,21 @@
 | 항목 | 기본값 |
 |---|---|
 | 가상 착용자 | W1, `checkpoints/W1_wearer_human/last.ckpt` |
-| 각도 예측기 | H1 flexion100-h15-swap (2026-10-29부터), 버전표에 고정한 epoch 8 파일 |
-| 보조 제어기 | L1, `checkpoints/L1_llp_pendulum/last.ckpt`, 출력 0.5배 |
+| 각도 예측기 | H1, `checkpoints/H1_maniflow_swap/epoch_0008.ckpt` (flexion100-h15-swap의 EMA 가중치 사본) |
+| 보조 제어기 | L18, `checkpoints/L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt` (Transformer+FPO++), 출력 배율 1 |
 | 동작 | `data/motion_for_trackers/skeleton_torque_suit_gait.pt`, 걷기 0번 (달리기 1번) |
 | 시간 | 물리 400 Hz, 착용자 20 Hz, 보조 100 Hz, 평가 40초 |
 | 예측 | 입력 100 Hz, 현재부터 50 ms까지 6점, LLP가 쓰는 미래 창은 0/10/20 ms |
 | 영점 | 첫 1초의 무보조 착용자 관측 평균 (`--calibration wearer`) |
 
-L1 출력 0.5배는 학습 토크 한계 ±40 N·m에 곱해 약 ±20 N·m를 주입하는 조건이다.
+보관한 LLP(L15–L18)는 모두 20·tanh 출력·한계 ±20 N·m로 학습했으므로 출력 배율 1(`--assist-scale` 기본값)로 쓴다.
 `--torque-limit`은 배율 적용 전 제어기 한계다. 두 값을 혼동하지 않는다.
-**다른 경로의 LLP 정책과 오라클 진단은 배율을 생략하면 1을 쓴다.**
-L1을 다른 위치로 복사해 평가할 때는 `--assist-scale 0.5`를 명시한다.
-명시한 `--assist-scale`은 자동 선택보다 우선한다.
+다른 LLP는 `--llp-checkpoint checkpoints/<버전>/epoch_N.ckpt`로 고른다(같은 폴더에 `resolved_configs_inference.pt` 필요).
 
 ## 실행
 
 ```bash
-# 기본 W1 + H1 + L1 × 0.5, 기존 걷기 40초. 기본은 headless.
+# 기본 W1 + H1 + L18, 기존 걷기 40초. 기본은 headless.
 python examples/experiments/assist_skeleton/run_system.py
 
 # 같은 기준의 달리기
@@ -50,15 +48,15 @@ python examples/experiments/assist_skeleton/evaluate.py native-wearer \
 전용 평가기의 출력 폴더는 실행마다 새 경로를 사용한다. 기존 결과를 덮어쓰지 않는다.
 새 실제 보행은 W1의 무보조 추종부터 확인한다. 이 단계를 통과하기 전에는 보조 성능을 판정하지 않는다.
 
-연구 후보를 비교할 때는 체크포인트·배율·한계를 명시한다. 예:
+다른 보관 모델이나 연구 후보를 비교할 때는 체크포인트·동작·seed를 명시한다. 예:
 
 ```bash
 python examples/experiments/assist_skeleton/run_system.py \
-    --llp-checkpoint results/llp_relative_R0_s0_20261020/epoch_6000.ckpt \
-    --assist-scale 0.5 --motion-id 0 --seconds 40
+    --llp-checkpoint checkpoints/L17_mlp_ppo_scratch_walkrun/epoch_200.ckpt \
+    --motion-id 1 --seconds 40 --seed 7
 ```
 
-이 명령은 기존 걷기의 연구 후보 평가다. 범용 보행이나 실기기 성능을 입증하지 않는다.
+이 명령은 기존 달리기 기록의 평가다. 범용 보행이나 실기기 성능을 입증하지 않는다.
 골반 고정 진단은 `--human mocap_pd`로 선택한다. 지면을 딛고 걷는 W1 평가와 별도 조건이다.
 과거 결과를 재현하려면 당시 `meta.json`의 모델·모션·영점·배율·시간 옵션을 모두 명시한다.
 이전 기본값(v3, 초기 착용자, 단일 walk 파일, motion 영점, 30초)에 의존한 명령은 그대로 재현되지 않는다.
@@ -77,14 +75,13 @@ HLP 계산 시간은 별도 기록한다. `--hlp-latency-ms 0`은 계산 지연�
 `--swing-gate 0.20`은 관절각만 보는 유각 브레이크 게이트다 (2026-10-14, `protomotions/assist/controller.py`).
 각 hip 관절각이 자기 중간값(지수이동평균)을 굴곡 방향으로 지나는 순간부터 같은 hip의 직전 교차 간격 × 0.20
 동안 신전 보조를 0으로 둔다. 걷기에서 유각 중·후반(참조 위상 68–92 %)의 다리 감속은 무릎 결합·중력이 내고
-착용자 hip 토크는 ≈0인데, 진자에서 배운 L1은 감속을 보고 브레이크를 걸어 착용자가 같은 크기로 맞서던 구간을
-끊는다. W1 평가: 걷기 τ² −18.7 → −26.5 %, 달리기 −24.3 → −31.0 % (`docs/ai_sbc/walking_swing_gate.html`).
+착용자 hip 토크는 ≈0인데, 진자에서 배운 정책이 감속을 보고 브레이크를 걸어 착용자가 같은 크기로 맞서던 구간을
+끊는 진단이다(2026-10-14, 지금은 지운 진자 모델로 측정: [보관 보고서](../../../docs/ai_sbc/archive/reports/walking_swing_gate.html)).
 손으로 만든 위상 규칙이라 **진단 기준값**이지 배포 후보가 아니다.
 
 ```bash
 python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20                 # 걷기
 python examples/experiments/assist_skeleton/run_system.py --swing-gate 0.20 --motion-id 1   # 달리기
-python examples/experiments/assist_skeleton/report.py swing-gate --out docs/ai_sbc/walking_swing_gate.html
 ```
 
 ## 파일 역할

@@ -47,60 +47,60 @@ CATALOG = [
          purpose='보조 한계 20 N·m(배율 1)로 진자에서 학습한 정책(L15)을 W1에서 평가하고, 가상 착용자 W1과 예측기를 연결한 전신 시뮬레이션에서 걷기·달리기 각각 이어서 학습한 뒤 보행 진행률 10 % 구간별 토크 실효값 감소량으로 비교. 같은 추가학습을 R0 ×0.5에서 시작한 계보와 L1 ×0.5를 기준으로 병기. 앞부분에 예측기(관측 토큰 ↔ 노이즈 action 토큰열 자리 맞바꿈) 비교',
          result='20 N·m 모델은 최대출력 95% 이상 사용 시간비율 76–84 %에 걷기 −17.8 %·달리기 −22.4 %로 L1 ×0.5와 비슷했고 추가학습 뒤 −22.3 / −25.0 %. R0 ×0.5에서 시작한 추가학습은 −26.5 / −25.6 %, 걷기 모델→달리기 −30.2 %로 더 크고 최대출력 95% 이상 사용 시간비율 절반. 예측기 자리 맞바꿈은 H1과 같은 수준(denoise 1에서 0.03–0.05° 낮음, 지연 +0.25 ms).',
          limit='학습 seed 하나씩, W1 하나, 걷기·달리기 기록 하나씩. 추가학습은 클립 앞 20 s 구간만 학습하고 전체 40 s를 평가. 실기기 검증 아님.'),
-    dict(file='261022_llp20_motion_shared/report.html', group='current', title='LLP 20 N·m · 단일 관절 학습·양다리 공유·실제 동작 궤적 · A·Δ 2×2 (그래프)', date='2026-10-22',
+    dict(file='261022_llp20_motion_shared/report.html', group='archive', title='LLP 20 N·m · 단일 관절 학습·양다리 공유·실제 동작 궤적 · A·Δ 2×2 (그래프)', date='2026-10-22',
          purpose='R0 레시피를 20·tanh, SEED 실제 고관절 동작(가벼운 다리 집단 포함), 단일 관절 학습 후 양다리 가중치 공유로 다시 학습하고, 보조 토크² 벌점 A·명령 변화 벌점 Δ를 켜고 끈 네 모델을 W1·진자(SEED 미학습 동작, ETRI 13동작, 합성 궤적)에서 L1·R0와 비교',
          result='네 모델 모두 W1에서 L1 ±20보다 덜 줄였다(기존 걷기 149/−123/−132/81, 달리기 637/413/229/155 vs L1 278·756). 학습 분포 진자에서는 에뮬레이션 예측으로 τ² 32–36 % 감소(R0 30 %)지만 실제 H1 예측이면 7–14 %로 떨어져, 학습 때 예측 신호와 배포 H1의 차이가 원인으로 보인다. A·Δ 효과는 평가마다 방향이 다르다.',
          limit='학습 seed 하나·W1 하나·걷기와 달리기 기록 하나씩. 세 공통 변경을 함께 적용해 R0와의 차이를 하나의 원인으로 나눌 수 없다. 10 Hz 저역통과는 모터 모델이 아닌 민감도 점검.'),
-    dict(file='261021_r0_generalization/report.html', group='current', title='R0 일반화 · 달리기와 다른 걷기 구간에서 L1 대비 개선 유지 여부 (그래프)', date='2026-10-21',
+    dict(file='261021_r0_generalization/report.html', group='archive', title='R0 일반화 · 달리기와 다른 걷기 구간에서 L1 대비 개선 유지 여부 (그래프)', date='2026-10-21',
          purpose='R0가 평가된 적 없는 조건(달리기, 같은 걷기 기록의 400–440 s 구간)에서 L1 ±10/15/20·R0 ±15/20 N·m를 같은 W1·H1으로 평가하고, 같은 보조 RMS·같은 저부담 손해의 L1 곡선과 비교',
          result='같은 보조 RMS에서 R0 ±20 이득은 L1 곡선보다 기존 걷기 +18 %, 400–440 s 구간 +35 %로 유지됐지만 달리기는 −34 %(±20 이득 436 vs L1 756)로 유지되지 않았다. 달리기에서 R0 보조는 필요 토크가 큰 구간에서 오히려 작아진다. 낙상 0.',
          limit='W1 하나·걷기와 달리기 기록 하나씩·R0 학습 seed 하나. W1이 학습하지 않은 동작은 무보조에서도 넘어져 평가하지 못했고, 0.85·1.15배 재생 걷기는 실제 속도 변화가 아니라 제외했다.'),
-    dict(file='261020_relative/phase_report.html', group='current', title='상위 5개 LLP와 L1 · 걷기 위상별 도움과 방해 (그래프)', date='2026-10-20',
+    dict(file='261020_relative/phase_report.html', group='archive', title='상위 5개 LLP와 L1 · 걷기 위상별 도움과 방해 (그래프)', date='2026-10-20',
          purpose='학습 전 고정한 점수로 고른 상위 5개(R0·F1·R1·F2·G0)와 L1을 ±20 N·m에서 위상별·필요 토크별·다른 관절·진자 일반화 그래프로 비교',
          result='R0만 L1보다 점수가 높다. 저부담·최악 위상 방해가 절반 이하지만 보조 RMS도 절반이며, 배율 1로 쓰면 L1과 같은 이득·방해로 돌아간다. 필요 토크 5 N·m 미만에서 보조 방향은 모든 모델이 무작위 수준이다.',
          limit='저장 기록만 사용한 그래프 요약이다. 기존 걷기 한 클립·동결 W1/H1·학습 seed 하나.'),
-    dict(file='261020_relative/report.html', group='current', title='진자 사전학습 R0/R1 · 토크 경로 대조와 무보조 대비 토크 증가 비용', date='2026-10-20',
+    dict(file='261020_relative/report.html', group='archive', title='진자 사전학습 R0/R1 · 토크 경로 대조와 무보조 대비 토크 증가 비용', date='2026-10-20',
          purpose='L1→R0(올바른 토크 경로만)→R1(R0+무보조 진자 대비 착용자 토크 증가 비용)로 한 번에 한 가지씩 바꿔 새 PPO 2개를 학습하고 W1·진자에서 L1/G0/G4/F1/F2와 같은 출력으로 비교',
          result='R0 ±20 N·m: 고관절 τ² 감소 262.03(L1 278.04), 저부담 감속 RMS 증가 3.27(L1 7.67), 최악 위상 7.57(L1 14.94) N·m, 포화 0.5 %. 과거 토크 경로가 L1 포화 출력의 주원인. R1은 출력만 줄고(이득 135.59) 방향 정확도가 떨어져 채택하지 않음.',
          limit='학습 seed 하나, 기존 걷기 한 클립·동결 W1/H1. 엄격한 공동 기준(평균 이득 ≥ L1)은 R0도 미달. 실기기 검증 아님.'),
-    dict(file='261020_feasible/report.html', group='current', title='진자 사전학습 F1/F2 · 실제 PPO와 W1 전이', date='2026-10-20',
+    dict(file='261020_feasible/report.html', group='archive', title='진자 사전학습 F1/F2 · 실제 PPO와 W1 전이', date='2026-10-20',
          purpose='올바른 토크 경로+관성 제한 C2 전환(F1)과 흡수 파워 비용 추가(F2)를 처음부터 학습해 L1/G0/G4와 같은 출력에서 비교',
          result='F2 ±20 N·m는 작은 보조 RMS로 비슷한 고관절 이득(284.35)을 냈지만 저부담 손해(8.07)와 진자 일반화가 L1보다 나빴다. F1은 손해는 작지만 이득이 크게 줄었다. L1 대체 모델 없음.',
          limit='F1 대 L1은 토크 경로와 궤적을 함께 바꾼 비교다. 학습 seed 하나, 동결 W1/H1 평가.'),
-    dict(file='261016_output_scale/report.html', group='current', title='공통 출력 크기와 저부담 감속 진단', date='2026-10-16',
+    dict(file='261016_output_scale/report.html', group='archive', title='공통 출력 크기와 저부담 감속 진단', date='2026-10-16',
          purpose='L1·G0·G4의 실제 출력 범위를 맞춰 크기 효과와 저부담 감속 방해를 분리', result='24건 완료. L1의 20→10 N·m에서 저부담 감속 RMS 증가 7.67→2.27 N·m. 같은 20 N·m에서도 G4는 11.29/11.01 N·m로 차이가 남았다.', limit='기존 걷기 한 클립·동결 W1/H1 평가이며 새 학습이나 실기기 검증이 아니다.'),
-    dict(file='experiment_summary.html', group='start', title='전체 실험 결과 요약', date='2026-10-20',
-         purpose='연구의 흐름과 현재 해결할 문제', result='R0(올바른 토크 경로만)가 같은 ±20 N·m에서 L1 이득의 94 %를 유지하며 저부담·최악 위상 손해를 절반 이하로 줄였다. 범용 L1 대체 확정은 아니며 반복 seed 검증이 남았다.', limit='범용 보행이나 실기기 성공을 입증한 결과는 아니다.'),
-    dict(file='261015_1815/training_plan.html', group='current', title='23 N·m LLP 일반화 학습 · 설계와 설명', date='2026-10-15',
+    dict(file='experiment_summary.html', group='start', title='전체 실험 결과 요약', date='2026-11-04',
+         purpose='연구의 흐름, 남긴 모델과 현재 해결할 문제', result='기본 조합은 W1 + H1 + L18(Transformer+FPO++). 전신 시뮬레이션에서 처음부터 학습한 L17·L18이 진자 사전학습 계보(L15·L16)보다 걷기·달리기 모두 좋다(L18 −30.1 / −29.3 %, L17 −24.0 / −35.4 %).', limit='학습 seed 하나·W1 하나·걷기와 달리기 기록 하나씩. 범용 보행이나 실기기 성공을 입증한 결과는 아니다.'),
+    dict(file='261015_1815/training_plan.html', group='archive', title='23 N·m LLP 일반화 학습 · 설계와 설명', date='2026-10-15',
          purpose='G1 기본·G0 대조를 포함한 다섯 조건, PPO·tanh와 scale·H1 평가의 역할 정리', result='무작위 초기화 ±23 N·m, PA 제외, L1 ×0.5 유지. 7개 학습·평가를 완료했으며 설계와 최종 결과를 구분해 기록했다.', limit='설계 문서이며 성능 결과가 아니다. 짧은 충격 외란은 순간 관성 변화나 heel strike 접촉의 재현이 아니다.'),
-    dict(file='261015_1815/walking_phase_report.html', group='current', title='23 N·m LLP · 보행 phase별 도움과 방해', date='2026-10-16',
+    dict(file='261015_1815/walking_phase_report.html', group='archive', title='23 N·m LLP · 보행 phase별 도움과 방해', date='2026-10-16',
          purpose='각 후보와 L1의 좌우 위상별 착용자 부담·보조 토크를 시각적으로 비교', result='8개 모두 40초 완주. G4의 보행 후반 방해는 L1보다 컸고 G0는 평균 개선에도 다른 구간 방해가 남았다.', limit='기존 걷기 한 클립의 동결 W1/H1 진단이다. 실기기 성공이나 최종 순위를 뜻하지 않는다.'),
-    dict(file='261015_1815/FINAL_RESULTS.html', group='current', title='23 N·m LLP · 최종 판단과 남은 문제', date='2026-10-16',
+    dict(file='261015_1815/FINAL_RESULTS.html', group='archive', title='23 N·m LLP · 최종 판단과 남은 문제', date='2026-10-16',
          purpose='계산 완료와 일반 모델 목표 달성을 구분', result='진자 선정 G4도 별도 난수 평가에서 L1 기준 미달. 조건부 달리기는 생략했고 모든 후보의 걷기는 완료했다.', limit='L1을 대체할 일반 모델을 확보했다는 결론이 아니다.'),
-    dict(file='261015_1815/pendulum_results.html', group='current', title='23 N·m LLP · 진자 평가와 음수 reward 기여', date='2026-10-16',
+    dict(file='261015_1815/pendulum_results.html', group='archive', title='23 N·m LLP · 진자 평가와 음수 reward 기여', date='2026-10-16',
          purpose='40개 평가의 부담·추종·일률과 실제 보상 기여 비교', result='보조 비용 강화는 포화를 줄였으나 L1 대체 실패. 사람 비용 2배만으로 개선되지 않았다.', limit='보상 기여는 평가 궤적에 학습 가중치를 적용한 값이며 학습 전체 평균이 아니다.'),
-    dict(file='pendulum_candidates_report.html', group='current', title='진자 LLP 후보 3종 · 그래프 비교', date='2026-10-15',
+    dict(file='pendulum_candidates_report.html', group='archive', title='진자 LLP 후보 3종 · 그래프 비교', date='2026-10-15',
          purpose='PA_E @100·L1 ×0.5·C0 @5000의 실제 H1 진자 평가를 부담·추종·일률 그래프로 비교', result='고정 평가에서 PA_E @100은 L1보다 부담·추종·일률을 소폭 개선했다. 더 긴 PA_E 학습은 부담을 줄여도 추종 오차가 커졌다.', limit='앞서 선정한 세 계열의 고정 비교다. 전체 모델의 확정 순위나 여러 seed·W1 전이 검증 결과가 아니다.'),
-    dict(file='pendulum_research_report.html', group='current', title='진자 사전학습 개선 실험', date='2026-10-15',
+    dict(file='pendulum_research_report.html', group='archive', title='진자 사전학습 개선 실험', date='2026-10-15',
          purpose='진자만 학습한 네 모델의 첫 비교와 실제 H1 연결, 후속 검증 상태', result='각 2,000 epoch·24평가 완료. 첫 비교에서 새 모델은 L1 기준에 미달했고, 실제 H1 연결 시 보조 효과도 줄었다. 추가학습·검증 결과를 본문에 갱신한다.', limit='진자 내 결과다. 후속 후보의 재현성과 W1 전이는 각각 완료 여부를 확인해야 한다.'),
     dict(file='walking_retarget_report.html', group='current', title='실제 보행 변환과 착용자 추종', date='2026-10-13',
          purpose='새 원본 보행을 현재 가상 착용자가 따라갈 수 있는지 확인', result='보통·느림 16조건에서 15낙상, 1골반 하강 중 종료. 같은 기존 걷기도 참조 표현을 바꾸면 낙상했다.', limit='보조를 끈 평가다. 데이터 표현·발 접촉·착용자 호환성을 먼저 해결해야 한다.'),
-    dict(file='walking_finetune_report.html', group='current', title='전신 걷기 보조 학습 결과', date='2026-10-11',
+    dict(file='walking_finetune_report.html', group='archive', title='전신 걷기 보조 학습 결과', date='2026-10-11',
          purpose='진자에서 배운 보조 모델을 전신 걷기에서 개선', result='기본 걷기의 고관절 부담은 약 69% 줄었다. 느리게 재생한 조건과 허리·무릎 부담은 해결하지 못했다.', limit='0.85–1.15배는 같은 동작의 재생 속도다. 실제 속도별 보행의 보조 효과와 구분한다.'),
     dict(file='walking_data_audit.html', group='current', title='실제 보행 자료의 범위와 속도', date='2026-10-12',
          purpose='재생 속도 변형과 실제로 다르게 걸은 자료를 구분', result='실제 보통·느림 자료를 확인했고, 빠른 후보의 정지·회전 구간을 선별할 필요가 있었다.', limit='자료 점검 보고서다. 후속 변환·무보조 평가 결과는 착용자 추종 보고서에서 확인한다.'),
-    dict(file='l1_w1_report.html', group='baseline', title='기본 보조 모델의 비교 기준', date='2026-10-01',
+    dict(file='l1_w1_report.html', group='archive', title='기본 보조 모델의 비교 기준', date='2026-10-01',
          purpose='사람 범위 근력의 가상 착용자에서 기존 성능을 재확인', result='출력 0.5배의 기본 모델은 걷기 부담 19.3%, 달리기 부담 23.7%를 줄였고 각각 40초 유지했다.', limit='가상 착용자 한 모델의 개발 기준이다. 출력 배율·토크 한계가 새 후보와 다르다.'),
-    dict(file='walking_swing_gate.html', group='current', title='걷기 유각 브레이크 분석과 관절각 게이트', date='2026-10-14',
+    dict(file='walking_swing_gate.html', group='archive', title='걷기 유각 브레이크 분석과 관절각 게이트', date='2026-10-14',
          purpose='기본 모델 L1이 걷기에서 착용자를 방해하는 구간의 원인을 찾고 관절각만으로 막기', result='방해 구간은 유각 중·후반(68–92 %) 하나다. 관절각 게이트로 걷기 부담 감소가 18.7 %에서 26.5 %, 달리기는 24.3 %에서 31.0 %가 됐다.', limit='가상 착용자 W1, 걷기·달리기 각 한 클립이다. 20–40 %는 손해 구간이 아니었다. 게이트 비율은 W1 걷기에서 정했다.'),
     dict(file='walking_fullbody_diagnostic.html', group='diagnostic', title='무릎·골반 결합과 보조 차단 진단', date='2026-10-10',
          purpose='단순 진자와 전신 걷기의 차이를 실제 물리에서 계측', result='문제 구간의 보조를 끄면 부담이 일부 줄었다. 무릎·골반 운동이 고관절 토크에 크게 기여했다.', limit='참조 보행 구간을 아는 진단이다. 그대로 배포하는 제어 방법이 아니다.'),
-    dict(file='walking_diagnostic.html', group='diagnostic', title='보조가 방해하는 구간과 관측 정보', date='2026-10-09',
+    dict(file='walking_diagnostic.html', group='archive', title='보조가 방해하는 구간과 관측 정보', date='2026-10-09',
          purpose='토크 방향·크기와 정책이 받은 과거·미래 입력을 분석', result='전체 평균의 이득이 특정 구간의 부담 증가를 가렸다. 예측 오차나 관측창 길이 하나로 원인을 확정할 수 없었다.', limit='기존 기록과 정책 재생 분석이다. 후속 전신 계측·학습으로 이어진 과거 진단이다.'),
-    dict(file='l6_l7_torque_report.html', group='diagnostic', title='진자 학습 후보의 구간별 토크 비교', date='2026-10-09까지',
+    dict(file='l6_l7_torque_report.html', group='archive', title='진자 학습 후보의 구간별 토크 비교', date='2026-10-09까지',
          purpose='기본 모델과 진자 학습 후보의 착용자·장치 토크를 비교', result='일부 평균 부담은 줄었지만 구간별 악화가 남았다. 표시된 후보 선정은 전체 기준 통과를 뜻하지 않는다.', limit='기본 모델과 L6·L8·L9의 당시 비교다. 최신 전신 학습 모델의 순위표가 아니다.'),
-    dict(file='versions.html', group='reference', title='모델·데이터 이름과 경로', date='2026-10-13',
-         purpose='원래 모델 이름과 보존 경로를 찾는 표', result='비교 기준과 연구 후보를 구분하고 원본 데이터 코드를 설명한다.', limit='버전 번호가 크다고 더 좋은 모델은 아니다.'),
+    dict(file='versions.html', group='reference', title='모델·데이터 이름과 경로', date='2026-11-04',
+         purpose='보관한 모델(checkpoints/)과 연구 원본·데이터 경로를 찾는 표', result='H1, W1, L15–L18의 경로·학습 조건·평가 수치와 2026-11-04 가중치 정리 내역.', limit='버전 번호가 크다고 더 좋은 모델은 아니다.'),
     dict(file='llp_v13_report.html', group='archive', title='이전 착용자에서의 기본 모델 평가', date='2026-09-28',
          purpose='현재 기준 이전의 강한 착용자 W0에서 진자 정책 평가', result='기본 모델을 보관하게 된 과거 근거다.', limit='현재 W1보다 강한 착용자의 결과다. 현재 성능표와 직접 혼합하지 않는다.'),
     dict(file='transfer_report.html', group='archive', title='초기 진자 정책의 전신 전이 시험', date='2026-09-23',
@@ -346,9 +346,15 @@ def link_for(meta):
     return 'archive/reports/'+meta['file'] if meta['group']=='archive' else meta['file']
 
 
+def up_from(file):
+    """docs/ai_sbc/로 돌아가는 상대 경로 (하위 폴더 보고서는 '../')."""
+    return '../'*(len(Path(file).parts)-1)
+
+
 def build_catalog():
-    body='<header class="report-header"><p class="report-meta">AI-SBC · '+max(m['date'] for m in CATALOG if m['group']!='archive')+' 결과 반영</p><h1>보고서 목록</h1><p>처음에는 전체 요약을 읽고, 필요한 결과와 근거만 선택한다. 과거 참고 자료는 아래에 분리했다.</p><div class="report-outcome"><p><strong>최신 결과</strong> 20 N·m·실제 동작·단일 관절 공유로 다시 학습한 네 모델(A·Δ 2×2)은 W1에서 L1보다 덜 줄였다. 학습 때 예측 신호와 배포 H1의 차이가 원인으로 보인다(2026-10-22).</p><p><a href="261022_llp20_motion_shared/report.html">결과 그래프 읽기 →</a> · <a href="experiment_summary.html">전체 실험 요약</a></p></div></header>'
+    body='<header class="report-header"><p class="report-meta">AI-SBC · '+max(m['date'] for m in CATALOG if m['group']!='archive')+' 결과 반영</p><h1>보고서 목록</h1><p>처음에는 전체 요약을 읽고, 필요한 결과와 근거만 선택한다. 과거 참고 자료는 아래에 분리했다.</p><div class="report-outcome"><p><strong>최신 결과</strong> 기본 조합은 W1 + H1 + L18(Transformer+FPO++)이다. 전신 시뮬레이션에서 처음부터 학습한 LLP가 진자 사전학습 계보보다 걷기·달리기 모두 좋다. L1 계보의 보고서는 아래 과거 참고 자료로 옮겼다(2026-11-04).</p><p><a href="261102_fpo_transformer/report.html">L18 결과 그래프 읽기 →</a> · <a href="experiment_summary.html">전체 실험 요약</a></p></div></header>'
     for group,title in [('current','최근 결과'),('baseline','계속 사용할 비교 기준'),('diagnostic','원인을 확인한 진단'),('reference','모델과 데이터 찾기')]:
+        if not any(m['group']==group for m in CATALOG):continue
         body+=f'<section class="report-section"><h2>{title}</h2><div class="report-cards">'
         for m in CATALOG:
             if m['group']!=group:continue
@@ -379,22 +385,27 @@ def main():
     record=[]
     for meta in CATALOG:
         p=DOCS/meta['file']
+        up=up_from(meta['file'])
         if meta['group']=='archive':
             target=archive/meta['file']
-            # A regenerated old URL replaces the archived presentation on the next pass.
-            source=target.read_text() if target.exists() and 'AI-SBC archived report pointer' in p.read_text() else p.read_text()
-            output=organize(meta,source,'../../')
-            target.write_text(output)
-            pointer=header(meta)+f'<p>이 보고서는 과거 참고 자료로 옮겼습니다.</p><p><a href="archive/reports/{meta["file"]}">원래 수치와 그래프가 있는 보관본 열기 →</a></p>'
-            p.write_text(shell(meta['title'],'<!-- AI-SBC archived report pointer -->'+pointer+footer('')))
+            # 보관본이 기준이다. 옛 주소에 보고서를 새로 만들었으면(안내 페이지가 아니면) 그것으로 보관본을 바꾼다
+            # (그 경우 본문의 상대 링크는 옛 위치 기준이므로 보관 위치로 옮기기 전에 맞춰 둔다).
+            fresh=p.exists() and 'AI-SBC archived report pointer' not in p.read_text()
+            source=p.read_text() if fresh or not target.exists() else target.read_text()
+            target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_text(organize(meta,source,'../../'+up))
+            pointer=header(meta)+f'<p>이 보고서는 과거 참고 자료로 옮겼습니다.</p><p><a href="{up}archive/reports/{meta["file"]}">원래 수치와 그래프가 있는 보관본 열기 →</a></p>'
+            p.parent.mkdir(parents=True,exist_ok=True)
+            p.write_text(shell(meta['title'],'<!-- AI-SBC archived report pointer -->'+pointer+footer(up),'',up))
         else:
             target=p
-            p.write_text(organize(meta,p.read_text(),'../' * (len(Path(meta['file']).parts) - 1)))
+            p.write_text(organize(meta,p.read_text(),up))
         record.append(dict(meta,path=link_for(meta),sha256=hashlib.sha256(target.read_bytes()).hexdigest()))
     (DOCS/'reports.html').write_text(build_catalog())
     updated=max(m['date'] for m in CATALOG if m['group']!='archive')
     (DOCS/'report_catalog.json').write_text(json.dumps({'updated':updated,'reports':record},ensure_ascii=False,indent=2)+'\n')
-    print('Organized',len(CATALOG),'reports; 3 historical reports archived; index: docs/ai_sbc/reports.html')
+    archived=sum(m['group']=='archive' for m in CATALOG)
+    print('Organized',len(CATALOG),'reports;',archived,'historical reports archived; index: docs/ai_sbc/reports.html')
 
 
 if __name__=='__main__':

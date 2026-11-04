@@ -47,7 +47,7 @@ HLP의 불완전한 예측(θ_d)만 받는다. 이 정보 비대칭이 프레임
 |---|---|---|
 | 정체 | ProtoMotions Mimic(PPO) 전신 모션 추종 RL 정책 | BONES-SEED mocap 지도학습 예측 모델 |
 | 역할 | 시뮬레이션 속 **"착용자" 대역** (skeleton을 걷게 함) | **사용자 의도 예측** (미래 flexion 출력) |
-| 현재 체크포인트 | `checkpoints/W1_wearer_human/last.ckpt` | H1 flexion100-h15-swap (버전표의 경로) |
+| 현재 체크포인트 | `checkpoints/W1_wearer_human/last.ckpt` | H1 `checkpoints/H1_maniflow_swap/epoch_0008.ckpt` |
 
 ### 2.3 Chunk 인터페이스 (HLP ↔ LLP 결합점)
 
@@ -114,18 +114,20 @@ chunk 갱신 v2 10 Hz / v3 50 Hz. ManiFlow 실모델의 native 스케일: 40 Hz(
 ### 3.1 각도 예측기
 
 H1 = ManiFlow flexion100-h15-swap (2026-10-29부터). DiT-X에서 관측 토큰은 self-attention, 노이즈 섞인 action 토큰열은
-cross-attention에 둔다(ManiFlow `obs_routing=swap`). 관측을 cross-attention에 두던 옛 H1(flexion100-h15-run01)은 폐기했고,
-2026-10-29 이전 결과는 옛 H1로 측정했다. 고관절 좌우 각도와 몸통 pitch/roll의 4채널을 입력한다.
+cross-attention에 둔다(ManiFlow `obs_routing=swap`). 관측을 cross-attention에 두던 옛 H1(flexion100-h15-run01)은
+2026-10-29 이전 결과를 측정한 모델이며 가중치는 2026-11-04에 지웠다. 고관절 좌우 각도와 몸통 pitch/roll의 4채널을 입력한다.
 입력 간격 10 ms, 현재부터 50 ms까지 6점을 예측한다. LLP는 0/10/20 ms 미래 창을 소비한다.
-체크포인트 위치는 버전표에 고정했다. 시뮬레이션 코드는 `protomotions/maniflow/`를 통해 접근한다.
+체크포인트는 저장소의 `checkpoints/H1_maniflow_swap/epoch_0008.ckpt`(원본에서 EMA 가중치만 남긴 사본, `loader.DEFAULT_H1_CHECKPOINT`)이고,
+모델 코드는 ManiFlow 저장소 `d9e536e` 이후가 필요하다. 시뮬레이션 코드는 `protomotions/maniflow/`를 통해 접근한다.
 40 Hz·150 ms의 H0는 초기 비교 모델이며 H1과 시간 계약을 혼용하지 않는다.
 
 ### 3.2 보조 제어기
 
-기본 비교 모델 L1은 진자에서 학습했다. W1 평가 시 출력 0.5배와 10 ms 제어 주기를 사용한다.
-L9는 전신 학습의 시작 모델이고 L13R 400회·L14 200회는 기존 걷기의 연구 후보다.
-후보의 관측은 고관절 상태·히스토리·예측이며, 학습용 무보조 정답을 실행 입력으로 쓰지 않는다.
-L12는 코드 준비 후 학습하지 않았다. 성능과 적용 한계는 실험 요약·버전표를 참조한다.
+기본 LLP는 L18(Temporal Transformer + FPO++, 전신 시뮬레이션에서 걷기·달리기를 처음부터 학습)이다.
+보관한 LLP는 L15(진자, 20 N·m)·L15_ft·L16(L15에서 이어서 학습)·L17(MLP+PPO 처음부터)·L18이며,
+모두 20·tanh 출력·한계 ±20 N·m를 출력 배율 1과 10 ms 제어 주기로 쓴다. L15 이전 모델(L1–L14 등)은 2026-11-04에 지웠다.
+관측은 고관절 상태·히스토리·예측이며, 학습용 무보조 정답을 실행 입력으로 쓰지 않는다.
+성능과 적용 한계는 실험 요약·버전표를 참조한다.
 
 ### 3.3 가상 착용자
 
@@ -163,7 +165,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/action/action_functions.py` | `normalized_torque_action` (tanh × torque_scale) |
 | `protomotions/robot_configs/hip_pendulum.py` | 로봇 정의 (factory.py에 등록) + `protomotions/data/assets/mjcf/hip_pendulum.xml` |
 | `protomotions/simulator/newton/fixed_base.py` | `FixedBaseNewtonSimulator` — 고정 베이스용 root write/velocity 무해화 |
-| `examples/experiments/assist_pendulum/mlp.py` | 진자 LLP 레시피 하나. `--recipe L1`(랜덤화 진자 40 N·m), `R0`(토크 경로 수정), `motion_leg`(R0 + 20 N·m tanh + SEED 동작 의도·단일 관절). `Recipe` 사전이 chunk 파라미터·보상 weight·PPO 구조를 겹쳐 쌓고, `protomotions/tests/test_pendulum_recipes.py`가 L1/R0/A0D0 `resolved_configs.pt`와 필드 단위로 일치하는지 검사 |
+| `examples/experiments/assist_pendulum/mlp.py` | 진자 LLP 레시피 하나. `--recipe R0`(랜덤화 진자 + 토크 경로 수정, 40 N·m), `L15`(R0 + 20 N·m, 기본), `motion_leg`(L15 + SEED 동작 의도·단일 관절). `Recipe` 사전이 chunk 파라미터·보상 weight·PPO 구조를 겹쳐 쌓고, `protomotions/tests/test_pendulum_recipes.py`가 R0/L15/A0D0 `resolved_configs.pt`와 필드 단위로 일치하는지 검사 |
 | `protomotions/envs/control/assist_disturbance_control.py` | `DisturbedAssistTargetControl` — 랜덤화 하중·수동 감쇠·구조화 사건·위상 사건·PD/FF 목표 유지(옛 pendulum_research/general control을 흡수, 새 항목은 기본 꺼짐). `protomotions/tests/test_pendulum_disturbance_events.py`가 병합 전 결과와 일치하는지 검사 |
 | `examples/experiments/assist_pendulum/runtime.py` | `PendulumRuntime` — ckpt/실험 파일에서 env+agent 재구성, 기록 rollout(lazy init 강제), paired 비교, 시각화(θ_g 고스트/토크 화살표), env 점검, A/B/C 평가(`abc`: 보조 없음 / 에뮬 chunk / 실 ManiFlow chunk) |
 | `examples/experiments/assist_pendulum/evaluate.py` | `PairedPendulumEvaluation`(고정 코호트 쌍 평가·실제 H1 예측), `ChunkDiagnosis`(학습 때 예측 신호 vs 실제 H1), `TrainingDistributionAudit`, `EtriEvalData`(ETRI 13동작 평가 데이터 준비) |
@@ -179,7 +181,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/control/assist_motion_control.py` | `MotionAssistTargetControl` — `AssistTargetControl`을 상속해 훅 4개(`_target_at`/`_refresh_chunk`/`reset`/`step`)만 override. 의도 소스와 chunk 소스를 각각 교체 가능 |
 | `protomotions/envs/control/motion_intent.py` | `MotionIntentSource` — mocap zarr → θ_g. 클립 필터(HLP val 분할 재현·동작종류·관절범위), 40 fps 선형보간, 클립 연결 crossfade, **전용 난수 generator** |
 | `protomotions/maniflow/chunk_source.py` | `ManiFlowChunkSource` — 자체 링 버퍼(policy 10 ms) → 25 ms 격자 재표집 → `predict_horizon()` → chunk knot |
-| `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A 25 ms / B 10 ms) |
+| `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A = 모델 프레임 간격 / B = 10 ms; H1은 10 ms라 A만). 기본값 H1, 2026-11-04 **PASS** (lead 0–50 ms 기준과 Δ≤0.002°) |
 | `protomotions/tests/test_motion_intent.py` | 의도 소스 단위 테스트 15개 |
 | `examples/experiments/assist_pendulum/mlp.py` (`_env_hlp_chunk_format`) | HLP chunk 형식·관측창·control 클래스 교체 단계 (옛 mlp_v3 실험 config를 레시피 체인 한 단계로 흡수) |
 | `examples/experiments/assist_pendulum/runtime.py abc` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
@@ -228,7 +230,7 @@ label을 각각 smoothing하므로 motion library는 독립 사본이어야 한�
 | `hybrid_control.py` | `JointTorqueOverride` — per-env/DOF qfrc 주입 | **현역** (LLP가 사용) |
 | `channels.py` | hip DOF 채널 계약 (`hip_dof_indices()`) | skeleton 단계에서 재사용 |
 | `angle_estimator.py` | `ManiFlowAngleEstimator` — flexion 모델용 온라인 래퍼 (4ch 각도 obs → 2ch chunk, 영점 캘리브레이션·denoise 오버라이드 내장) | **HLP 실행기** (Phase C에서 결합) |
-| `verify_angle_estimator.py` | Phase B 등가성 검증 스크립트 (`python -m protomotions.maniflow.verify_angle_estimator`, sbc env) — 2026-08-24 **PASS** (suit14 스트리밍 MAE 0.940°/0.961°, 기준과 Δ≤0.004°) | 래퍼 회귀 테스트로 상시 사용 가능 |
+| `verify_angle_estimator.py` | Phase B 등가성 검증 스크립트 (`python -m protomotions.maniflow.verify_angle_estimator`, sbc env). 기본값은 H1 저장소 사본 + suit14-100fps + 같은 H1의 2026-10-29 오프라인 평가(denoise 1) — 2026-11-04 **PASS** (스트리밍 MAE 0.529°/0.490°, 기준과 Δ≤0.002°) | 래퍼 회귀 테스트로 상시 사용 가능 |
 
 **데이터 파이프라인**: `data/scripts/extract_soma23_hip_imu_zarr.py` —
 BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
@@ -241,9 +243,9 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 | 경로 | 내용 |
 |------|------|
 | `ManiFlow/maniflow/config/walking_task/hip_flexion_seed.yaml` | flexion 태스크 config |
-| `ManiFlow/data/hip-flexion-seed-locomotion-40fps.zarr` | 학습 데이터 (LLP θ_g 풀로도 재사용 예정) |
-| `ManiFlow/data/hip-flexion-etri-suit14-40fps.zarr` | 교차평가 데이터 (분포 밖 검증용) |
-| `ManiFlow/data/outputs/hip_flexion_seed-...-flexion40-run01_seed42/` | 학습 run + best ckpt |
+| `ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr` | H1 학습 데이터 (40 fps 판은 옛 H0용) |
+| `ManiFlow/data/hip-flexion-etri-suit14-100fps.zarr` | 교차평가 데이터 (분포 밖 검증용) |
+| `ManiFlow/data/outputs/hip_flexion_seed-...-flexion100-h15-swap-run01_seed42/` | H1 학습 run + 원본 ckpt(epoch 8). 다른 run의 ckpt는 2026-11-04에 지움 |
 | `scripts/compare_hip_imu_reference.py` | 오프라인 교차평가 (receding-horizon, 캘리브레이션, `--denoise_steps`, `--latency_bench`) — Phase B 등가성 검증의 기준 |
 | `scripts/train_walking.sh`, `scripts/eval_walking_lowdim.py` | 학습/오프라인 평가 진입점 |
 
@@ -258,12 +260,13 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 
 ## 5. 재현 명령어
 
-레포 루트, sbc 환경에서 기존 기준 모델을 평가하는 예다. 새 학습 시작 명령이 아니다.
+레포 루트, sbc 환경에서 기본 조합(W1 + H1 + L18)을 평가하는 예다. 모든 옵션이 기본값과 같다. 새 학습 시작 명령이 아니다.
 
 ```bash
 /home/bak/miniconda3/envs/sbc/bin/python examples/experiments/assist_skeleton/run_system.py \
     --human tracker --tracker-checkpoint checkpoints/W1_wearer_human/last.ckpt \
-    --llp-checkpoint checkpoints/L1_llp_pendulum/last.ckpt --llp-dt 0.01 --assist-scale 0.5 \
+    --hlp-checkpoint checkpoints/H1_maniflow_swap/epoch_0008.ckpt \
+    --llp-checkpoint checkpoints/L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt --llp-dt 0.01 --assist-scale 1 \
     --motion-file data/motion_for_trackers/skeleton_torque_suit_gait.pt --motion-id 0 \
     --seconds 40 --calibration wearer --seed 42
 ```
@@ -275,11 +278,11 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 
 ## 6. 다음 검증의 순서
 
-현재 실행할 과제는 HANDOFF에서 관리한다. 연구 순서는 다음과 같다.
+현재 실행할 과제는 HANDOFF에서 관리한다. 지금까지의 순서와 남은 일은 다음과 같다.
 
-1. [진자 사전학습 개선안](pendulum_pretrain_discussion.md)을 먼저 실행한다. 진자 환경의 20 N·m 대조군, 외란, 관절별 정책을 비교한다.
-2. 진자에서 선택한 정책을 기존 W1에 연결해 전이를 평가한다. 전신 보행 학습은 이번 단계에 포함하지 않는다.
-3. 새 실제 보행의 무보조 추종 확보와 전신 추가학습은 후속 과제로 둔다. 새 자료의 보조 평가는 무보조 검증 뒤에 한다.
+1. 진자 학습(2026-10 중순 계획: [보관 개선안](archive/20261104/pendulum_pretrain_discussion.md))은 20 N·m의 L15까지 진행했다.
+2. 같은 W1 + H1 전신 시뮬레이션에서 진자 사전학습 없이 처음부터 학습한 L17·L18이 L15에서 이어서 학습한 L16보다 좋았고, 기본 LLP를 L18로 정했다.
+3. 남은 일: 학습 seed 반복, 알고리즘과 갱신 횟수 효과 분리, 실기기 CPU 지연 측정. 새 실제 보행은 무보조 추종 확보가 먼저다. 새 자료의 보조 평가는 무보조 검증 뒤에 한다.
 
 기존 걷기 한 패턴의 개선을 다양한 사람·계단·험지·실기기 검증으로 읽지 않는다.
 
@@ -712,7 +715,7 @@ ASD-STE100의 명확한 문장과 일관된 용어 원칙을 참고한다.
 - 원본 실험 이름, 경로, 해시는 재현용 부록에 보존한다. 설명 이름을 바꿔도 원본 결과는 바꾸지 않는다.
 - HTML 그림은 파일 안에 넣는다. 생성 뒤 긴 이름의 잘림, 숫자의 보존, 외부 이미지 의존성을 확인한다.
 
-이 원칙을 적용한 보고서: [`walking_finetune_report.html`](walking_finetune_report.html).
+이 원칙을 적용한 보고서: [`walking_finetune_report.html`](archive/reports/walking_finetune_report.html).
 
 HTML 보고서의 입구는 [reports.html](reports.html)이다. 최근 결과·비교 기준·원인 진단·과거 참고 자료를 구분한다.
 종료된 연구의 상세 보고서는 `docs/ai_sbc/archive/reports/`에 두고 이전 주소에는 이동 안내를 남긴다.

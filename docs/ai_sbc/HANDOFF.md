@@ -1,12 +1,31 @@
 # AI-SBC — 현재 상태와 다음 작업
 
-2026-11-04 같은 세 정책을 진자 학습에 적용한 비교 완료(기본 설정의 FPO++ 두 모델은 진자에서 학습되지 않았고, 출력 배율 4.0으로 다시 학습해도 L15에 못 미침). 2026-11-03 Temporal Transformer + FPO++ LLP를 구현해 MLP+PPO 기준선과 비교 완료(걷기는 FPO++ 두 모델이 더 줄이고 달리기는 아직 못 미침, 1,200 epoch에서 수렴 전). 2026-11-02 진자 사전학습 없이 걷기·달리기를 같이 처음부터 학습한 모델이 L16(진자 사전학습 + 동시 추가학습)보다 두 동작 모두 좋음을 확인. 2026-10-30 L15(20 N·m 진자 정책)의 걷기·달리기 동시 추가학습 L16 대 동작별 추가학습 비교를 1,200 epoch까지 완료. 2026-10-29에 새 H1 채택(옛 H1 폐기), 20 N·m 처음부터 학습 + 예측기 토큰 자리 맞바꿈 비교도 완료. 이 파일에는 현재 판단만 쓴다. 지난 세션의 진행 상황을 덧붙이지 않는다.
+2026-11-04 가중치를 정리하고 기본 LLP를 L18(Transformer+FPO++)로 정했다. L1과 그 계보는 더 쓰지 않는다. 같은 날 Transformer+FPO++ 등 세 정책을 진자 학습에 적용한 비교도 끝냈다(진자에서는 L15를 넘지 못함). 이 파일에는 현재 판단만 쓴다. 지난 세션의 진행 상황을 덧붙이지 않는다. 정리 전 판본은 [archive/20261104/HANDOFF.md](archive/20261104/HANDOFF.md)에 있다.
+
+## 2026-11-04 정리: 남긴 모델, 기본 조합, 인수인계
+
+**기본 조합은 W1 + H1 + L18이다.** `run_system.py`를 인자 없이 실행하면 `checkpoints/`의 H1·L18을 출력 배율 1(±20 N·m)로 쓴다. 그렇게 돌린 걷기·달리기(seed 42)의 보조 토크 실효값은 10.14 / 11.62 N·m로 학습 연구의 기록(10.13 / 11.62)과 같았다. 무보조 착용자 토크 실효값 차이(걷기 38.58 vs 38.83 N·m)는 Newton 재실행 산포다.
+
+| 모델 | 경로 (`checkpoints/`, Git LFS) | W1 + H1 걷기 / 달리기 τ² |
+|---|---|---|
+| H1 | `H1_maniflow_swap/epoch_0008.ckpt` — 원본에서 EMA 가중치만 남긴 사본(42.5 MB). 가중치 164개와 같은 입력의 예측이 원본과 같음을 확인 | — |
+| W1 | `W1_wearer_human/last.ckpt` — 착용자 하나가 걷기·달리기를 모두 따라감 | — |
+| **L18** (기본) | `L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt` — Transformer+FPO++, 처음부터 | −30.1 / −29.3 % |
+| L17 | `L17_mlp_ppo_scratch_walkrun/epoch_200.ckpt` — MLP+PPO, 처음부터 | −24.0 / −35.4 % |
+| L16 | `L16_mlp_ppo_ft_walkrun/epoch_{800,1200}.ckpt` — L15에서 걷기·달리기 동시 추가학습 | −22.7 / −27.1 %, −19.9 / −27.4 % |
+| L15_ft | `L15_ft_mlp_ppo_walk/epoch_1200.ckpt`, `L15_ft_mlp_ppo_run/epoch_400.ckpt` — 동작별 추가학습 | −26.6 / —, — / −25.5 % |
+| L15 | `L15_mlp_ppo_pendulum/epoch_6000.ckpt` — 진자 학습 20 N·m | −18.0 / −21.8 % |
+
+- 지운 것: `results/`의 나머지 LLP checkpoint 903개(4.4 GB; L1–L14, G0–G4, F1/F2, R0/R1, 20 N·m 다리별 4종, 진자 FPO++, 남긴 run의 다른 epoch·`last.ckpt`)와 git의 `checkpoints/L1_llp_pendulum`·`llp_v{3,4,5,6,10}_*`, H1 외 ManiFlow checkpoint 21개(8.8 GB; 옛 H1 포함). 각 run의 설정·로그·평가 기록과 학습 자료(zarr)는 남겼다. 착용자 모델은 모두 남겼다.
+- L1을 없앤 코드: `run_system.py` 기본 LLP·H1과 출력 배율(항상 1), `verify_controller` 기본 모델(L15), 진자 레시피 `mlp.py --recipe R0|L15|motion_leg`(기본 L15; R0 토크 경로 이전 프리셋 삭제), H1 기본 경로를 `protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT` 하나로 모음. `test_pendulum_recipes.py`는 L15 설정을 고정한다. 제어기 일치 검증(L15 + H1 사본)은 세 부분 모두 정확히 일치했다.
+- L1 계보의 보고서 17개(2026-10-01 ~ 10-22)는 `docs/ai_sbc/archive/reports/`로 옮겼고 옛 주소에는 안내 페이지가 남는다. 요약·버전표·이 파일의 정리 전 판본은 `docs/ai_sbc/archive/20261104/`에 있다.
+- 인수인계: H1·L15–L18을 `checkpoints/`에 Git LFS로 올린다(쓰기·LFS 업로드 권한 확인, 커밋·push는 사용자 확인 뒤). 받는 쪽에는 ManiFlow 코드(`d9e536e` 이후)가 필요하다. 각 폴더의 `INFO.md`에 입출력·학습 조건·로드 방법이 있다.
 
 ## 진자 학습에 적용한 Temporal Transformer + FPO++ 대 MLP+PPO(L15) (2026-11-03 ~ 04, 새 H1)
 
 **전신 학습에서 비교한 세 정책(MLP+PPO, MLP+FPO++, Transformer+FPO++)을 L15와 같은 진자 학습 조건(R0 레시피, ±20 N·m, 4,096 환경 × 32 step, seed 0, 1,200 epoch 예산)에 적용해 W1 걷기·달리기로 전이 평가했다. 전신 학습과 같은 기본 설정(flow 출력 배율 0.25, actor lr 1e-4)의 FPO++ 두 모델은 진자에서 거의 학습되지 않았다(1,200 epoch 동안 W1 보조 RMS 1~2 N·m, τ² −0.6 ~ −1.4 %; 진자 환경 자체 평가도 같음). 학습률 3e-4·1e-3은 효과가 없고 출력 배율만 효과가 있어(200 epoch 진단, 배율 1·2·4·8) 배율 4.0으로 두 모델을 1,200 epoch 다시 학습했다. 평가 동작별 best checkpoint(1,200 epoch 이하)의 착용자 고관절 τ² 변화: 걷기 L15 −24.1 %(1,000 epoch) · Transformer+FPO++ 배율 4 −14.6 %(400) · MLP+FPO++ 배율 4 −11.0 %(1,000); 달리기 L15 −22.1 %(1,000) · Transformer+FPO++ 배율 4 −16.4 %(600) · MLP+FPO++ 배율 4 −11.3 %(1,200). 진자 학습에서는 FPO++가 L15에 못 미친다(전신 학습에서는 걷기에서 PPO보다 좋았음). 낙상 0.** [보고서: 설정 진단·그래프·영상·지연](261103_fpo_pendulum/report.html). 학습 seed 하나, 평가 seed 둘(설정 진단은 하나).
 
-- 학습·평가: `examples/experiments/assist_pendulum/mlp.py --recipe R0 --assist-limit 20 --policy mlp_fpo|tfm_fpo [--fpo-actor-scale 4.0]`(FPO 설정은 전신 `llp_walk.py`와 공용 `protomotions/agents/fpo/recipe.py`), checkpoint 200 epoch마다, W1 + H1 40 s seed 42·7 배율 1. 기준선 L15는 2026-10-29 run의 500~6,000 epoch checkpoint를 같은 조건으로 평가했다(비교는 1,200 이하의 500·1,000 중 best; 전체로는 달리기 1,500 epoch −24.2 %가 best). run `results/llp_fpo_pend_{mlp,tfm}_20261103/`(기본 설정), `results/llp_fpo_pend_{mlp,tfm}_scale4_20261103/`(배율 4), 진단 `results/llp_fpo_pend_mlp_diag_*_20261103/`·`results/llp_fpo_pend_tfm_diag_scale4_20261103/`, 평가·스크립트 `results/llp_fpo_pendulum_20261103/`(`summary.json`, `latency.json`, `best_setting.json`).
+- 학습·평가: `examples/experiments/assist_pendulum/mlp.py --recipe R0 --assist-limit 20 --policy mlp_fpo|tfm_fpo [--fpo-actor-scale 4.0]`(FPO 설정은 전신 `llp_walk.py`와 공용 `protomotions/agents/fpo/recipe.py`), checkpoint 200 epoch마다, W1 + H1 40 s seed 42·7 배율 1. 기준선 L15는 2026-10-29 run의 500~6,000 epoch checkpoint를 같은 조건으로 평가했다(비교는 1,200 이하의 500·1,000 중 best; 전체로는 달리기 1,500 epoch −24.2 %가 best). run `results/llp_fpo_pend_{mlp,tfm}_20261103/`(기본 설정), `results/llp_fpo_pend_{mlp,tfm}_scale4_20261103/`(배율 4; 이 연구의 checkpoint는 2026-11-04에 모두 지움), 진단 `results/llp_fpo_pend_mlp_diag_*_20261103/`·`results/llp_fpo_pend_tfm_diag_scale4_20261103/`, 평가·스크립트 `results/llp_fpo_pendulum_20261103/`(`summary.json`, `latency.json`, `best_setting.json`).
 - 기본 설정이 학습되지 않은 원인: 학습 rollout의 보조 토크(RMS ≈ 5 N·m)는 거의 탐색 잡음(초기 잡음 × 배율 0.25 → 20·tanh)이고 결정적 출력(초기 잡음 0에서 적분)은 0 근처에 머문다. TensorBoard에서 진자 FPO++ run은 actor gradient norm 0.15~0.8(clip 1.0에 거의 안 걸림)·비율 clip(0.05)에 걸린 비율 1 % 안팎, 전신 run은 gradient가 항상 clip되고 clip 비율 4~18 % → 신뢰영역이 아니라 작은 기울기가 병목. 진자 최적은 20 N·m 한계 근처(tanh 입력 ≥ 2~3)인데 배율 0.25로는 flow가 x₀를 8~12만큼 옮겨야 하고, 전신 학습의 최적(10 N·m 수준)은 가까웠다. 기본 설정 Transformer run은 1,000 epoch 뒤 gradient norm이 10²~10⁷로 튀었으나(clip이 막음) 결과는 그대로였다.
 - 설정 진단(MLP+FPO++ 200 epoch, 진자 paired 평가 legacy 128 env·W1 seed 42): lr 3e-4·1e-3 → W1 보조 0.3~0.8 N·m(효과 없음); 출력 배율 1.0 걷기/달리기 −4.0/−2.5 %, 2.0 −7.4/−2.6, 4.0 −7.8/−6.8(진자 −15.8 %, L15 500 epoch −14.7 수준), 8.0 진자 −18.4 %지만 W1 +2.1/+0.6(전이 깨짐; 거의 ±20 bang-bang). 배율 s는 20·tanh(s·x₀)의 s라 초기 토크 분포가 tanh 선형 구간(|토크| < 19)에 남는 비율이 97/73/42/22 %(s = 1/2/4/8)이고, 결정적 출력이 ±19에 닿는 데 필요한 x₀ 이동은 2.2/s다. Transformer+FPO++ 배율 4의 200 epoch 확인 run은 걷기 −13.8 %·달리기 −9.2 %(보조 8.3/13.2 N·m)로 같은 설정이 Transformer에도 듣는다.
 - 배율 4 본 학습의 추세(걷기 / 달리기, τ² %): Transformer+FPO++ 200 → 400 → 600 → 800 → 1,000 → 1,200 epoch −9.8 → −14.6 → −13.0 → −11.7 → −7.3 → −10.6 / −8.2 → −14.8 → −16.4 → −15.6 → −11.1 → −9.8; MLP+FPO++ −6.8 → −6.1 → −4.7 → −10.6 → −11.0 → −10.8 / −0.0 → −3.2 → −3.1 → −8.3 → −9.6 → −11.3. 두 모델 모두 보조 RMS 9 → 18~20 N·m, 최대출력 95% 이상 사용 시간비율 0 → 65~92 %로 출력이 한계 쪽으로 커지며(L15도 500 → 6,000 epoch에 0 → 77 %) Transformer는 정점 뒤 전이가 나빠진다. best의 최대출력 95% 이상 사용 시간비율: Transformer 배율 4 걷기 8 %·달리기 68 %, MLP 배율 4 77 / 92 %, L15 32 / 45 %.
@@ -21,9 +40,9 @@
 
 **FPO++(flow 정책, conditional flow matching 손실의 비율로 PPO 비율을 대신함)와 관측 이력·HLP 예측을 시간별 토큰으로 읽는 소형 Temporal Transformer를 ProtoMotions LLP에 구현해, 같은 조건(W1 + H1, 관측 137, ±20 N·m, 걷기·달리기 반반, 진자 사전학습 없음, 256 환경 × 32 step × 1,200 epoch, seed 13)에서 MLP+PPO(2026-11-02 처음부터 학습)와 비교했다. 평가 동작별 best checkpoint의 착용자 고관절 τ² 변화: 걷기 Transformer+FPO++ −30.1 % · MLP+FPO++ −29.8 % · MLP+PPO −24.4 %, 달리기 MLP+PPO −35.4 %(200 epoch) · Transformer+FPO++ −29.3 % · MLP+FPO++ −29.0 %. FPO++ 두 모델은 보조 토크 실효값 10–12 N·m(PPO 17–18)·최대출력 95% 이상 사용 시간비율 0 %(PPO 39–57 %)로 작은 토크를 쓰고, 걷기에서 PPO의 80–90 % 방해(−8.9 N·m)가 없으며(10 구간 모두 감소), 1,200 epoch에서도 τ² 감소가 매 checkpoint 커지는 추세(수렴 전)다. 낙상 0, 몸체 오차 변화 −1.5 ~ −2.2 %, 전진 속도 변화 0.1 % 안팎.** [보고서: 구현 다이어그램·그래프·호환성·남은 검증](261102_fpo_transformer/report.html). 학습 seed 하나, W1 하나, 걷기·달리기 기록 하나씩.
 
-- 구현: `protomotions/agents/fpo/`(`FPO(PPO)` agent, `FlowActor`, `TemporalTransformer`, 설정), `examples/experiments/assist_skeleton/llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`(env·관측·보상·토크 한계는 처음부터 학습 레시피 그대로), `protomotions/assist/llp_policy.py`가 flow actor를 `act_deterministic`(초기 잡음 0에서 Euler 16 step)으로 평가. 단위 시험 `protomotions/tests/test_fpo_agent.py` 9개(토큰 슬롯, transformer는 action당 1회 실행, 비율 1 불변량, 합성 bandit 수렴, EMA checkpoint, 레시피). 학습 run `results/llp_fpo_mlp_20261102`·`results/llp_fpo_tfm_20261102`(동시 실행 1시간 31분), 평가·스크립트·로그 `results/llp_fpo_study_20261102/`(`common.sh`, `short_runs.sh`, `full_run_{mlp,tfm}.sh`, `summarize.py`, `latency_bench.py`, `build_report.py`).
+- 구현: `protomotions/agents/fpo/`(`FPO(PPO)` agent, `FlowActor`, `TemporalTransformer`, 설정), `examples/experiments/assist_skeleton/llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`(env·관측·보상·토크 한계는 처음부터 학습 레시피 그대로), `protomotions/assist/llp_policy.py`가 flow actor를 `act_deterministic`(초기 잡음 0에서 Euler 16 step)으로 평가. 단위 시험 `protomotions/tests/test_fpo_agent.py` 9개(토큰 슬롯, transformer는 action당 1회 실행, 비율 1 불변량, 합성 bandit 수렴, EMA checkpoint, 레시피). 학습 run `results/llp_fpo_mlp_20261102`·`results/llp_fpo_tfm_20261102`(동시 실행 1시간 31분; checkpoint는 Transformer+FPO++ 1,200 epoch만 L18로 `checkpoints/L18_tf_fpo_scratch_walkrun/`에 남김), 평가·스크립트·로그 `results/llp_fpo_study_20261102/`(`common.sh`, `short_runs.sh`, `full_run_{mlp,tfm}.sh`, `summarize.py`, `latency_bench.py`, `build_report.py`).
 - 영상(2026-11-03): Transformer+FPO++ 1,200 epoch(걷기·달리기 모두 best checkpoint)을 2026-10-30 영상과 같은 조건(40 s, seed 42, ±20 N·m)·같은 상자 레이아웃으로 오른쪽 앞 대각선(방위각 315°)에서 녹화해 `docs/ai_sbc/261102_fpo_transformer/videos/`(`Walk_Transformer+FPO++_1200epoch_diag.mp4`, `Run_Transformer+FPO++_1200epoch_diag.mp4`; 보고서 7절 끝)에 두었다. 녹화 실행의 착용자 고관절 토크 RMS는 걷기 38.7 → 32.4 N·m(16.1 % 감소), 달리기 55.9 → 47.1 N·m(15.8 % 감소). 만드는 법은 `results/llp_fpo_study_20261102/video/record_diag.sh` → `make_videos.sh`(상자는 L16 연구의 `overlay.py`를 그대로 씀) → `build_report.py` → `organize_reports.py`.
-- 알고리즘 설정 차이(같은 환경 step 예산): FPO++는 rollout당 gradient step 32회(8 epoch × 4 minibatch 2,048), 비율 clip 0.05 ASPO, AdamW 1e-4·weight decay 1e-4·grad clip 1, actor EMA 0.95(200 epoch 뒤, checkpoint의 actor = EMA), Euler 16 step, actor_scale 0.25(초기 탐색 폭 raw 0.25). 기준선 PPO는 1회(L1부터의 기존 설정), clip 0.2, σ = e⁻², Adam 1e-4, grad clip 50. critic·보상 정규화·advantage 정규화는 공통.
+- 알고리즘 설정 차이(같은 환경 step 예산): FPO++는 rollout당 gradient step 32회(8 epoch × 4 minibatch 2,048), 비율 clip 0.05 ASPO, AdamW 1e-4·weight decay 1e-4·grad clip 1, actor EMA 0.95(200 epoch 뒤, checkpoint의 actor = EMA), Euler 16 step, actor_scale 0.25(초기 탐색 폭 raw 0.25). 기준선 PPO는 1회(진자 학습부터 써 온 기존 설정), clip 0.2, σ = e⁻², Adam 1e-4, grad clip 50. critic·보상 정규화·advantage 정규화는 공통.
 - epoch 추세(걷기 / 달리기, τ² %): MLP+FPO++ 200 → 400 → 600 → 800 → 1,000 → 1,200: −14.0 → −19.9 → −24.0 → −27.0 → −29.4 → −29.8 / −12.0 → −18.4 → −23.3 → −26.0 → −28.3 → −29.0; Transformer+FPO++ −13.8 → −21.1 → −24.9 → −26.9 → −28.7 → −30.1 / −12.7 → −19.9 → −24.3 → −26.7 → −28.4 → −29.3. 보조 토크 실효값은 4 → 10–12 N·m로 같이 커진다. PPO는 200 epoch에 이미 −24.0 / −35.4. 학습 끝 step당 보상 MLP+FPO++ 0.30·Transformer+FPO++ 0.33·PPO 0.21.
 - 구간별(best, N·m): 걷기 FPO++ 두 모델은 10 구간 모두 감소(최악 구간이 −1.6 ~ −1.9 감소 = 증가 없음), PPO는 80–90 % −8.9. 달리기는 PPO 200 epoch이 10–30 %·50–70 %에서 +15 ~ +20으로 가장 크고, FPO++는 같은 구간 +12 ~ +15, 80–90 % 거의 0.
 - 추론 지연(CPU batch 1 단일 스레드 / 평가 중 GPU batch 2, eager): MLP+PPO 0.06 / 0.22 ms, MLP+FPO++ 0.62 / 1.7 ms, Transformer+FPO++ 0.98 / 2.2 ms — 모두 10 ms 예산 안. flow는 Euler step 수에 비례(step당 속도 MLP 1회 ≈ PPO MLP 1회), transformer context는 step당 1회(CPU 0.42 ms)라 flow step 수와 무관.
@@ -37,9 +56,9 @@
 - 처음부터 학습 = `llp_walk.py --initial-actor-checkpoint <L15 ckpt> --actor-init random --finetune-actor-lr 1e-4 --finetune-assist-limit 20 --motion-weights 0.5,0.5 --hlp-calibration "0:…;1:…"`: 출발 checkpoint는 관측 구성·action 변환·PPO 설정의 틀로만 쓰고 가중치는 쓰지 않는다(`AssistFinetunePPO.setup`이 빈 경로면 이어받기를 건너뜀). L16과 다른 점은 actor 초기값과 actor 학습률(1e-4 = 진자 학습값; 추가학습 3e-5)뿐이다. 걷기·달리기 따로 처음부터 학습한 모델은 만들지 않았다(사용자 지시).
 - epoch 효과(걷기 / 달리기): 200 → 400 → 600 → 800 → 1,000 → 1,200 epoch 걷기 −24.0 → −23.3 → −22.9 → −23.7 → −20.9 → −24.4 %, 달리기 −35.4 → −31.6 → −32.3 → −34.3 → −29.1 → −32.9 %. 200 epoch에서 이미 L16 best를 넘고 그 뒤 오르내린다(1,000 epoch이 두 동작 모두 가장 나쁨). 학습 보상(에피소드 보상 합; 둘 다 걷기·달리기 반반이라 절대값 비교 가능): 처음부터 학습 200 epoch 222 → 1,200 epoch 183, L16 800 epoch 104 → 1,200 epoch 102.
 - 구간별(best checkpoint, N·m): 달리기 처음부터 학습 200 epoch은 1 N·m 넘게 방해하는 구간이 없고(최악 −0.2) 10–30 %에서 +16.0 / +14.8(L16 +7.9 / +9.9); 걷기 1,200 epoch은 80–90 % −8.9만 남는다. 낙상 0, 몸체 오차 변화 걷기 −2.2 %·달리기 −0.2 %.
-- 원본·코드: `results/llp_L16scratch_20261102/`(50 epoch마다 checkpoint), 평가 24건 `results/llp_L16_study_20261029/L16scratch/`(달리기 400 epoch seed 7은 세그폴트로 재실행), `scratch_train_and_eval.sh`, `scratch_section.py`(보고서 절 + 그림 `figures/학습보상곡선_사전학습유무`, `{걷기,달리기}_사전학습유무_tau2변화_epoch`, `{걷기,달리기}_사전학습유무_구간별감소량_{막대,꺾은선}`), `scratch_summary.json`; `summarize.py`·`build_report.sh`에 포함. 보고서 본문의 네 모델 비교 그래프는 그대로다. `Svg.legend_auto`에 가려도 되는 보조선(기준 점선) 인자 `soft` 추가(네 모서리가 다 막힐 때 데이터 점을 가리던 문제).
+- 원본·코드: `results/llp_L16scratch_20261102/`(설정·로그; checkpoint는 200 epoch만 L17로 `checkpoints/L17_mlp_ppo_scratch_walkrun/`에 남김), 평가 24건 `results/llp_L16_study_20261029/L16scratch/`(달리기 400 epoch seed 7은 세그폴트로 재실행), `scratch_train_and_eval.sh`, `scratch_section.py`(보고서 절 + 그림 `figures/학습보상곡선_사전학습유무`, `{걷기,달리기}_사전학습유무_tau2변화_epoch`, `{걷기,달리기}_사전학습유무_구간별감소량_{막대,꺾은선}`), `scratch_summary.json`; `summarize.py`·`build_report.sh`에 포함. 보고서 본문의 네 모델 비교 그래프는 그대로다. `Svg.legend_auto`에 가려도 되는 보조선(기준 점선) 인자 `soft` 추가(네 모서리가 다 막힐 때 데이터 점을 가리던 문제).
 
-다음은 (1) 처음부터 학습과 L16을 학습 seed 하나 더로 반복해 차이가 seed 때문이 아닌지 확인, (2) 추가학습의 actor 학습률을 1e-4로 올려 차이가 초기값 때문인지 학습률 때문인지 분리, (3) 처음부터 학습 모델의 걷기 80–90 % 방해 원인 확인, (4) 배포 후보를 처음부터 학습 모델(걷기 1,200·달리기 200 epoch, 또는 한 checkpoint)로 바꿀지 결정. epoch을 더 늘리지 않는다. L1·R0 계보와는 더 비교하지 않는다. 새 학습을 자동 재개하지 않는다.
+다음은 (1) 처음부터 학습과 L16을 학습 seed 하나 더로 반복해 차이가 seed 때문이 아닌지 확인, (2) 추가학습의 actor 학습률을 1e-4로 올려 차이가 초기값 때문인지 학습률 때문인지 분리, (3) 처음부터 학습 모델의 걷기 80–90 % 방해 원인 확인. 기본 LLP는 2026-11-04에 L18로 정했다(맨 위 절). epoch을 더 늘리지 않는다. 새 학습을 자동 재개하지 않는다.
 
 ## L15 계보: 걷기·달리기 동시 추가학습 L16 대 동작별 추가학습, 1,200 epoch까지 (2026-10-29 ~ 30, 새 H1)
 
@@ -54,167 +73,51 @@
 - 학습 보상 곡선(25 epoch 평균): 걷기 전용은 400 → 1,200 epoch에 62 → 89로 완만히 오르지만 평가는 600 epoch부터 평평하다. 달리기 전용은 400 epoch 181에서 800 epoch 90까지 내려갔다가 1,200 epoch 145로 돌아왔고, 학습 중 일찍 끝나는 에피소드가 있는 epoch 비율이 41 → 61 %로 늘었다. L16은 800 epoch 104 → 1,000 epoch 88 → 1,200 epoch 102.
 - 보행 진행률 구간별 착용자 토크 실효값: 걷기 70–80 / 80–90 %의 방해는 추가학습 전 −7.1 / −7.9 N·m, 걷기 전용 400 epoch −1.5 / −1.9, 1,200 epoch +0.1 / −1.1(없어짐), L16 800 / 1,200 epoch −0.5 / −8.2, −2.1 / −8.5(80–90 %는 그대로). 달리기 80–90 % 방해는 추가학습 전 −16.4, 달리기 전용 400 / 1,200 epoch −13.6 / −12.5, L16 800 / 1,000 / 1,200 epoch −10.6 / −9.3 / −6.7(계속 줄어듦).
 - 최대출력 95% 이상 사용 시간비율(|보조 토크| ≥ 19 N·m인 시간의 비율): 걷기 전용 1,200 epoch 걷기 68 %, 달리기 전용 1,200 epoch 달리기 97 %, L16 1,200 epoch 92 / 88 %. 낙상 0, 몸체 오차 변화 −2.8 ~ +1.2 %.
-- 원본·코드: `results/llp_L16_study_20261029/`(평가 72건, `summary.json`, `train_curve.json`, 학습·평가 스크립트), checkpoint `results/llp_L15ft_{walk,run}_20261029/epoch_{400,…,1200}.ckpt`, `results/llp_L16_20261029/epoch_{400,…,1200}.ckpt`. 새 코드: `llp_walk.py --motion-weights`, motion id별 영점(`skeleton_assist_control.py`, `angle_estimator.py`, `paired_skeleton_assist_env.py`). 평가 3건이 python 세그폴트로 기록 없이 끝나 다시 실행했다.
+- 원본·코드: `results/llp_L16_study_20261029/`(평가 72건, `summary.json`, `train_curve.json`, 학습·평가 스크립트), 남긴 checkpoint `checkpoints/L15_ft_mlp_ppo_walk/epoch_1200.ckpt`, `checkpoints/L15_ft_mlp_ppo_run/epoch_400.ckpt`, `checkpoints/L16_mlp_ppo_ft_walkrun/epoch_{800,1200}.ckpt`(나머지 epoch은 2026-11-04에 지움). 새 코드: `llp_walk.py --motion-weights`, motion id별 영점(`skeleton_assist_control.py`, `angle_estimator.py`, `paired_skeleton_assist_env.py`). 평가 3건이 python 세그폴트로 기록 없이 끝나 다시 실행했다.
 
 다음 작업은 위 '진자 사전학습의 효과' 절의 목록을 따른다(이 절의 seed 반복·배포 조합 결정은 거기에 합쳤다; L16 걷기 80–90 % 방해는 처음부터 학습 모델에도 남아 그쪽에서 본다).
 
-## 20 N·m 처음부터 학습 + 걷기·달리기 추가학습, 예측기 토큰 자리 맞바꿈 (2026-10-29)
+## 20 N·m 진자 학습 L15와 예측기 토큰 자리 맞바꿈 (2026-10-29)
 
-**보조 한계를 학습 때부터 20 N·m(배율 1)로 두고 진자에서 학습한 정책(L15)은 최대출력 95% 이상 사용 시간비율(|보조 토크| ≥ 19 N·m인 시간의 비율) 76–84 %로 W1 걷기 −17.8 %·달리기 −22.4 %로 L1 ×0.5와 비슷했고, 전신 추가학습 200 epoch 뒤 −22.3 / −25.0 %가 됐다. 같은 추가학습을 R0 ×0.5(40 N·m 학습 후 출력 절반)에서 시작하면 −26.5 / −25.6 %, 걷기로 학습한 모델을 달리기에 쓰면 −30.2 %로 더 크고 최대출력 95% 이상 사용 시간비율은 절반(50–56 %)이다. 학습 때부터 20 N·m로 제한하는 것은 출력 절반 적용보다 불리했다.** [그래프·표](261029_lim20_finetune/report.html). 학습 seed 하나씩, W1 하나, 걷기·달리기 기록 하나씩.
-
-- L15 = 진자 학습(`mlp.py --recipe R0 --assist-limit 20`: 보조 한계 20 N·m, 4,096 환경·6,000 epoch·seed 0) → `results/llp_R0lim20_s0_20261029/epoch_6000.ckpt`. 이전 진자 모델들은 23–40 N·m로 학습했으므로 20 N·m로 학습한 현재 계보는 L15부터다.
-- 추가학습: `llp_walk.py --initial-actor-checkpoint <진자 ckpt> --exclude-motion-ids 1|0 --finetune-assist-limit 20` (추가학습 = 진자에서 학습한 정책을 가상 착용자 W1과 예측기 H1을 연결한 전신 시뮬레이션에서 이어서 학습. 정책의 관측 구성과 20·tanh 출력은 그대로 두고 actor 가중치만 이어받으며 critic·optimizer는 새로 시작한다. 보상은 같은 난수로 나란히 걷는 무보조 착용자 대비 고관절 토크 감소. 기록의 앞 20 s 안에서 8 s씩 잘라 학습, 256 환경·200 epoch·seed 13, 착용자 영점은 걷기·달리기 각각 측정값). 걷기·달리기 각각 약 8–25분.
-- 보행 진행률 10 % 구간별 착용자 토크 실효값 감소량(`report.py finetune`): 20 N·m 모델은 추가학습 뒤에도 걷기 70–90 %에서 −2.4 / −5.5 N·m(방해)가 남고, R0 ×0.5 추가학습은 −0.5 / −1.1 N·m로 거의 없어졌다. 달리기 80–90 %는 모든 모델이 방해(−9 ~ −16 N·m)이며 R0 ×0.5 걷기 모델만 −0.1이다.
-- 교차: 걷기로 학습한 모델이 달리기에서 더 좋고(R0 계보 −30.2 %, 20 N·m 계보 −23.4 %), 달리기로 학습한 모델은 걷기에서 추가학습 전 수준(−18.7 / −19.5 %)이다.
-- 예측기: DiT-X의 관측 토큰(4ch × 10)을 self-attention 열로, 노이즈 섞인 15프레임 action 토큰열을 cross-attention으로 보내고 출력을 위치 전용 15 query 토큰에서 읽는 구조(ManiFlow `obs_routing=swap`)를 H1과 같은 데이터·12 epoch·seed로 학습해 ETRI 14동작 100 Hz에서 비교했다. denoise 1에서 평균 MAE 0.51° vs H1 0.56°(모든 lead에서 0.03–0.05° 낮음), denoise 10에서는 H1이 짧은 lead에서 낮음(0 ms 0.09 vs 0.16°). 달리기만 1.35 vs 1.32°. 지연 2.45 vs 2.20 ms. 정확도는 우열이 없지만 원래 구상한 구조이므로 **사용자 결정으로 이 모델을 H1로 채택했고, 옛 H1(관측 cross-attention, flexion100-h15-run01)은 폐기했다**(파일은 2026-10-29 이전 결과의 재현용으로만 보존). 이 절의 LLP 수치는 모두 옛 H1로 측정했다. 통합 코드의 기본 경로(`run_system.py` `DEFAULT_HLP_CHECKPOINT`, `verify_angle_estimator.FLEXION100_RUN_DIR`, 진자 `study.py`)와 ManiFlow 학습 설정 기본값(`obs_routing: swap`)을 새 H1로 바꿨다. 새 H1은 ManiFlow 저장소의 미커밋 코드(`maniflow_lowdim_policy.py` `obs_routing`, `ditx.py` `sample_as_context`)가 있어야 로드된다. 원본 `results/hlp_routing_swap_20261029/`.
-- 새 H1 기준값(W1, 40 s, seed 42·7 평균, 낙상 0, `results/h1_swap_adoption_20261029/`): L1 ×0.5 걷기 −19.0 %(옛 H1 −18.8)·달리기 −23.3 %(−24.1), R0 ×0.5 걷기 추가학습 모델 걷기 −26.7 %(−26.5)·달리기 −29.7 %(−30.2). 최대출력 95% 이상 사용 시간비율 58.7 / 72.8 / 49.4 / 55.6 %(옛 53.7 / 69.3 / 49.9 / 55.6). 제어 루프 안 예측 오차 10/20/50 ms: 걷기 0.32/0.50/1.33°(옛 0.30/0.49/1.38), 달리기 0.45/0.83/2.35°(0.45/0.87/2.32). 옛 H1 결과를 다시 재지 않아도 되는 차이이며, 앞으로의 평가는 새 H1로 한다.
-- 코드: `llp_walk.py` 추가학습 옵션, `report.py finetune`, 2026-10-14/15 진자 checkpoint 저장 설정을 읽기 위한 호환 모듈 `protomotions/envs/control/pendulum_research_control.py`.
-
-다음은 (1) R0 ×0.5 걷기 추가학습 모델(`results/llp_R0ft_walk_20261029/epoch_200.ckpt`)을 다른 걷기 구간·seed에서 검증해 L13R/L14와 비교, (2) 20 N·m 직접 학습은 최대출력 95% 이상 사용 시간비율이 그대로 높으므로 보류. 새 학습을 자동 재개하지 않는다.
-
-## 발표용 ON/OFF 시연 (2026-10-23)
-
-현재 발표 편집본은 [3장 HTML](../../results/presentation_three_slides_20261023/index.html)이다. 기본형=L1, 효율형=R0로 표시하고 보조 최대 ±20 N·m 조건만 남겼다. 1장 힘 제한 ON/OFF 영상+원래 W1 정량 그래프, 2장 ON/OFF/ON, 3장 저부담 방해·다음 단계. 실제 보조 RMS가 다르므로 첫 그래프는 같은 **최대 출력** 비교로 표시한다. 추가 분석: 보조받는 착용자 토크 ≤−100 N·m일 때 보조 평균 L1 −19.97 / R0 −16.42 N·m, −19 이하 비율 100 / 12.2 %; 두 모델 모두 음의 보조. 기존 40초 seed 42/7, 10 ms 창 정렬. 별도 400 Hz 기록에서도 같은 경향. 출력 여유가 남는다는 관찰이지 포화 출력이 최적이라는 결론은 아니다. 상세·재현 `results/presentation_three_slides_20261023/diagnostics/`, `presentation_high_torque.py`.
-
-**발표용 우선 추천은 원래 W1을 유지한 ON → OFF → ON 시연이다.** 영상 5초에 OFF, 10초에 다시 ON(시뮬레이션 10/15초). 같은 시각의 계속 ON 대조군 대비 착용자 고관절 τ² 차이는 L1 **+0.32 → +383.93 → +3.31**, R0 **+7.13 → +330.05 → +1.20 (N·m)²**로, OFF에서 늘고 다시 ON 뒤 대조군 수준으로 돌아왔다. 각 구간 5초 전체 평균, seed 42 한 번. 전환 실행 2건과 저장 ON 대조군 2건 모두 완주·낙상 0. 근력 제한·토크 재생·새 학습 없이 W1 원래 피드백/힘 한계를 유지했다. 실제 사람이나 다른 보행으로 확대 해석하지 않는다. [영상·그래프](../../results/presentation_toggle_20261023/deliverables/index.html), 실행·검증 `results/presentation_toggle_20261023/`.
-
-W1의 피드백을 유지하고, 기존 보조 ON 기록(5–20 s)의 400 Hz 실제 착용자 고관절 토크 절대 최대값을 좌우 고정 한계로 적용한 L1/R0 ON·OFF 4건을 완료했다. 좌우 굴곡·신전 축만 제한(오른쪽/왼쪽: L1 ±190.58/±140.84, R0 ±185.83/±139.83 N·m). 영상 시작부터 같은 한계, 영상 5초에 OFF. 보조는 두 모델 모두 ±20 N·m이며 새 학습은 없다. **모두 낙상 없이 완주했고 OFF 뒤 10초의 착용자 고관절 τ²는 L1 1239.66 → 1549.46, R0 1214.56 → 1522.31 (N·m)²로 증가했다.** OFF 후 한계에 닿는 시간은 각 축 0.025–0.10 %로 작다. 순간 최대값 제한으로는 보행 모습 차이가 크게 드러나지 않으며 영상과 토크 그래프를 함께 사용한다. 모델별 한계가 달라 L1/R0 순위 비교에는 쓰지 않는다. seed 42 한 번의 진단이며 실제 사람 근력 검증은 아니다.
-
-[영상·그래프](../../results/presentation_cap_20261023/deliverables/index.html), 조건·실행·검증은 `results/presentation_cap_20261023/{protocol,runs}.json` 및 `deliverables/metrics_and_validation.json`. 앞선 전신 토크 재생은 ON 대조군도 넘어져 보조 효과의 증거로 사용하지 않는다. 다음 연구 과제는 아래와 같고 추가 계산을 자동 시작하지 않는다.
-
-## 최신 결과와 다음 판단
-
-**출력 20·tanh, 실제 고관절 동작 궤적, 단일 관절 학습 후 양다리 가중치 공유로 R0 레시피를 다시 학습한 네 모델(보조 토크² 벌점 A × 명령 변화 벌점 Δ)은 모두 W1에서 L1 ±20보다 덜 줄였다. 원인은 학습 때 쓰는 미래 목표 신호(의도 궤적에 고정된 에뮬레이션 예측)와 배포 때 실제 H1 예측의 차이로 보인다.** [그래프·표](261022_llp20_motion_shared/report.html). 2026-10-22 06:09 KST 계산 완료(학습 4개 각 약 2시간, 평가 74건, 진단 12건). 미완료 계산은 없다.
-
-- 학습: R0 레시피(`mlp.py --recipe R0`)에서 세 가지를 바꿨다(`examples/experiments/assist_pendulum/mlp.py --recipe motion_leg`). (1) 출력 20·tanh·한계 20 N·m, 평가 배율 1. (2) 의도 궤적: 환경 20 %는 기존 합성 궤적, 40 %는 가벼운 다리(hip 축 관성 0.42–0.80 kg·m²)의 달리기 60·조깅 30·점프 10 %, 40 %는 R0 관성 범위의 걷기·조깅·점프·앉기/일어서기류·기타. SEED 100 fps 고관절 동작 중 H1 학습분할만 쓰고, 다리가 따라갈 수 없는 클립(각가속도 99 % 값 × 관성 > 0.8 × 150 N·m)은 뽑지 않는다. R0 관성 분포로는 달리기를 따라갈 다리가 2 % 남짓이라 가벼운 다리 집단을 따로 뒀다. 의도 각속도 4 rad/s 초과 시간 7.7 %(R0 약 3 %). (3) 오른쪽 관절 하나만 보조·보상·관측하는 학습(= 단일 진자 학습)이고, 평가·배포는 같은 가중치를 양다리에 적용한다(`protomotions/assist/llp_pair.py`의 `LLPSharedLeg`, `run_system.py --llp-share-legs`). 학습 seed 0 하나다(처음 함께 띄운 왼쪽 관절 seed 1 학습은 사용자 결정으로 중지).
-- W1 고관절 τ² 감소 [(N·m)²] (평가 난수 42/7 평균, A·Δ 없음 / 둘 다 / A만 / Δ만): 기존 걷기 **149 / −123 / −132 / 81** (L1 ±20 278, R0 ±20 262), 같은 걷기 400–440 s 140 / −120 / −132 / 69 (L1 245, R0 264), 달리기 **637 / 413 / 229 / 155** (L1 756, R0 436). 새 모델은 보조 RMS 17.5–19.3 N·m로 L1 ±20보다 크고, 걷기 포화 66–72 %(L1 54 %, R0 0.5 %)다. 필요 토크 0–5 N·m에서도 19–20 N·m를 내며, A를 켠 두 모델은 걷기 필요 토크 10–40 N·m 구간의 보조 방향 일치가 50–55 %(무작위 수준)다. 낙상 0, 몸체 오차 변화 ±1 mm 이내.
-- 진자(실제 H1, 착용자 τ² 감소율): SEED 미학습 동작 L1 6.7 / R0 10.7 / 새 1.5–10.4 %; 그중 달리기 클립은 새 20–26 %(L1 21, R0 22)로 비슷하거나 크다. ETRI 13동작 L1 −6.4 / R0 2.4 / 새 −11.4–4.3 %; 스쿼트 L1 −27 / R0 −9 / 새 −37–+2 %. 2026-10-20과 같은 합성 궤적 평가(legacy) 새 12.3–16.3 %(저장 L1 20.2, R0 14.4; 무보조 τ² 2299.5로 같은 진자).
-- 원인 진단(`evaluate.py chunk`, 옛 diagnose_motion_leg_chunk.py): 학습 분포 진자에서 학습과 같은 에뮬레이션 예측을 주면 새 모델이 τ²를 **32–36 %** 줄여 R0 ×0.5(30 %)·L1 ×0.5(27 %)보다 크지만, 예측만 실제 H1로 바꾸면 **7–14 %**로 떨어진다(R0 13, L1 12 %). 보조와 무보조 착용자 토크의 상관은 새 0.55–0.61 → 0.19–0.24, R0 0.71 → 0.36. 학습은 됐고, 에뮬레이션 예측이 담는 착용자 추종 오차(필요 토크의 단서)에 더 의존하도록 학습된 것이 배포 H1에서 드러났다.
-- A·Δ: 방향이 평가마다 다르다. W1 걷기는 A를 끈 두 모델이 낫고, 진자 실제 동작은 A를 켠 두 모델이 낫다(SEED 10.4·8.5 vs 1.5·7.0 %). A를 켜도 보조 크기는 거의 그대로다. Δ는 학습 마지막 50 epoch의 명령 변화(Δ 끔 6.3–6.5 → Δ 켬 4.2–4.3 N·m/10 ms)와 진자 합성 평가(1.43–1.71 → 0.88–1.06)를 줄였지만 W1 달리기에서는 줄이지 못했다. 출력 10 Hz 저역통과는 모든 모델의 W1 이득을 늘렸다(걷기 L1 278 → 302, A·Δ 없음 149 → 194). 학습 seed 하나라 A·Δ의 효과로 단정하지 않는다.
-- 학습 분포의 무보조 진자 실패: 가벼운 다리가 달리기 중 입각 하중까지 받으면 착용자 토크가 한계에 걸려 10 s당 약 8 %(모든 모델 공통 기준). 시뮬레이터 SIGSEGV 3회(학습 1, W1 2)는 자동 재개·재실행으로 완료했다.
-- 원본·코드: `results/llp20_motion_20261021/`(manifest, execution_right, eval_runs, pendulum/, walking/, diagnostics/, verification.json 통과), checkpoint `results/llp20_motion_{A0D0,A1D1,A1D0,A0D1}_right_s0_20261021/epoch_6000.ckpt`, 실행 `examples/experiments/assist_pendulum/study.py`(2026-10-26 통합; 당시 실행기는 `results/llp20_motion_20261021/scripts/`에 보관). W1/H1/L1/R0 동결.
-
-다음은 (1) 학습 때의 미래 목표 신호를 배포 H1과 같은 정보로 맞춰 다시 학습한다. 후보는 에뮬레이션 예측을 실제 각도 이력 기준으로 만들기(실제 각도에 고정 + H1 오차 통계) 또는 학습 중 실제 H1 연결이며, 먼저 진단 스크립트로 에뮬레이션 대 H1 차이가 줄어드는지 본다. (2) 20 N·m로 학습하면 보조가 한계에 몰리는 문제(L2–L5 교훈과 같은 양상)는 (1)과 함께 본다. (3) A·Δ 판단은 (1) 이후 학습 seed를 늘려 다시 한다. 새 학습을 자동 재개하지 않는다.
-
-## 앞선 R0 일반화 평가 (2026-10-21)
-
-**R0의 개선(같은 보조 크기에서 L1보다 큰 이득)은 같은 걷기 기록의 다른 구간에서는 유지되지만, 달리기에서는 유지되지 않는다.** [그래프·표·판정 기준](261021_r0_generalization/report.html). 2026-10-21 00:52 KST 계산 완료, 약 40분. 미완료 계산은 없다.
-
-- W1이 무보조로 40초를 완주하는 조건만 넣었다. 그 결과 달리기(2.59 m/s, R0 미평가)와 기존 걷기 기록의 400–440 s 구간이 남았다. 제자리 걷기·무릎 높이 들기는 무보조 W1도 2초 남짓에 넘어졌다. 0.85·1.15배 재생 걷기는 같은 자세를 시간 축만 바꾼 합성 동작이라 실제 속도 변화의 전신 동역학이 아니므로 사용자 지시로 제외했다. 실제로 느리거나 빠르게 걸은 기록 중 W1이 따라갈 수 있는 것은 아직 없다.
-- 각 조건에서 L1 ±10/15/20, R0 ±15/20 N·m를 평가 난수 42/7로 평가했다. 신규 W1 22건(선별 4건 포함) 중 낙상은 W1이 학습하지 않은 동작 선별 2건뿐이고, 본 평가 30건(기존 걷기 10건은 저장 기록)은 모두 완주했다. 판정 기준은 새 조건의 R0 결과 전에 `analysis_plan.json`에 고정했다.
-- 원점과 L1 ±10/15/20을 이은 곡선(L1 출력만 줄여 얻는 이득)과 비교하면, 같은 보조 RMS에서 R0 ±20의 고관절 τ² 감소는 기존 걷기 **+40.9 (N·m)²(+18 %)**, 400–440 s 구간 **+69.0(+35 %)**, 달리기 **−227.8(−34 %)**이다. 같은 저부담 손해 기준으로는 **+7 / +24 / −33 %**다. 앞선 "+15 %"는 L1 ±10과 직접 비교한 값이고 +18 %는 곡선 보간 값이다.
-- 달리기 ±20: 이득 L1 **755.9** vs R0 **436.2 (N·m)²**, 보조 RMS 18.56 vs 13.84 N·m, 최악 위상 RMS 증가 16.83 vs 16.77 N·m(같음). 걷기에서 R0 보조는 필요 토크에 비례했지만(무보조 착용자 토크 0–5 N·m에서 7.3, 80 이상에서 15.3 N·m), 달리기에서는 14.4 → 11.3 N·m로 거꾸로다. 보조 방향 일치율은 모든 조건에서 L1과 같고 저부담에서는 둘 다 무작위(~50 %)다. 달리기는 고관절 각속도 4 rad/s 이상인 시간이 25.9 %로, 진자 평가 궤적 3.0 %, 걷기 0.1 %보다 훨씬 많다. 다만 이 분포 차이가 원인이라는 검증은 하지 않았다. 달리기의 저부담 감속 구간은 0.47초뿐이라 손해는 최악 위상으로 판단했다.
-- 좌우: R0는 세 조건 모두 오른쪽 이득이 더 크다(+121 / +168 / +231 (N·m)²). 몸체 오차 변화 −1.1 ~ +0.5 mm, 속도 변화 0.0003 m/s 이하. 시뮬레이터 SIGILL 1회(400 s 구간 R0 ±20 seed 7)는 같은 명령으로 처음부터 다시 실행했다(`runtime_failures.json`).
-- 원본·코드: `results/llp_r0_generalization_20261021/`, `results/llp_r0_generalization_20261021/scripts/{evaluate_generalization,report_generalization}.py`(2026-10-26 보관; 계산은 `assist_skeleton/analysis.py`의 `WalkingPhaseDigest`). W1/H1/L1/R0 동결.
-
-당시 다음 과제였던 "빠른 각속도를 넣은 R0 레시피 재학습"은 2026-10-22 위 실험으로 수행했다. R0 학습 seed 1 반복과 R0/R1 절의 저부담 방향 문제는 그대로 남아 있다. R0는 걷기 후보 기준, 달리기 비교 기준은 L1이다.
-
-## 앞선 R0/R1 실험 (2026-10-20)
-
-**토크 경로만 바로잡은 R0는 L1과 같은 보조 크기에서 평균 이득이 15 % 크고, L1 출력 축소 곡선보다 조금 위의 이득·손해 곡선을 보인다. 그러나 저부담 상태의 방향은 여전히 무작위(부호 일치 ~50 %)이며, L1 수준의 이득을 내게 하면 저부담 손해도 L1 수준이다. L1의 포화 출력은 과거 토크 경로가 만든 학습 분포의 산물이었다.** [상위 5개 위상 그래프](261020_relative/phase_report.html) · [상세 보고서와 전체 비교표](261020_relative/report.html). 12:42 KST 계산 완료, 약 4시간. 미완료 계산은 없다.
-
-- R0 = L1 레시피(`mlp.py --recipe L1`) + 사람 PD+FF를 한 actuator에서 한 번 제한하고 보조·외란을 독립 주입(G/F와 같은 경로). R1 = R0 + 무보조 대비 토크 증가 비용(가중치 −0.5). 학습 중 같은 목표 궤적·관성·외란을 받는 무보조 진자를 함께 계산하고, 보조 진자의 착용자 토크²가 무보조보다 커진 만큼을 (무보조 착용자 토크²의 최근 50 ms 평균 + 10²)로 나눠 벌점으로 준다. 무보조보다 줄어든 경우는 벌점 0이다. 각 seed 0·6,000 epoch·786,432,000 표본, 공동 MLP·학습 ±40 N·m·4096환경은 L1과 동일. W1/H1 동결, 기존 L1/G0/G4/F1/F2 기준선 재실행 없음. 신규 W1 8건 모두 40초 완주, 진자 6조건 완료.
-- R0 ±20 N·m: 고관절 τ² 감소 **262.03** (L1 **278.04 (N·m)²**), 저부담 감속 RMS 증가 **3.27** (L1 **7.67 N·m**), 최악 위상 RMS 증가 **7.57** (L1 **14.94 N·m**), 보조 RMS **8.29** (L1 **16.90**), 포화 **0.5 %** (L1 53.8 %). ±15 N·m: **220.25 / 1.87 / 5.86 / 6.33**. 이때 R0의 보조 RMS는 L1 ±20의 절반이므로 직접 비교는 R0에 유리하다. 보조 RMS가 같은 L1 ±10(8.57 N·m: 228.55 / 2.27 / 5.92)과 비교하면 R0 ±20(0.5배)은 이득 **+33.5 (N·m)²(+15 %)**에 저부담 손해 **+1.0**, 최악 위상 **+1.65 N·m**다. 같은 저부담 손해(3.27)에서 L1 축소 곡선의 이득은 244.1로 R0가 +18 위다. 배율 1·±20 클립의 추가 평가에서는 이득 **277.05**(L1 278.04)에 손해 **8.41 / 14.69**(L1 7.67 / 14.94)로 L1과 같아진다(`results/llp_relative_20261020/walking_native/`). 사전 등록한 공동 기준(평균 이득 ≥ L1 ±20)은 미달이며 규칙에 따라 학습 seed 1 반복은 생략했다.
-- 무보조 착용자 토크 구간별로 보면 L1은 모든 구간에서 약 17 N·m(포화 54 %)를 내고, R0는 |τ_A|<5 N·m에서 7.3, 80 N·m 이상에서 15.3 N·m로 필요 토크에 비례한다. 부호 일치율은 같고 저부담 구간에서는 둘 다 무작위다(0–5 N·m 51 / 50 %). 과거 경로는 속도 피드포워드를 PD와 따로 ±150 N·m에서 포화시켜 무거운 진자의 착용자 토크를 비현실적으로 키웠고, 그 분포에서 "옳은 방향으로 최대"가 최적이었다. 분석: `examples/experiments/assist_pendulum/analyze_need_bins.py`.
-- F1 = R0 + C2 전환이므로 F1−R0가 C2 효과다: ±20에서 이득 **−77.6 (N·m)²**, 저부담 손해 **+1.83**, 최악 위상 **+4.77 N·m**. C2 전환은 해로웠다(앞선 후속 1의 답).
-- R1은 진자 학습 분포 안에서만 R0보다 좋았고(학습 후반 추종 0.979 vs 0.975, 사람 τ² 1931 vs 2014), 실제 H1 진자(legacy τ² **2024.3** vs R0 **1967.9**, hold50 보조 실패 3 vs 2)와 W1(이득 **135.59**, 저부담 **3.79**, 보조 RMS 5.53; 부호 일치율이 전 구간에서 R0보다 낮음)에서 나빴다. 출력만 줄고 방향 정확도가 떨어졌으므로 채택하지 않는다(앞선 후속 2의 답). 가중치 −0.5 하나의 관찰이다.
-- 진자 ±20 실제 H1: R0 legacy/phase/hold50 RMSE **2.884/2.772/4.003°**, 보조 실패 **0/0/2** (L1 2.700/2.642/3.673°, 0/0/1). 진자 점수만으로는 R0가 뽑히지 않았을 것이므로 진자 선정 기준에 필요 토크에 비례하는 보조 크기(구간별 보조 RMS)을 넣어야 한다.
-- 다른 관절(±20): R0 무릎 −67 / 발목 −121 / 몸통 +60 (N·m)² (L1 −139 / −198 / +134), 회전관절 합 감소 759.6 (L1 991.5). 몸체 오차 59.6 vs 59.3 mm, 속도 1.283 m/s 동일, 낙상 0.
-- 시뮬레이터 SIGSEGV 3회(R0 ±20 W1 seed 42/7 첫 시도, R1 학습 epoch 4,890)를 자동 재실행·재개로 완료했다. R1은 epoch 4,850 저장본에서 재개해 물리·난수 상태는 새로 초기화됐다. 원인은 미확정이며 `results/llp_relative_20261020/{runtime_failures.json,runtime_diagnosis_R0_20_seed42.txt}`에 기록했다.
-- 원본·명령·설정·로그·검증: `results/llp_relative_20261020/`, checkpoint `results/llp_relative_R{0,1}_s0_20261020/epoch_6000.ckpt`. 코드: R0 = `examples/experiments/assist_pendulum/mlp.py --recipe R0`, `protomotions/envs/base_env/paired_assist_env.py`; 당시 실행기·R1 보상 커널(`assist_energy.py`)은 `results/llp_relative_20261020/scripts/`에 보관(R1은 2026-10-26 코드에서 제거).
-
-2026-10-20 당시 정한 후속 과제는 (1) R0를 학습 seed 1로 반복해 같은 보조 크기에서의 +15 % 이득 재현 확인, (2) 저부담 손해의 근본 원인인, 착용자 토크가 작은 구간의 보조 방향 오류를 겨냥해 실제 H1 예측을 학습에 연결하거나 chunk를 실제 각도에 정박한 조건에서 무보조 토크 구간별 부호 일치를 선정 지표로 두는 실험, (3) 진자 선정 기준에 보조 크기를 맞춘 비교와 필요 토크에 비례하는 보조 크기 추가다. 토크 증가 비용·흡수 파워처럼 비용 계수만 바꾸는 반복은 하지 않는다. 기존 걷기 비교 기준은 L1 ±10/15/20 N·m 축소 곡선을 유지하고 R0 ±20(0.5배)을 후보 기준으로 보조 RMS와 함께 병기한다. 새 학습을 자동 재개하지 않는다.
+- L15 = 진자 학습(`mlp.py --recipe L15` = R0 토크 경로 + 보조 한계 20 N·m, 4,096 환경·6,000 epoch·seed 0) → `checkpoints/L15_mlp_ppo_pendulum/epoch_6000.ckpt`. 최대출력 95% 이상 사용 시간비율(|보조 토크| ≥ 19 N·m인 시간의 비율) 76–84 %로 출력이 거의 항상 최대다. 새 H1에서 W1 걷기 −18.0 % · 달리기 −21.8 %. 이전 진자 모델들은 23–40 N·m로 학습했으므로 20 N·m로 학습한 현재 계보는 L15부터다.
+- 추가학습: `llp_walk.py --initial-actor-checkpoint <진자 ckpt> --exclude-motion-ids 1|0 --finetune-assist-limit 20` (정책의 관측 구성과 20·tanh 출력은 그대로 두고 actor 가중치만 이어받으며 critic·optimizer는 새로 시작한다. 보상은 같은 난수로 나란히 걷는 무보조 착용자 대비 고관절 토크 감소. 기록의 앞 20 s 안에서 8 s씩 잘라 학습, 256 환경·seed 13, 착용자 영점은 걷기·달리기 각각 측정값).
+- 예측기: DiT-X의 관측 토큰(4ch × 10)을 self-attention 열로, 노이즈 섞인 15프레임 action 토큰열을 cross-attention으로 보내고 출력을 위치 전용 15 query 토큰에서 읽는 구조(ManiFlow `obs_routing=swap`)를 옛 H1과 같은 데이터·12 epoch·seed로 학습해 ETRI 14동작 100 Hz에서 비교했다. denoise 1에서 평균 MAE 0.51° vs 0.56°, 지연 2.45 vs 2.20 ms. 정확도는 우열이 없지만 원래 구상한 구조이므로 **사용자 결정으로 이 모델을 H1로 채택했다.** 옛 H1(관측 cross-attention)의 가중치는 2026-11-04에 지웠다. 이 구조는 ManiFlow 저장소 커밋 `d9e536e`(`obs_routing`, `sample_as_context`)에 있다. 원본 `results/hlp_routing_swap_20261029/`, 채택 평가 `results/h1_swap_adoption_20261029/`.
+- 코드: `llp_walk.py` 추가학습 옵션, `report.py finetune`, 2026-10-14/15 진자 checkpoint 저장 설정을 읽기 위한 호환 모듈 `protomotions/envs/control/pendulum_research_control.py`. [보고서](261029_lim20_finetune/report.html).
 
 ## 목표와 현재 위치
 
 **걷는 동작을 방해하지 않으면서 착용자의 고관절 부담을 줄이는 보조 제어기를 만든다.**
-장기 목표는 다양한 보행에 대응하는 것이다. 진자에서 학습한 정책의 전이는 평지 걷기부터 검증한다.
-하드웨어 확인은 사용자 담당이며, 현재 작업 범위는 시뮬레이션이다.
+장기 목표는 다양한 보행에 대응하는 것이다. 하드웨어 확인은 사용자 담당이며, 현재 작업 범위는 시뮬레이션이다.
 
 - 각도 예측기(HLP, H1): 최근 움직임으로 미래 고관절 각도를 예측한다.
-- 보조 제어기(LLP, L 계열): 예측과 관절 상태를 받아 좌우 고관절 보조 토크를 낸다.
+- 보조 제어기(LLP, L 계열, 기본 L18): 예측과 관절 상태를 받아 좌우 고관절 보조 토크를 낸다.
 - 가상 착용자(W1): 시뮬레이션에서 사람 대신 전신 동작을 따라가는 모델이다.
 
-**기존 걷기에서 보조 효과는 개선했지만, 다양한 실제 보행에 쓸 수 있다는 검증은 아직 없다.**
-**지금은 진자 환경만으로 학습하는 보조 정책의 성능을 최대한 높이는 것이 우선이다.**
-합성 운동·외란·관절별 정책 구조를 진자에서 개선한다. W1은 전이 평가에 사용하며 전신 보행 학습은 이번 범위에 넣지 않는다.
-새 실제 보행의 무보조 추종 확보는 후순위로 옮겼다.
-
-## 실험에서 남은 결론
-
-| 무엇을 확인했나 | 결과 | 현재 판단 |
-|---|---|---|
-| 진자에서 배운 기본 보조 모델(L1, 출력 0.5배) | 기존 W1의 걷기/달리기 고관절 토크 제곱 평균 약 19%/24% 감소 | 비교 기준으로 보존 |
-| L1이 걷기에서 방해하는 구간의 원인(2026-10-14) | 방해 구간은 유각 중·후반(참조 위상 68–92 %) 하나. 다리 감속은 무릎 결합·중력이 내고 착용자 hip 토크는 ≈0인데 L1은 감속을 보고 −20 N·m 브레이크를 걸어 착용자가 같은 크기로 맞섬. 20–40 %는 손해 구간이 아님(끊어도 변화 없음) | 원인 확정. [보고서](walking_swing_gate.html) |
-| L1 + 관절각 유각 게이트(`--swing-gate 0.20`) | 관절각만으로 그 구간의 신전 보조를 끊음. 걷기 −18.7 → −26.5 %, 달리기 −24.3 → −31.0 % (seed 7 재실행 −18.8 → −26.2 / −24.0 → −30.7 %; 참조 위상을 아는 차단과 같은 수준, β 오라클 기준 −35.5 %) | 진단·옵션(기본 off). **배포 후보 아님** — 수동 위상 규칙은 쓰지 않음. 현재는 진자 학습 개선이 우선이며 전신 추가학습은 후속. 힘 되먹임 센서는 당장 불가 |
-| 진자 보상·하중 변형(L2–L11) | 일부 평균값은 개선됐지만 동작 구간별 악화나 낙상이 남음 | 같은 변형을 반복 학습하지 않음 |
-| 전신 걷기 추가학습(L13, L13R, L14) | 기본 걷기에서 약 69% 감소까지 개선. 느린 재생 조건과 허리·무릎 부담은 미해결 | 연구 후보이며 범용·배포 성공이 아님 |
-| 실제 느림·보통 보행으로 평가 | 4명 표기의 8클립×2시작=16조건: 15낙상, 1골반 하강 중 종료 | 아직 보조 모델을 평가할 시험 동작으로 쓸 수 없음 |
-| 같은 기존 걷기의 참조 표현만 교체 | 초기 물리 상태가 같아도 W1 낙상 | 데이터 표현과 착용자 호환성을 먼저 해결 |
-
+**기존 걷기·달리기 기록에서는 전신 시뮬레이션에서 처음부터 학습한 LLP(L17·L18)가 가장 좋다. 다양한 실제 보행에 쓸 수 있다는 검증은 아직 없다.**
+2026-10 중순에 정한 우선순위는 진자만으로 학습하는 정책의 성능을 높이는 것이었다([개선안](archive/20261104/pendulum_pretrain_discussion.md)). 그 뒤 처음부터 학습한 전신 정책이 진자 사전학습 계보보다 좋았고, 기본 LLP를 L18로 정했다. 진자 학습과 전신 학습 중 무엇을 이어갈지는 위 절들의 남은 검증 결과로 정한다.
+새 실제 보행은 W1이 무보조로도 따라가지 못해(16조건 중 15낙상) 보조 평가에 쓰지 못한다.
 토크 제곱 평균은 시뮬레이션에서 계산한 부담 지표다. 대사량이나 실제 근활성을 측정한 값이 아니다.
-기존 0.85–1.15배 실험은 **같은 동작의 재생 속도 변경**이며, 실제 느리게 걸은 사람의 자료와 다르다.
 실험별 조건·한계·근거는 [실험 결과 요약](experiment_summary.html)에 모았다. 상세 자료는 [보고서 목록](reports.html)에서 찾는다.
-
-## 앞선 공통 출력 크기 진단 (2026-10-16)
-
-**공통 출력 크기 평가 24건을 완료했다. 출력 축소는 방해를 줄였지만 같은 출력에서도 정책별 차이가 남았다.** [상세 보고서](261016_output_scale/report.html).
-
-- L1·G0 첫 학습·G4 첫 학습/독립 재학습 × 10/15/20 N·m × 평가 난수 42/7. 기존 걷기 40초, W1/H1 동결, 새 학습 없음. 완료된 24건 모두 완주했다. 실행 시간 약 48분. L1·15 N·m·seed 7에서 SIGSEGV 1회 후 같은 명령으로 처음부터 재실행해 완료했으며 원인은 미해결이다.
-- L1의 20 → 15 → 10 N·m에서 전체 고관절 토크² 감소는 **278.04 → 267.98 → 228.55 (N·m)²**, 저부담 감속 RMS 증가는 **7.67 → 4.83 → 2.27 N·m**다. L1 ×0.375(±15 N·m)는 기존 걷기의 이득과 방해를 비교할 중간 기준이며 최적 출력이나 새 기본값으로 확정하지 않는다.
-- 같은 ±20 N·m의 저부담 감속 RMS 증가: L1 **7.67**, G0 **9.21**, G4 첫 학습 **11.29**, 독립 재학습 **11.01 N·m**. L1/G4 첫 학습의 실제 보조 RMS는 **16.90 / 16.98 N·m**로 비슷해 상한 크기만의 설명으로 충분하지 않다. 이 비교가 보상·관측·학습 환경 중 단일 원인을 확정하지는 않는다.
-- 전체 토크² 감소는 G0·20 N·m **306.18 (N·m)²**가 가장 컸지만 저부담 손해와 몸통 부담 증가가 남는다. 전체 평균 하나로 모델을 대체하지 않는다. 두 평가 실행의 평균·범위이며 다른 사람이나 보행에 대한 검증이 아니다.
-- 각 평가 난수의 L1·20 N·m 무보조 A로 저부담 감속 마스크를 고정했다. 50 ms 토크 RMS ≤10 N·m가 주 분석, ≤5 N·m가 민감도 분석이다. 이 구간의 위상 분포는 좌우가 달라 유각 후반과 동일시하지 않는다.
-
-원본·고정 계획·명령·검증: `results/llp_output_scale_20261016/{manifest,runs,comparison,verification,runtime_failures}.json`. 실행·분석: `results/llp_output_scale_20261016/scripts/{evaluate_output_scale,report_output_scale}.py`(2026-10-26 보관; 저부담 구간 마스크 계산은 `assist_skeleton/analysis.py`의 `DecelerationMasks`). 모델·평가 소스 해시와 정상 기록의 연속 4,000개 창·토크 상한·유한값을 확인했으며 분석 검증 4개가 통과했다.
-
-**다음 연구 문제는 비슷한 운동에서도 사람에게 필요한 토크가 다른 상황을 현재 관측과 이력으로 구분할 수 있는지 확인하는 것이다.** 외부 작용이 감속을 맡는 저부담 조건과 사람이 감속해야 하는 고부담 조건을 진자에서 분리해 평가한다. 계수만 키우는 재학습은 근거가 부족하다. 현재 미완료 계산은 없으며 새 학습·기존 큐·전신 추가학습을 자동 재개하지 않는다.
-
-**23 N·m 무작위 초기화 실험은 완료했으며, L1을 대체할 일반 모델은 확보하지 못했다.**
-[최종 판단](261015_1815/FINAL_RESULTS.html) · [보행 phase 그래프](261015_1815/walking_phase_report.html) · [보상 진단](261015_1815/pendulum_results.html) · [요청사항·TODO](261015_1815/REQUESTS_AND_TODO.md).
-
-- 2026-10-16 01:02 KST 계산 완료. G0–G4 seed 0과 G1/G4 seed 1 **7개 모두 3,000 epoch**, 진자 **40평가**, W1 걷기 **8평가·모두 40초 완주**.
-- G1 관절별 공유 actor를 기본으로 G0 공동 actor, G2 구간 외란, G3 사람 부담 비용 2배, G4 보조 절약·명령 변화 비용 4배를 비교했다. G4가 진자 선정에서 선택됐지만 두 seed 모두 별도 H1 평가의 부담·추종에서 L1에 미달했다. 조건부 달리기는 실행하지 않았다. 별도 걷기는 모든 후보에 이미 수행했다.
-- 보행 최악 구간의 착용자 RMS 증가: L1 오른쪽 76–80% **13.95**, 왼쪽 84–88% **14.98 N·m**. G4 seed 0은 같은 구간 **19.41 / 18.35**, seed 1은 **22.75 / 21.00 N·m**. 방해 해결 실패.
-- G0의 전체 보행 고관절 RMS는 **34.27 N·m**, L1은 **34.83 N·m**. 하지만 G0는 오른쪽 24–28%에서 **16.36 N·m** 증가했고 진자 혼합 외란 실패 1회가 있다. 추가 seed 검증도 없어 일반 우위로 채택하지 않는다.
-- G4는 진자 혼합 외란의 출력 포화를 G2 **48.97% → 31.81%**로 줄였으나 보행 방해는 남았다. 사람 비용 2배 G3은 **59.59%**였다. 비용 계수만 계속 키울 근거는 없다.
-- PA_E·PA_H1 제외. 새 모델 `23*tanh(raw action)`, L1 기존 ×0.5(±20 N·m). 목표 각도 입력 유지. G1 이후는 같은 단일 관절 actor를 좌우에 독립 적용하며 별개 가중치 두 개가 아니다.
-- 학습은 합성 목표 예측, 실제 동결 H1은 평가에 연결했다. 몸체 관성은 환경 생성 시 고정하며 순간 관성 변화·실제 heel strike는 미구현이다.
-- 원본: `results/pendulum_general23_20261015_all/manifest.json`, `comparison.json`, `confirmation.json`, `walking/runs.json`. 정확한 모델은 [버전표](AI_SBC_VERSIONS.md)에 있다. 공유 문서의 모델명은 설계 설명과 첫 학습/독립 재학습을 함께 표기한다. s0/s1은 학습 난수 0/1이며 보고서 상단에 정의한다. 학습·평가 소스 해시는 유지한다.
-
-감시 운영도 수정했다. 밤중 G3/G4 학습 및 G1 보행 SIGSEGV는 자동 복구했지만, 완료 이후 서비스가 빈 재시작을 **5,818회** 반복하는 종료 설정 오류가 있었다. 완료 전용 종료 코드 42와 systemd의 성공·재시작 제외 설정으로 고쳤고 실제 오류→재시작→완료 정지를 검증했다. 현재 서비스는 정상 종료 상태다. [감시 설명과 증거](261015_1815/EXECUTION_MONITOR.html). SIGSEGV 자체의 원인은 해결되지 않았고, 같은 모델·optimizer 재개가 물리·난수 상태까지 동일하게 복원하는 것은 아니다.
-
-이전 20/40 N·m 대조 큐와 PA 후속 큐는 최신 지시에 따라 중단하고 결과를 보존했다.
-기존/수정 토크 처리 ×20/40의 인과 비교는 미완료다. 기존 경로 20·seed 0의 마지막 저장 epoch는 1640이다.
-중단 근거: `results/pendulum_general23_20261015/superseded_jobs.json`.
-PA_E의 과거 소폭 개선은 [후보 보고서](pendulum_candidates_report.html)에 남기되 현재 후보 선정에는 쓰지 않는다.
-C0/S1/A1/T1·C0 연장·AB1의 이전 결론은 [연구 보고서](pendulum_research_report.html)에 보존했다.
-전신 보행 추가학습·새 착용자 학습·새 실제 보행 변환은 자동 재개하지 않는다.
 
 ## 계속 작업할 때 필요한 파일
 
 | 용도 | 위치 |
 |---|---|
-| 모델 이름·보존할 경로 | [AI_SBC_VERSIONS.md](AI_SBC_VERSIONS.md) |
-| 최신: LLP 20 N·m 단일 관절·공유·실제 동작 학습, A·Δ 비교 | [결과](261022_llp20_motion_shared/report.html) · 원본 `results/llp20_motion_20261021/` |
-| R0 일반화(달리기·다른 걷기 구간) | [결과](261021_r0_generalization/report.html) · 원본 `results/llp_r0_generalization_20261021/` |
-| R0/R1 토크 경로 대조·무보조 대비 토크 증가 비용 | [결과](261020_relative/report.html) · 원본 `results/llp_relative_20261020/` |
-| 앞선 F1/F2 실제 PPO와 전이 | [신규 학습·평가 결과](261020_feasible/report.html) · 원본 `results/llp_feasible_20261020/` |
-| 공통 출력 크기 기준선 | [24건 결과](261016_output_scale/report.html) · 고정 계획과 원본은 `results/llp_output_scale_20261016/` |
-| 앞선 23 N·m 일반화 실험 | [최종 판단](261015_1815/FINAL_RESULTS.html) · [보행 phase 결과](261015_1815/walking_phase_report.html). 고정 계획·원본은 results/에 보존 |
+| 모델 이름·보존 경로 | [AI_SBC_VERSIONS.md](AI_SBC_VERSIONS.md), 각 `checkpoints/*/INFO.md` |
+| 진자 학습에 적용한 FPO++ | [결과](261103_fpo_pendulum/report.html) · 원본 `results/llp_fpo_pendulum_20261103/` |
+| L18(Transformer+FPO++) 대 MLP+PPO | [결과](261102_fpo_transformer/report.html) · 원본 `results/llp_fpo_study_20261102/` |
+| L15_ft·L16·L17(처음부터 학습) | [결과](261029_L16_joint_finetune/report.html) · 원본 `results/llp_L16_study_20261029/` |
+| L15·H1 토큰 자리 맞바꿈 | [결과](261029_lim20_finetune/report.html) · 원본 `results/llp_lim20_finetune_20261029/`, `results/hlp_routing_swap_20261029/` |
+| 지난 L1 계보 (가중치 삭제) | [보관 보고서](reports.html#past) · 정리 전 [HANDOFF](archive/20261104/HANDOFF.md)·[버전표](archive/20261104/AI_SBC_VERSIONS.md)·[요약](archive/20261104/experiment_summary.html) |
 | 코드 구조·관측 계약·운영 주의 | [AI_SBC_FRAMEWORK.md](AI_SBC_FRAMEWORK.md) |
 | 2026-10-26 코드 통합 이전 상태 | 스냅샷 커밋 `8058f3c`(`git worktree add ../AI-SBC-PROTOMOTIONS-8058f3c 8058f3c`). 닫힌 연구의 당시 스크립트는 `results/<study>/scripts/`(각 `SNAPSHOT.md`) |
 | 새 보행 변환 / 무보조 평가 코드 | `data/scripts/retarget_soma23_to_suit.py` / `examples/experiments/assist_skeleton/evaluate.py native-wearer` |
 | 실제 보행 변환본 | `results/real_walk_retarget_20261012_224957/` |
 | 무보조 평가·참조 교체 실험 | `results/native_walk_validation_20261013/validation_summary.json` |
-| 전신 추가학습 결과 | [walking_finetune_report.html](walking_finetune_report.html) |
-| 과거 실험 일지 | [archive/20261013/NEXT_SESSION.md](archive/20261013/NEXT_SESSION.md) — 현재 지시가 아님 |
 
-2026-10-26에 실험 코드를 통합했다. 진자는 `examples/experiments/assist_pendulum/{mlp,runtime,evaluate,study,report}.py`
-(`mlp.py --recipe L1|R0|motion_leg`), 스켈레톤은 `examples/experiments/assist_skeleton/{run_system,analysis,report,evaluate,plots,viz,llp_walk,tracker_human}.py`다.
-연구 외란 제어는 `DisturbedAssistTargetControl` 하나, 양다리 공유 LLP는 `LLPPolicy(share_legs=True)`다. R1 보상 경로는 코드에서 제거했다.
-통합 뒤 W1+H1+L1×0.5 40 s 재평가(`results/assist_skeleton/consolidation_check/`)는 걷기 τ² −18.6 %, 달리기 −24.0 %로,
-같은 조건의 기존 실행 산포(걷기 −18.5…−20.4 %, 달리기 −23.7…−24.3 %) 안에 있다.
+진자는 `examples/experiments/assist_pendulum/{mlp,runtime,evaluate,study,report}.py`(`mlp.py --recipe R0|L15|motion_leg`, 기본 L15),
+스켈레톤은 `examples/experiments/assist_skeleton/{run_system,analysis,report,evaluate,plots,viz,llp_walk,tracker_human}.py`다.
+연구 외란 제어는 `DisturbedAssistTargetControl` 하나, 양다리 공유 LLP는 `LLPPolicy(share_legs=True)`다.
 
 실행 Python은 `/home/bak/miniconda3/envs/sbc/bin/python`이다. Full access에서 GPU 계산과 Newton 평가를 완료했다.
-예전 접근 오류로 현재 실행을 막지 말고 실제 명령 결과를 확인한다. 기존 미커밋 코드·모델·원본 결과는 보존한다.
+예전 접근 오류로 현재 실행을 막지 말고 실제 명령 결과를 확인한다. 남긴 모델·원본 결과는 보존한다.

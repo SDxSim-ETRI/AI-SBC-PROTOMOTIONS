@@ -29,21 +29,23 @@ whitelisted in `.gitignore` are versioned; reports, figures and the archive stay
 
 ## Current research baseline
 
-- H1: ManiFlow angle predictor, 100 Hz input, current through 50 ms prediction. Since 2026-10-29 it is
-  flexion100-h15-swap (observation tokens in self-attention, noised action tokens in cross-attention);
-  the retired cross-attention H1 is kept only to reproduce results dated before then.
-- L1: pendulum-trained assist policy, `checkpoints/L1_llp_pendulum/last.ckpt`.
-  W1 comparison uses output scale 0.5 (about ±20 N·m), 10 ms control.
-  The hip-angle swing-brake gate (`--swing-gate 0.20`, `AssistController.swing_gate_fraction`, off by default)
-  is a diagnostic reference, not a deployment candidate: hand-made phase rules are excluded;
-  see `docs/ai_sbc/walking_swing_gate.html`.
-- W1: frozen suit wearer, `checkpoints/W1_wearer_human/last.ckpt`.
-- Current priority: maximize LLP performance using pendulum-only training at 20 N·m, scale 1;
-  follow `docs/ai_sbc/pendulum_pretrain_discussion.md`. Compare pendulum disturbances and per-joint policies.
-  W1 is for transfer evaluation. Native walking validation and full-body fine-tuning are later tasks.
+Retained weights live in `checkpoints/<version>/` (Git LFS) with an `INFO.md` each; the table is in AI_SBC_VERSIONS.
+- H1: ManiFlow angle predictor, `checkpoints/H1_maniflow_swap/epoch_0008.ckpt` (EMA-only copy of the
+  flexion100-h15-swap checkpoint, identical weights and predictions; `protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT`).
+  100 Hz input, current through 50 ms prediction; observation tokens in self-attention, noised action tokens in
+  cross-attention. Building the model needs the ManiFlow repository at commit `d9e536e` or later.
+- L18 is the default LLP: Temporal Transformer + FPO++ trained from scratch on walk+run in the full-body simulation,
+  `checkpoints/L18_tf_fpo_scratch_walkrun/epoch_1200.ckpt`. Other retained LLPs: L17 (MLP+PPO from scratch),
+  L16 (L15 walk+run fine-tune), L15_ft walk/run, L15 (pendulum, 20 N·m). All use 20·tanh, ±20 N·m, output scale 1, 10 ms control.
+- L1 and every LLP trained before L15 (L1–L14, G0–G4, F1/F2, R0/R1, motion_leg) were deleted on 2026-11-04 together
+  with the old cross-attention H1. Do not use or compare against them; their reports are in `docs/ai_sbc/archive/reports/`.
+- W1: frozen suit wearer, `checkpoints/W1_wearer_human/last.ckpt`; one model follows both walk and run.
+- Current priority and open checks: follow HANDOFF. The mid-October pendulum-only plan (archived at
+  `docs/ai_sbc/archive/20261104/pendulum_pretrain_discussion.md`) predates the finding that full-body training from scratch beats pendulum pretraining.
+- The hip-angle swing-brake gate (`--swing-gate`, `AssistController.swing_gate_fraction`, off by default) is a diagnostic
+  option only: hand-made phase rules are excluded from deployment.
 - `Axxx` denotes the source motion performer's `actor_uid`, not an experiment or model version.
-- L13R/L14 are research candidates for the existing walk. New native walking clips still need
-  unassisted wearer tracking validation. Follow HANDOFF before resuming training.
+- New native walking clips still need unassisted wearer tracking validation. Follow HANDOFF before resuming training.
 - Use `protomotions/maniflow/` for simulation integration; never import external `maniflow` directly.
 - Skeleton work uses the suit robot and 27-DOF suit motions. Plain skeleton assets/checkpoints are absent.
   v18-era folders are historical metadata, not the current wearable baseline.
@@ -58,7 +60,7 @@ GPU failures must be diagnosed from current `nvidia-smi` and runtime output, not
 pip install -e .
 pip install -r requirements_<sim>.txt  # isaacgym | isaaclab | newton | genesis | mujoco
 
-# Current W1 + H1 + L1 × 0.5 comparison, existing walk, 40 seconds, headless
+# Default W1 + H1 + L18, existing walk (--motion-id 1 = run), 40 seconds, headless
 python examples/experiments/assist_skeleton/run_system.py
 
 # Show the wearer using its saved robot configuration
@@ -68,8 +70,7 @@ python protomotions/inference_agent.py \
     --simulator newton --num-envs 1
 ```
 
-The integration runner defaults to W1, the pinned H1 file, L1, gait motion 0 and wearer calibration.
-A different LLP path or an oracle probe defaults to scale 1; explicit `--assist-scale` wins.
+The integration runner defaults to W1, the in-repo H1, L18, gait motion 0, wearer calibration and output scale 1.
 Historical evaluations must specify their original options from `meta.json`.
 Never pass `--robot-name` to `inference_agent.py`; it loads the checkpoint robot configuration.
 Generic training/config examples are in `examples/experiments/format.py` and the framework document.
@@ -103,7 +104,7 @@ These files carry the design docs; read the relevant one before changing that ar
 - `protomotions/utils/simulator_imports.py` — IsaacGym/IsaacLab must be imported before torch.
 - `protomotions/assist/` — independent HLP + LLP controller, actor loading and skeleton features. `protomotions/simulator/newton/substep_hook.py` runs assistance inside the wearer step.
 - `protomotions/agents/fpo/` — FPO++ flow-policy agent (`FPO(PPO)`: CFM-loss ratio instead of log-prob ratio, ASPO clip, actor EMA baked into checkpoints with raw weights under `fpo_actor_raw`) and the `FlowActor` / `TemporalTransformer` models. Selected with `llp_walk.py --policy mlp_fpo|tfm_fpo --actor-init random`; `LLPPolicy` evaluates flow actors through `act_deterministic`. On the pendulum (`assist_pendulum/mlp.py --policy mlp_fpo|tfm_fpo`) the default flow output scale 0.25 barely learns; `--fpo-actor-scale 4.0` learns but stays below L15 (2026-11-04 study).
-- `examples/experiments/assist_pendulum/` — `mlp.py` (one experiment file, `--recipe L1|R0|motion_leg`; `protomotions/tests/test_pendulum_recipes.py` pins the presets to the saved configs), `runtime.py` (`PendulumRuntime`: play/compare/check-env/abc), `evaluate.py`, `study.py`, `report.py`. Pendulum disturbances live in `protomotions/envs/control/assist_disturbance_control.py` (`DisturbedAssistTargetControl`).
+- `examples/experiments/assist_pendulum/` — `mlp.py` (one experiment file, `--recipe R0|L15|motion_leg`, default L15; `protomotions/tests/test_pendulum_recipes.py` pins the presets to the saved configs), `runtime.py` (`PendulumRuntime`: play/compare/check-env/abc), `evaluate.py`, `study.py`, `report.py`. Pendulum disturbances live in `protomotions/envs/control/assist_disturbance_control.py` (`DisturbedAssistTargetControl`).
 - `examples/experiments/assist_skeleton/` — `run_system.py` (`SystemRunner`), `analysis.py` (metric classes), `report.py` (HTML: comparison/checkpoint/torque/swing-gate), `evaluate.py` (motions/native-wearer/wearer), `plots.py`, `viz.py`, `llp_walk.py`, `tracker_human.py`. Closed studies keep their original scripts under `results/<study>/scripts/` with a `SNAPSHOT.md` pointing at snapshot commit `8058f3c`; do not resurrect them into `examples/`.
 
 ## Gotchas
