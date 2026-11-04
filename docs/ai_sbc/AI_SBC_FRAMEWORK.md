@@ -178,7 +178,7 @@ W1 = `checkpoints/W1_wearer_human/last.ckpt`. suit 전신 동작 추종 모델�
 | `protomotions/envs/control/assist_motion_control.py` | `MotionAssistTargetControl` — `AssistTargetControl`을 상속해 훅 4개(`_target_at`/`_refresh_chunk`/`reset`/`step`)만 override. 의도 소스와 chunk 소스를 각각 교체 가능 |
 | `protomotions/envs/control/motion_intent.py` | `MotionIntentSource` — mocap zarr → θ_g. 클립 필터(HLP val 분할 재현·동작종류·관절범위), 40 fps 선형보간, 클립 연결 crossfade, **전용 난수 generator** |
 | `protomotions/maniflow/chunk_source.py` | `ManiFlowChunkSource` — 자체 링 버퍼(policy 10 ms) → 25 ms 격자 재표집 → `predict_horizon()` → chunk knot |
-| `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A = 모델 프레임 간격 / B = 10 ms; H1은 10 ms라 A만). 기본값 H1, 2026-11-04 **PASS** (lead 0–50 ms 기준과 Δ≤0.002°) |
+| `protomotions/maniflow/verify_chunk_source.py` | chunk 소스 등가성 검증 (suit14 스트리밍, 모드 A = 모델 프레임 간격 / B = 10 ms; H1은 10 ms라 A만). 기본값 H1, 2026-11-05 **PASS** (lead 0–50 ms 기준과 Δ≤0.002°) |
 | `protomotions/tests/test_motion_intent.py` | 의도 소스 단위 테스트 15개 |
 | `examples/experiments/assist_pendulum/mlp.py` (`_env_hlp_chunk_format`) | HLP chunk 형식·관측창·control 클래스 교체 단계 (옛 mlp_v3 실험 config를 레시피 체인 한 단계로 흡수) |
 | `examples/experiments/assist_pendulum/runtime.py abc` | A/B/C paired 평가 (assist off / 에뮬 chunk / 실 ManiFlow chunk) |
@@ -226,7 +226,7 @@ label을 각각 smoothing하므로 motion library는 독립 사본이어야 한�
 | `hybrid_control.py` | `JointTorqueOverride` — per-env/DOF qfrc 주입 | **현역** (LLP가 사용) |
 | `channels.py` | hip DOF 채널 계약 (`hip_dof_indices()`) | skeleton 단계에서 재사용 |
 | `angle_estimator.py` | `ManiFlowAngleEstimator` — flexion 모델용 온라인 래퍼 (4ch 각도 obs → 2ch chunk, 영점 캘리브레이션·denoise 오버라이드 내장) | **HLP 실행기** (Phase C에서 결합) |
-| `verify_angle_estimator.py` | Phase B 등가성 검증 스크립트 (`python -m protomotions.maniflow.verify_angle_estimator`, sbc env). 기본값은 H1 저장소 사본 + suit14-100fps + 같은 H1의 2026-10-29 오프라인 평가(denoise 1) — 2026-11-04 **PASS** (스트리밍 MAE 0.529°/0.490°, 기준과 Δ≤0.002°) | 래퍼 회귀 테스트로 상시 사용 가능 |
+| `verify_angle_estimator.py` | Phase B 등가성 검증 스크립트 (`python -m protomotions.maniflow.verify_angle_estimator`, sbc env). 기본값은 H1 저장소 사본 + suit14-100fps + 같은 H1의 2026-11-05 오프라인 평가(denoise 1) — 2026-11-05 **PASS** (스트리밍 MAE 0.533°/0.484°, 기준과 Δ≤0.002°). 학습 자료 평균(관측 영점)은 float64로 구한다 — 2026-10-29 기록은 float32 누적 오차로 영점이 1.5~1.9° 어긋났고 보정 후 오차는 거의 같았다 | 래퍼 회귀 테스트로 상시 사용 가능 |
 
 **데이터 파이프라인**: `data/scripts/extract_soma23_hip_imu_zarr.py` —
 BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
@@ -239,7 +239,7 @@ BONES-SEED .motion → flexion zarr 추출기 (`--features flexion_trunk`,
 | 경로 | 내용 |
 |------|------|
 | `ManiFlow/maniflow/config/walking_task/hip_flexion_seed.yaml` | flexion 태스크 config |
-| `ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr` | H1 학습 데이터 (40 fps 판은 옛 H0용) |
+| `ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr` | H1 학습 데이터 (40 fps 판은 2026-11-05에 지움) |
 | `ManiFlow/data/hip-flexion-etri-suit14-100fps.zarr` | 교차평가 데이터 (분포 밖 검증용) |
 | `ManiFlow/data/outputs/hip_flexion_seed-...-flexion100-h15-swap-run01_seed42/` | H1 학습 run + 원본 ckpt(epoch 8). 다른 run의 ckpt는 2026-11-04에 지움 |
 | `scripts/compare_hip_imu_reference.py` | 오프라인 교차평가 (receding-horizon, 캘리브레이션, `--denoise_steps`, `--latency_bench`) — Phase B 등가성 검증의 기준 |

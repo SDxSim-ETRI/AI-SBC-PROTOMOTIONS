@@ -98,7 +98,6 @@ MIMIC_EXPERIMENT = REPO / "examples" / "experiments" / "mimic" / "mlp.py"
 HOOK_SIM = "protomotions.simulator.newton.substep_hook.SubstepHookNewtonSimulator"
 HOOK_SIM_FIXED = "protomotions.simulator.newton.substep_hook.SubstepHookFixedBaseNewtonSimulator"
 ENV_A, ENV_B = 0, 1  # A = 보조 없음, B = 보조
-SEED_MEAN_RAD = torch.deg2rad(torch.tensor(SEED_CHANNEL_MEAN_DEG, dtype=torch.float32))
 PELVIS_BODY = 0
 
 
@@ -119,6 +118,8 @@ def parse_args(argv=None):
     p.add_argument("--calibration", default="wearer",
                    help="motion(선택 클립 평균) | motion_all(파일 전 클립 평균 — 다중 모션 학습 LLP와 동일) | "
                         "wearer(warmup 동안 착용자 스트림을 재서 영점조정 — 실기기 방식) | none | 'p,q,r,s' (deg)")
+    p.add_argument("--calibration-target", default=None,
+                   help="wearer 영점조정이 맞출 4ch 기준 평균 'p,q,r,s' [deg] (기본 SEED_CHANNEL_MEAN_DEG)")
     p.add_argument("--physics-fps", type=int, default=400)
     p.add_argument("--env-dt", type=float, default=0.05, help="착용자 env 주기 [s] (tracker 학습 50 ms)")
     p.add_argument("--llp-dt", type=float, default=0.01, help="LLP 주기 [s] (학습 10 ms)")
@@ -339,6 +340,16 @@ def pin_spawn_location(env):
     env.terrain.sample_valid_locations = _fixed
 
 
+def calibration_target_deg(args):
+    """wearer 영점조정의 4ch 기준 평균 [deg]."""
+    spec = getattr(args, "calibration_target", None)
+    if not spec:
+        return list(SEED_CHANNEL_MEAN_DEG)
+    vals = [float(v) for v in spec.split(",")]
+    assert len(vals) == 4, "--calibration-target 'p,q,r,s' needs 4 values (deg)"
+    return vals
+
+
 def resolve_calibration(args, dof_names):
     """HLP 관측 4ch 영점 오프셋 [rad] 또는 None.
 
@@ -473,6 +484,7 @@ class SystemHook:
         # (실기기에서 착용 직후 중립자세 영점조정에 대응). 그 뒤 제어기를 리셋하고 보조 시작.
         self.calib_wearer = args.calibration.strip().lower() == "wearer"
         self.calib_steps = int(round(max(args.warmup, 0.5) / self.llp_dt)) if self.calib_wearer else 0
+        self.calib_target = torch.deg2rad(torch.tensor(calibration_target_deg(args), dtype=torch.float32))
         self.calib_sum = torch.zeros(4, device=dev)
         self.measured_calib_deg = None
         self.prev_tau_ff = torch.zeros(2, self.n_dofs, device=dev)
@@ -522,7 +534,7 @@ class SystemHook:
             # 착용자 A의 실제 스트림 평균을 모은다 (이 구간 보조는 0)
             self.calib_sum += ch[ENV_A]
         elif self.calib_wearer and self.i == self.calib_steps:
-            offset = SEED_MEAN_RAD.to(ch.device) - self.calib_sum / max(self.calib_steps, 1)
+            offset = self.calib_target.to(ch.device) - self.calib_sum / max(self.calib_steps, 1)
             self.ctrl.set_hlp_calibration(offset.tolist())
             self.measured_calib_deg = [math.degrees(v) for v in offset.tolist()]
             print("[system] 착용자 영점조정 오프셋 (deg):",
@@ -1021,7 +1033,7 @@ class SystemRunner:
             "calibration_deg": (hook.measured_calib_deg if calib is None
                                 else [math.degrees(v) for v in calib.tolist()]),
             "calibration_mode": args.calibration,
-            "seed_mean_deg": list(SEED_CHANNEL_MEAN_DEG),
+            "seed_mean_deg": calibration_target_deg(args),
             "physics_fps": args.physics_fps,
             "env_dt": args.env_dt,
             "llp_dt": args.llp_dt,

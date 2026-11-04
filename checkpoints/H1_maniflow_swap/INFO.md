@@ -24,7 +24,7 @@
 | 입력 | 100 Hz, 4채널 × 10 step(과거 100 ms): 좌우 고관절 굴곡각, 몸통 pitch·roll |
 | 프레임 간격 | 10 ms. `ManiFlowAngleEstimator`가 학습 zarr의 `frame_dt`를 읽고, 학습 자료가 없는 환경(실기기 등)에서는 기본값 `FLEXION_FRAME_DT` = 10 ms를 쓴다(2026-11-05 전에는 지운 40 fps 판 기준 25 ms였다) |
 | 출력 | 좌우 고관절 굴곡각 15 step 중 현재~50 ms의 6 step을 쓴다 |
-| 영점 | 착용자의 warmup 구간 평균을 `skeleton_features.SEED_CHANNEL_MEAN_DEG` = (10.41, 10.42, 7.39, −0.58)°에 맞추는 오프셋 (`run_system.py --calibration wearer`). 이 값은 40 fps 판 SEED 자료의 평균이며, H1 학습 자료(100 fps, 원본 출처가 다름)의 평균 (15.66, 15.67, 13.26, −1.44)°와 다르다(2026-11-05 확인). L15–L18 평가는 모두 앞의 값을 썼다 |
+| 영점 | 착용자의 warmup 구간 평균을 `skeleton_features.SEED_CHANNEL_MEAN_DEG` = (10.41, 10.42, 7.39, −0.58)°에 맞추는 오프셋 (`run_system.py --calibration wearer`). 이 값은 H1 학습 자료의 실제 평균 (15.66, 15.67, 13.26, −1.44)°와 약 5° 다르다(2026-11-05 float64로 확인, 출처 기록 없음). L15–L18 평가는 모두 앞의 값을 썼고, 학습 자료 평균으로 바꿔도 W1 + L18의 착용자 τ² 변화는 걷기 −29.8 → −30.1 %, 달리기 −29.0 → −29.4 %로 재실행 산포 안이다(`run_system.py --calibration-target`, `results/calibration_target_20261105/`) |
 | 정확도 | ETRI suit14 100 Hz 교차평가, denoise 1: 10 / 20 / 50 ms 앞 MAE 0.23 / 0.34 / 1.03°, 지연 2.45 ms |
 
 ## 사용

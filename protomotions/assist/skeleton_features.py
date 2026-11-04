@@ -43,8 +43,11 @@ LUMBAR_DOF_NAMES = ("lumbar_extension", "lumbar_bending", "lumbar_rotation")
 HIP_FLEXION_DOF_NAMES = ("hip_flexion_r", "hip_flexion_l")
 HLP_CHANNELS = ("hip_flexion_r", "hip_flexion_l", "trunk_pitch", "trunk_roll")
 
-# HLP 학습 데이터(hip-flexion-seed-locomotion-40fps.zarr, 20,657,709프레임) 채널 평균
-# [deg] — 2026-09-12 전체 스트리밍 평균. `--seed-zarr`로 재계산 가능.
+# `run_system.py --calibration wearer`가 착용자 관측 평균을 맞추는 4ch 기준값 [deg] (2026-09-12).
+# 당시 주석은 40 fps SEED zarr의 평균이라고 적었지만, 2026-11-05에 float64로 다시 구한 실제 평균은
+# 40 fps 판 (15.64, 15.65, 13.24, −1.44)°, H1 학습 자료 100 fps 판 (15.66, 15.67, 13.26, −1.44)°로 이 값과
+# 약 5° 다르다(재계산 방법 기록은 없음). 두 값으로 W1 + H1 + L18을 비교하면 τ² 차이가 0.3~0.4 %로
+# 재실행 산포 안이다(`results/calibration_target_20261105/`). 다른 기준값은 `--calibration-target`으로 준다.
 SEED_CHANNEL_MEAN_DEG = (10.41, 10.42, 7.39, -0.58)
 
 

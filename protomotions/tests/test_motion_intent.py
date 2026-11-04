@@ -38,7 +38,7 @@ from protomotions.envs.control.motion_intent import (
 )
 
 SEED_ZARR = Path(
-    "/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-40fps.zarr"
+    "/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr"
 )
 LIMIT = 1.6 * 0.95  # hip_pendulum 관절 한계 × dof_limit_margin
 
@@ -301,8 +301,8 @@ def test_real_seed_zarr_filter_counts():
     train = load_motion_clips(
         str(SEED_ZARR), split="train", target_low=low, target_high=high
     )
-    # 2026-09-08 실측 (관절 범위 필터 후)
-    assert val.num_clips == 3130
-    assert train.num_clips == 59840
+    # 2026-11-05 실측 (H1 학습 자료 100 fps, 관절 범위 필터 후)
+    assert val.num_clips == 3142
+    assert train.num_clips == 59855
     assert val.frames.shape[1] == 4
     assert float(val.frames[:, :2].abs().max()) <= LIMIT + 1e-6
