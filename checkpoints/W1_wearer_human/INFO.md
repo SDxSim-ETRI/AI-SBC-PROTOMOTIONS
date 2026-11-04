@@ -1,7 +1,7 @@
 # W1 — 시뮬레이션 가상 착용자
 
 W1은 전신 동작을 따라가는 동결 mimic tracker다. 실제 장치에서 사용하는 HLP·LLP와 별도다.
-옛 이름은 `tracker v33`이며, 현재 기존 걷기·달리기의 비교 기준으로 보존한다.
+옛 이름은 `tracker v33`이며, 걷기·달리기 하나의 모델로 LLP 평가와 전신 학습의 착용자 역할을 한다.
 모델 목록은 [버전표](../../docs/ai_sbc/AI_SBC_VERSIONS.md), 다음 작업은 [HANDOFF](../../docs/ai_sbc/HANDOFF.md)를 참조한다.
 
 ## 보관 정보
@@ -22,8 +22,9 @@ W1은 전신 동작을 따라가는 동결 mimic tracker다. 실제 장치에서
 
 ## 사용 범위
 
-L1 출력 0.5배와 결합한 기존 걷기·달리기 비교 기준이다.
-기존 동작의 결과는 [기준 보고서](../../docs/ai_sbc/l1_w1_report.html)에 있다.
+기존 걷기·달리기 기록(`skeleton_torque_suit_gait.pt` motion 0·1)에서 LLP를 평가하고 전신 학습할 때의 가상 착용자다.
+기본 조합은 W1 + H1 + L18이다(`run_system.py` 기본값). 2026-10-01의 첫 기준 보고서는
+[보관 자료](../../docs/ai_sbc/archive/reports/l1_w1_report.html)로 옮겼다.
 고관절 힘 한계를 줄인 시뮬레이션 모델이라는 뜻이며, 실제 사람 전반을 검증한 모델은 아니다.
 
 2026-10-13의 새 실제 보통·느린 보행 16조건에서는 15낙상,
@@ -36,7 +37,7 @@ L1 출력 0.5배와 결합한 기존 걷기·달리기 비교 기준이다.
 저장소 루트의 `sbc` 환경에서 실행한다.
 
 ```bash
-# W1 + H1 + L1 출력 0.5배의 기존 걷기 비교
+# W1 + H1 + L18의 기존 걷기 비교 (달리기는 --motion-id 1)
 python examples/experiments/assist_skeleton/run_system.py --seconds 40
 
 # 새 실제 보행의 무보조 추종만 확인. 출력은 새 폴더를 사용한다.

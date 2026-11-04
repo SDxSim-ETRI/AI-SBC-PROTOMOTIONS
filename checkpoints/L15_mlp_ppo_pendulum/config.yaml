@@ -1,0 +1,91 @@
+{
+  "robot_name": "hip_pendulum",
+  "simulator": "newton",
+  "num_envs": 4096,
+  "batch_size": 16384,
+  "motion_file": "none",
+  "experiment_path": "examples/experiments/assist_pendulum/mlp.py",
+  "experiment_name": "llp_R0lim20_s0_20261029",
+  "scenes_file": null,
+  "checkpoint": null,
+  "use_wandb": false,
+  "use_slurm": false,
+  "ngpu": 1,
+  "nodes": 1,
+  "distributed_backend": null,
+  "headless": true,
+  "seed": 0,
+  "torch_deterministic": false,
+  "training_max_steps": 786432000,
+  "overrides": [],
+  "create_config_only": false,
+  "recipe": "R0",
+  "assist_limit": 20.0,
+  "action_torque_scale": null,
+  "action_transform": "tanh",
+  "separate_torque_limits": false,
+  "inertia_range": [
+    1.0,
+    25.0
+  ],
+  "mass_exponent": 0.0,
+  "assist_limit_range": null,
+  "stance_prob": 0.85,
+  "reversal_brake_prob": 0.0,
+  "reversal_brake_c": [
+    2.0,
+    30.0
+  ],
+  "reversal_brake_lead": 0.15,
+  "reversal_mode": "viscous",
+  "reversal_ff_gain": [
+    0.5,
+    1.2
+  ],
+  "chunk_anchor": "intent",
+  "omega_n_range": [
+    12.0,
+    24.0
+  ],
+  "zeta_range": [
+    0.3,
+    0.8
+  ],
+  "stance_load_per_kg": 2.0,
+  "stance_kp_mult": [
+    2.0,
+    8.0
+  ],
+  "stance_gap": [
+    0.4,
+    1.6
+  ],
+  "stance_dur": [
+    0.08,
+    0.45
+  ],
+  "perturb_amp_per_kg": 0.3,
+  "no_disturbance": false,
+  "blend_range": [
+    0.25,
+    2.5
+  ],
+  "hold_prob": 0.3,
+  "history_steps": 25,
+  "prev_actions": 10,
+  "human_cost": "both",
+  "work_weight": -0.0016,
+  "torque_sq_weight": -3e-05,
+  "tracking_weight": 1.0,
+  "assist_effort_weight": -2e-05,
+  "action_rate_weight": -0.005,
+  "hlp_dt": 0.01,
+  "chunk_knots": 6,
+  "chunk_refresh_steps": 1,
+  "obs_future_samples": 3,
+  "obs_future_dt": 0.01,
+  "leg": null,
+  "motion_zarr": "/home/bak/Projects/ManiFlow_Policy/ManiFlow/data/hip-flexion-seed-locomotion-100fps.zarr",
+  "motion_metadata": "/home/bak/Projects/AI-SBC-PROTOMOTIONS/data/seed/metadata/seed_metadata_v004.parquet",
+  "wandb_id": null
+}
