@@ -45,7 +45,7 @@ LLP는 모두 20·tanh 출력, 한계 ±20 N·m, 출력 배율 1, 10 ms 제어�
 - ManiFlow 체크포인트는 H1 원본 하나만 남기고 21개(8.8 GB)를 지웠다: 옛 H1(관측 cross-attention, flexion100-h15-run01), 40 fps 판(flexion40),
   초기 hips·IMU 모델, 2026-05 이미지 정책. 학습 자료(zarr)는 그대로다.
 - L1은 더 이상 기준 모델이 아니다. 코드 기본값과 진자 레시피에서 빼고, L1 계보의 보고서는 [보관 자료](reports.html#past)로 옮겼다.
-- 남긴 run의 원래 위치(`results/llp_R0lim20_s0_20261029`, `llp_L15ft_{walk,run}_20261029`, `llp_L16_20261029`,
+- 남긴 run의 원래 위치(`results/llp_R0lim20_s0_20261029`, `llp_L15_ft_{walk,run}_20261029`, `llp_L16_20261029`,
   `llp_L16scratch_20261102`, `llp_fpo_tfm_20261102`)에는 이제 checkpoint 없이 설정·로그만 있다.
 
 ## 현재 계보의 연구 원본

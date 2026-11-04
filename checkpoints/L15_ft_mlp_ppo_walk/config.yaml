@@ -5,7 +5,7 @@
   "batch_size": 8192,
   "motion_file": "data/motion_for_trackers/skeleton_torque_suit_gait.pt",
   "experiment_path": "examples/experiments/assist_skeleton/llp_walk.py",
-  "experiment_name": "llp_L15ft_walk_20261029",
+  "experiment_name": "llp_L15_ft_walk_20261029",
   "scenes_file": null,
   "checkpoint": null,
   "use_wandb": false,

@@ -984,7 +984,7 @@ simulator:
     nconmax: '300'
     cone: pyramidal
     ccd_iterations: '200'
-  experiment_name: llp_L15ft_walk_20261029
+  experiment_name: llp_L15_ft_walk_20261029
   camera: None
   record_viewer: 'False'
   viewer_record_dir: output/recordings/viewer

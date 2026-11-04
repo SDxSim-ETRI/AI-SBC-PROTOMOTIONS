@@ -6,7 +6,7 @@
 | 항목 | 내용 |
 |---|---|
 | 가중치 | `epoch_400.ckpt` |
-| 원본 실행 | `results/llp_L15ft_run_20261029` (2026-10-29 ~ 30, 1,200 epoch까지 학습한 run의 400 epoch) |
+| 원본 실행 | `results/llp_L15_ft_run_20261029` (2026-10-29 ~ 30, 1,200 epoch까지 학습한 run의 400 epoch) |
 | 정책 | MLP(512·256·128) + PPO. L15 actor 가중치를 이어받고 critic·optimizer는 새로 시작 |
 | 학습 | 가상 착용자 W1과 H1을 연결한 전신 시뮬레이션, 달리기(motion 1)만, actor 학습률 3e-5, 256 환경 × 32 step, seed 13 |
 | 출력 | 20·tanh, 한계 ±20 N·m, 출력 배율 1, 10 ms 주기 |
