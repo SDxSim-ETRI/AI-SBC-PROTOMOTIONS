@@ -2,6 +2,14 @@
 
 2026-11-04 가중치를 정리하고 기본 LLP를 L18(Transformer+FPO++)로 정했다. L15 이전 계보는 더 쓰지 않는다. 같은 날 Transformer+FPO++ 등 세 정책을 진자 학습에 적용한 비교도 끝냈다(진자에서는 L15를 넘지 못함). 이 파일에는 현재 판단만 쓴다. 지난 세션의 진행 상황을 덧붙이지 않는다. 정리 전 판본은 [archive/20261104/HANDOFF.md](archive/20261104/HANDOFF.md)에 있다.
 
+## 2026-11-05: AI-SBC-Testbed(Isaac Lab) 연결과 W1의 PhysX 전이 결과
+
+**Testbed 쪽.** 현재 조합(swap H1 + L18)을 AI-SBC-Testbed에 `TR-FPO`(S1용 프로필)와 `W1-TR-FPO`(W1 짝 비교 외부 플러그인, `uv run aisbc-eval w1-eval`)로 등록했다. Testbed의 보조 경로가 실제 checkpoint로 `AssistController`와 같은 신호에서 2.1e-4 N·m 안에 일치함을 확인했다(`AI-SBC-Testbed/docs/VALIDATION.md`). Testbed가 요구하는 S1/SMPL/HML 입력은 이 머신에 없어 S1 평가는 하지 않았다.
+
+**이 저장소 쪽.** `run_system.py --simulator isaaclab`(새 `protomotions/simulator/isaaclab/substep_hook.py`)으로 W1 + H1 + L18을 Isaac Lab/PhysX에서 돌렸다. Newton 결과(seed 42: 보조 RMS 10.13 / 11.62 N·m, 착용자 고관절 토크 RMS −16.0 % / −16.0 %)는 Testbed CLI로도 재현됐지만, **PhysX에서는 W1이 보조 유무와 무관하게 걷기 1.15 s·달리기 1.0 s에 넘어진다.** 원인은 suit USD 변환: 관절 없는 body가 충돌하는 고정 관절 link가 되고(self-collision off로 해결), 3-hinge hip·lumbar·어깨가 D6 관절이 되어 같은 관절각에서 body 자세가 최대 4.2 cm / 4.9° 다르다. 물리 dt·접촉 offset·solver 반복은 결과를 바꾸지 않았다. 기록은 `AI-SBC-Testbed/workspace/w1_trials/`·`workspace/w1_isaaclab/`에 있다.
+
+다음: (1) suit USD를 hinge마다 dummy body를 둔 순차 revolute 관절로 다시 만들고 MJCF와 FK(관절각 → body 자세)가 같은지 수치로 확인한 뒤 W1 무보조 추종을 재시험, 또는 (2) Isaac Lab에서 착용자를 재학습해 PhysX용 W1을 만든다. Newton 수치와 PhysX 수치를 한 표에 섞지 않는다. 자동 재개하지 않는다.
+
 ## 2026-11-04 정리: 남긴 모델, 기본 조합, 인수인계
 
 **기본 조합은 W1 + H1 + L18이다.** `run_system.py`를 인자 없이 실행하면 `checkpoints/`의 H1·L18을 출력 배율 1(±20 N·m)로 쓴다. 그렇게 돌린 걷기·달리기(seed 42)의 보조 토크 실효값은 10.14 / 11.62 N·m로 학습 연구의 기록(10.13 / 11.62)과 같았다. 무보조 착용자 토크 실효값 차이(걷기 38.58 vs 38.83 N·m)는 Newton 재실행 산포다.
@@ -20,7 +28,23 @@
 - 기본값: `run_system.py` 기본 LLP·H1과 출력 배율(항상 1), `verify_controller` 기본 모델(L15), 진자 레시피 `mlp.py --recipe L15`(유일한 프리셋), H1 기본 경로는 `protomotions.maniflow.loader.DEFAULT_H1_CHECKPOINT` 하나. `test_pendulum_recipes.py`는 L15 설정을 고정한다. 제어기 일치 검증(L15 + H1 사본)은 세 부분 모두 정확히 일치했고, ManiFlow 검증 2개도 인자 없이 H1을 검증한다(PASS).
 - 옛 계보에만 쓰던 코드를 뺐다: 한쪽 다리 모델을 양다리에 따로 돌리는 공유 LLP(`share_legs`·`SingleJointMLP`·`motion_leg` 레시피·진자 연구 실행기와 보고서), 제어기의 유각 브레이크 게이트, L1 출력 절반 기준 비교 보고서(`report.py torque|swing-gate`, `PhaseScreen` 등), 7월 고관절 토크 예측기(`torque_estimator.py`, `tasks/`의 추론·제어 비교·DAgger 스크립트). 원본은 각 연구의 `results/<연구>/scripts/retired_20261104/`(스냅샷 커밋 `e74e83e`)에 있다. 지금 LLP는 모두 actor 하나가 양다리 관측을 함께 받아 오른쪽·왼쪽 토크를 한 번에 낸다.
 - L15 이전 계보의 보고서 17개(2026-10-01 ~ 10-22)는 `docs/ai_sbc/archive/reports/`로 옮겼고 옛 주소에는 안내 페이지가 남는다. 요약·버전표·이 파일의 정리 전 판본은 `docs/ai_sbc/archive/20261104/`에 있다.
-- 인수인계: H1·L15–L18을 `checkpoints/`에 Git LFS로 올렸다(2026-11-04 push, LFS 파일 20개). 받는 쪽에는 ManiFlow 코드(`d9e536e` 이후)가 필요하다. 각 폴더의 `INFO.md`에 입출력·학습 조건·로드 방법이 있다.
+- 인수인계: H1·L15–L18을 `checkpoints/`에 Git LFS로 올렸다(2026-11-04 push, LFS 파일 20개). 받는 쪽에는 ManiFlow 코드(`d9e536e` 이후)가 필요하다. 각 폴더의 `INFO.md`에 입출력·학습 조건·로드 방법이 있다. ManiFlow 저장소에는 가중치가 없고 모델 코드만 있다. H1 가중치는 AI-SBC 저장소에만 있다.
+
+**받는 법** (저장소 두 개를 같은 폴더 아래에 둔다)
+
+```bash
+git lfs install                       # 이 PC에서 처음 한 번
+cd ~/Projects
+git clone git@github.com:SDxSim-ETRI/AI-SBC-PROTOMOTIONS.git     # LFS 가중치까지 함께 받는다
+git clone git@github.com:SDxSim-ETRI/ManiFlow_Policy.git
+git -C ManiFlow_Policy checkout main  # 커밋 d9e536e 이후여야 한다
+cd AI-SBC-PROTOMOTIONS && git lfs pull   # 가중치가 3줄짜리 포인터로 받아졌다면 실행
+```
+
+- 확인: `head -c 60 checkpoints/H1_maniflow_swap/epoch_0008.ckpt`가 `version https://git-lfs…`로 시작하면 아직 포인터다(`git lfs pull`). 실제 파일은 42.5 MB다.
+- ManiFlow 코드는 `~/Projects/ManiFlow_Policy/ManiFlow`에 있으면 자동으로 찾는다. 다른 곳에 두면 `export MANIFLOW_ROOT=<그 경로>`를 지정한다(`protomotions/maniflow/loader.py`).
+- 환경은 `pip install -e .`와 `requirements_newton.txt` 외에 `einops timm termcolor zarr dill hydra-core omegaconf`가 필요하다.
+- 동작 확인: `python examples/experiments/assist_skeleton/run_system.py`를 인자 없이 실행하면 W1 + H1 + L18 걷기 40 s가 돈다.
 
 ## 진자 학습에 적용한 Temporal Transformer + FPO++ 대 MLP+PPO(L15) (2026-11-03 ~ 04, 새 H1)
 
